@@ -50,6 +50,8 @@ _CONFIG_KEYS = _CONTROL_KEYS | {
     "MEMORYGATE_URL",
     "TOOLGATE_BOOTSTRAP_EXECUTION_KEY",
     "TOOLGATE_BOOTSTRAP_SCOPES",
+    "TOOLGATE_OWNER_KEY_SHA256",
+    "TOOLGATE_OWNER_KEY",
     "TOOLGATE_DASHBOARD_ORIGINS",
     "TOOLGATE_DATA_DIR",
     "TOOLGATE_ENV_PATH",
@@ -168,6 +170,8 @@ def _decrypt(name: str, raw: str) -> str:
 
 def get_key(placeholder: str) -> str:
     """Return the real value for a vault placeholder. Never exposed to callers via list_placeholders()."""
+    if placeholder in {"TOOLGATE_OWNER_KEY_SHA256", "TOOLGATE_OWNER_KEY"}:
+        raise KeyError("Owner channel configuration is not a tool secret")
     value = _load().get(placeholder) or os.environ.get(placeholder)
     if not value:
         raise KeyError(f"{placeholder} is not set in .env")

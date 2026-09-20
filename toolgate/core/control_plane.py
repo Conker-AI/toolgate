@@ -683,7 +683,7 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
     return True, "approved"
 
 
-def decide_request(request_id: str, status: str, actor: str, note: str = "") -> dict | None:
+def decide_request(request_id: str, status: str, actor: str, note: str = "", *, guard=None) -> dict | None:
     if status not in {"approved", "rejected", "dismissed"}:
         raise ValueError("Decision must be approved, rejected, or dismissed")
     with _conn() as conn:
@@ -692,6 +692,8 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "") -> 
         if not row:
             return None
         record = _row(row)
+        if guard is not None:
+            guard(conn, record)
         if record.get("status") != "pending":
             raise ValueError(f"request is already {record.get('status')}")
         if record.get("kind") == "verification":

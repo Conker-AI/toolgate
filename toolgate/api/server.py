@@ -10,20 +10,47 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Literal
 from urllib.parse import quote, urlsplit
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, StrictBool, StrictInt
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
-from toolgate.core import control_plane, execution_journal as journal, legacy_archive, spending, vault
-from toolgate.core.public_https import DestinationDenied, public_client, public_url, resolve_public
+from toolgate.core import control_plane, legacy_archive, owner_channel, spending, vault
+from toolgate.core import execution_journal as journal
+from toolgate.core.public_https import (
+    DestinationDenied,
+    public_client,
+    public_url,
+    resolve_public,
+)
 from toolgate.executors import research
 
 SERVICE_VERSION = "0.3.0"
 
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
+
+
+@app.exception_handler(owner_channel.OwnerError)
+async def owner_error(_request: Request, error: owner_channel.OwnerError):
+    return JSONResponse({"detail": {"code": error.code, "message": str(error)}},
+                        status_code=error.status)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, error: RequestValidationError):
+    if request.url.path.startswith("/v2/owner/"):
+        return JSONResponse({"detail": {"code": "invalid_request",
+                                       "message": "Send a supported owner request with bounded fields."}},
+                            status_code=422)
+    return await request_validation_exception_handler(request, error)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in os.environ.get(
@@ -47,6 +74,10 @@ def require_agent(x_toolgate_execution_key: str | None = Header(None, alias="X-T
     if not agent:
         raise HTTPException(401, "missing or invalid X-ToolGate-Execution-Key")
     return agent
+
+
+def require_owner(x_toolgate_owner_key: str | None = Header(None, alias="X-ToolGate-Owner-Key")):
+    owner_channel.authenticate(x_toolgate_owner_key)
 
 
 @app.on_event("startup")
@@ -421,6 +452,12 @@ class V2Request(BaseModel):
 class V2RequestDecision(BaseModel):
     status: str
     note: str = ""
+
+
+class OwnerDecision(BaseModel):
+    model_config = {"extra": "forbid"}
+    status: Literal["approved", "rejected", "dismissed"]
+    note: str = Field(default="", max_length=2000)
 
 
 class V2Invoke(BaseModel):
@@ -1708,6 +1745,23 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
 @app.get("/v2/requests")
 def list_requests(_tier: str = Depends(require_admin)):
     return control_plane.list_objects("request")
+
+
+@app.get("/v2/owner/requests", dependencies=[Depends(require_owner)])
+def owner_requests(limit: int = Query(default=50, ge=1, le=200),
+                   cursor: str | None = Query(default=None, min_length=1, max_length=128,
+                                             pattern=r"^[A-Za-z0-9_-]+$")):
+    return owner_channel.list_requests(limit, cursor)
+
+
+@app.get("/v2/owner/requests/{request_id}", dependencies=[Depends(require_owner)])
+def owner_request(request_id: str):
+    return owner_channel.get(request_id)
+
+
+@app.post("/v2/owner/requests/{request_id}/decision", dependencies=[Depends(require_owner)])
+def owner_decision(request_id: str, payload: OwnerDecision):
+    return owner_channel.decide(request_id, payload.status, payload.note)
 
 
 @app.post("/v2/requests")
