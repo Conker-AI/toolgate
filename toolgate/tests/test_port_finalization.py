@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from toolgate.api import server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import owner_channel, port_finalization, port_replacements
+from toolgate.core import container_lineage, owner_channel, port_finalization, port_replacements
 from toolgate.executors import container_control
 from toolgate.tests.test_port_control_boundary import (
     setup as boundary_setup,  # noqa: F401
@@ -117,3 +117,36 @@ def test_http_partial_recovery_does_not_create_approval(request):
         server.finalize_port_recovery(server.PortFinalizationRequest(action_id=payload.action_id), agent)
     assert error.value.status_code == 409
     assert len(cp.list_objects("request")) == before
+
+
+def test_crash_after_atomic_verification_can_recover_without_docker_replay(request, monkeypatch):
+    daemon, agent, _, payload = request.getfixturevalue("pending")
+    actual = container_lineage.record
+
+    def crash_after_commit(*args, **kwargs):
+        actual(*args, **kwargs)
+        raise RuntimeError("lost verification acknowledgement")
+
+    monkeypatch.setattr(container_lineage, "record", crash_after_commit)
+    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert port_replacements.steps(payload.action_id)[-1]["status"] == "observed"
+    count = len(daemon.requests)
+    approved = []
+    recovered = port_finalization.finalize(payload.action_id, agent["id"],
+        authorize=lambda conn: approved.append(conn.in_transaction))
+    assert approved == [True] and recovered["status"] == "completed"
+    assert len(daemon.requests) == count
+
+
+def test_failed_lineage_write_cannot_leave_successful_verification(request):
+    daemon, agent, _, payload = request.getfixturevalue("pending")
+    with cp._conn() as conn:
+        conn.executescript(container_lineage.SCHEMA)
+        conn.executescript("""CREATE TRIGGER synthetic_disk_failure BEFORE INSERT ON v2_container_lineage
+            BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END;""")
+    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert port_replacements.steps(payload.action_id)[-1]["status"] == "outcome_unknown"
+    with cp._conn() as conn:
+        assert conn.execute("SELECT * FROM v2_container_lineage").fetchall() == []
+    with pytest.raises(port_replacements.ReplacementError):
+        port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail())

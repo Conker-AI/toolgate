@@ -169,11 +169,11 @@ def execute(action_id, *, authorize, transport=None):
                     or not networks_match
                     or _mount_identity(after["Mounts"]) != _mount_identity(before["Mounts"])):
                 raise ReplacementUnknown()
-            records.observed(action_id, ordinal, reference=new_id)
-            claimed = False
             if docker._configuration(cid) != configuration:
                 raise docker.ControlError("configuration_changed")
-            container_lineage.record(action_id, cid, new_id, configuration[0])
+            container_lineage.record(action_id, cid, new_id, configuration[0],
+                                     verification_ordinal=ordinal, authorize=check)
+            claimed = False
             return {"containerId": cid, "replacementId": new_id, "snapshotImage": snapshot,
                     "originalRetained": True, "outcome": "observed", "dispatched": True,
                     "bindings": normalized}

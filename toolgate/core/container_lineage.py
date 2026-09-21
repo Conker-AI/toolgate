@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import time
 
 from toolgate.core import control_plane as cp
 from toolgate.core import port_replacements as records
@@ -27,7 +28,12 @@ def _digest(socket):
     return hashlib.sha256(socket.encode()).hexdigest()
 
 
-def record(action_id, source_id, target_id, socket):
+def record(action_id, source_id, target_id, socket, *, verification_ordinal=None, authorize=None):
+    """Save lineage, optionally committing the final observation atomically.
+
+    The executor supplies its completed Docker verification, not a recovery guess.
+    A crash must not persist a successful verification without its lineage.
+    """
     if (source_id == target_id or any(not isinstance(value, str) or not re.fullmatch(
             r"[a-f0-9]{64}", value) for value in (source_id, target_id))):
         raise records.ReplacementError()
@@ -38,6 +44,20 @@ def record(action_id, source_id, target_id, socket):
         parent = records._parent(conn, action_id, active=True)
         if json.loads(parent["args"]).get("container_id") != source_id:
             raise records.ReplacementError()
+        if verification_ordinal is not None:
+            if type(verification_ordinal) is not int or not callable(authorize):
+                raise records.ReplacementError()
+            steps = conn.execute("SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal",
+                                 (action_id,)).fetchall()
+            if (not steps or steps[-1]["ordinal"] != verification_ordinal
+                    or steps[-1]["name"] != "verify" or steps[-1]["status"] != "dispatching"
+                    or any(step["status"] != "observed" for step in steps[:-1])
+                    or [step["reference"] for step in steps if step["name"] == "create"] != [target_id]):
+                raise records.ReplacementError()
+            authorize(conn)
+            conn.execute("UPDATE v2_port_steps SET status='observed',reference=?,updated_at=?"
+                         " WHERE action_id=? AND ordinal=?",
+                         (target_id, time.time(), action_id, verification_ordinal))
         verified = conn.execute("SELECT reference FROM v2_port_steps WHERE action_id=?"
                                 " AND name='verify' AND status='observed'", (action_id,)).fetchall()
         if len(verified) != 1 or verified[0]["reference"] != target_id:
