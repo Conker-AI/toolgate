@@ -24,34 +24,28 @@ class RuntimePathsTests(unittest.TestCase):
     def test_bootstrap_agent_key_is_idempotent_and_authenticates(self):
         from toolgate.core import control_plane
 
-        with tempfile.TemporaryDirectory() as root, patch.dict(
-            os.environ,
-            {"TOOLGATE_DATA_DIR": root},
+        # Patch the storage boundary without recreating exception classes already
+        # registered by the HTTP server during test collection.
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            control_plane, "DB_PATH", Path(root) / "toolgate.db",
         ):
-            importlib.reload(paths)
-            reloaded = importlib.reload(control_plane)
-            first = reloaded.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
-            second = reloaded.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
+            first = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
+            second = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
             self.assertEqual(first["id"], second["id"])
-            self.assertEqual(reloaded.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"])
-        importlib.reload(paths)
-        importlib.reload(control_plane)
+            self.assertEqual(control_plane.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"])
 
     def test_bootstrap_agent_key_does_not_reconcile_deployment_scopes(self):
         from toolgate.core import control_plane
 
-        with tempfile.TemporaryDirectory() as root, patch.dict(
-            os.environ,
-            {"TOOLGATE_DATA_DIR": root},
+        # Patch the storage boundary without recreating exception classes already
+        # registered by the HTTP server during test collection.
+        with tempfile.TemporaryDirectory() as root, patch.object(
+            control_plane, "DB_PATH", Path(root) / "toolgate.db",
         ):
-            importlib.reload(paths)
-            reloaded = importlib.reload(control_plane)
-            first = reloaded.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
-            second = reloaded.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:research.*"])
+            first = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
+            second = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:research.*"])
             self.assertEqual(first["id"], second["id"])
-            self.assertEqual(reloaded.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"])
-        importlib.reload(paths)
-        importlib.reload(control_plane)
+            self.assertEqual(control_plane.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"])
 
 
     def test_explicit_admin_key_is_persisted_instead_of_replaced(self):
