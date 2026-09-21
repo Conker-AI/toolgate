@@ -138,10 +138,37 @@ the current definition before resubmitting a conflicted edit.
 For compatibility, omitting `expected_version` remains an unconditional replacement
 and does not protect against lost edits, although versions are still monotonic.
 The existing dashboard remains in this compatibility mode until its later adapter
-update. `version` is not a concurrency precondition. This increment provides no
-immutable publication catalogue or historical execution endpoint; deletion ends
-the current object's lifetime. Existing approvals continue to bind the exact
-definition/version and fail closed after changes.
+update. `version` is not a concurrency precondition. Existing live approvals continue
+to bind the exact definition/version and fail closed after changes.
+
+### Immutable definition history and publication
+
+Owner-only `GET /v2/tools/{id}/versions` and the matching `/v2/automations/{id}/versions`
+list saved revisions with publication state. `GET .../versions/{version}` returns the
+saved definition; `?published=true` requires and returns an immutable publication
+envelope. There is no fallback to the current version. History starts with the current
+definition when this feature is installed; overwritten pre-upgrade definitions cannot
+be reconstructed. Subsequent saves retain revisions atomically. Deleting a working
+definition retains its history; recreating its ID allocates above retained versions.
+
+`POST /v2/tools/{id}/publish` or `/v2/automations/{id}/publish` requires
+`{"expected_version": 3}`. Publication requires an active, unblocked current definition
+at that exact revision. It does not edit the draft, allocate a new revision, or execute
+anything. Repeating a successful publication returns the same envelope without a
+second event. Publications and revision history cannot be updated, deleted, or replaced.
+
+An automation publication captures all referenced child-tool definitions under the
+same writer transaction, including tools in inactive branches. Missing, inactive,
+blocked, or incompatible dependencies fail publication. An optional `tool_version`
+on a `tool_call` must match that tool's current version at publication; otherwise the
+resolved current version is pinned in the envelope. Later tool changes never rewrite
+the snapshot. Workflows are limited to 500 blocks and four nested levels. Nested
+automation calls, including cycles, are unsupported and rejected. Vault references
+remain references; publication never resolves or copies vault credentials.
+
+The publication catalogue alone does not change existing live execution routes or
+bind scheduled jobs. Explicit published-version execution must be implemented before
+using these snapshots as job targets; the legacy run route still uses current definitions.
 
 Automations use a typed JSON workflow as their source of truth. The dashboard presents the same definition as a roadmap, layer map, draggable block editor, and editable code view.
 

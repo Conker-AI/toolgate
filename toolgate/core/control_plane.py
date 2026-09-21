@@ -45,6 +45,28 @@ def _conn():
       subject_type TEXT, subject_id TEXT, actor TEXT, payload TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS v2_definition_versions (
+      kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
+      body TEXT NOT NULL, PRIMARY KEY(kind,id,version)
+    );
+    CREATE TABLE IF NOT EXISTS v2_publications (
+      kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
+      body TEXT NOT NULL, PRIMARY KEY(kind,id,version)
+    );
+    CREATE TRIGGER IF NOT EXISTS v2_versions_no_update BEFORE UPDATE ON v2_definition_versions
+    BEGIN SELECT RAISE(ABORT, 'definition history is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS v2_versions_no_delete BEFORE DELETE ON v2_definition_versions
+    BEGIN SELECT RAISE(ABORT, 'definition history is permanent'); END;
+    CREATE TRIGGER IF NOT EXISTS v2_versions_no_replace BEFORE INSERT ON v2_definition_versions
+    WHEN EXISTS(SELECT 1 FROM v2_definition_versions WHERE kind=NEW.kind AND id=NEW.id AND version=NEW.version)
+    BEGIN SELECT RAISE(ABORT, 'definition revision already exists'); END;
+    CREATE TRIGGER IF NOT EXISTS v2_publications_no_update BEFORE UPDATE ON v2_publications
+    BEGIN SELECT RAISE(ABORT, 'publication is immutable'); END;
+    CREATE TRIGGER IF NOT EXISTS v2_publications_no_delete BEFORE DELETE ON v2_publications
+    BEGIN SELECT RAISE(ABORT, 'publication is permanent'); END;
+    CREATE TRIGGER IF NOT EXISTS v2_publications_no_replace BEFORE INSERT ON v2_publications
+    WHEN EXISTS(SELECT 1 FROM v2_publications WHERE kind=NEW.kind AND id=NEW.id AND version=NEW.version)
+    BEGIN SELECT RAISE(ABORT, 'publication already exists'); END;
     """)
     try:
         yield conn
@@ -108,7 +130,11 @@ def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = N
                 raise ValueError("Initial definition version must be a positive integer")
             # Legacy callers may omit the precondition, but can never allocate/reset a
             # stored version. Keep create/upsert compatibility under the same lock.
-            body["version"] = current + 1 if current is not None else initial
+            retained = conn.execute("SELECT MAX(version) FROM v2_definition_versions WHERE kind=? AND id=?",
+                                    (kind, obj_id)).fetchone()[0] or 0
+            body["version"] = max(current or 0, retained) + 1 if existing or retained else initial
+            if existing:
+                retain_definition(conn, kind, _row(existing))
         if kind == "request" and existing:
             raise ValueError("Requests cannot be replaced; use the serialized decision or consumption transition")
         created = existing["created_at"] if existing else now
@@ -117,7 +143,16 @@ def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = N
             "ON CONFLICT(kind,id) DO UPDATE SET body=excluded.body,updated_at=excluded.updated_at",
             (kind, obj_id, json.dumps(body), created, now),
         )
+        if definition:
+            retain_definition(conn, kind, {**body, "created_at": created, "updated_at": now})
     return {**body, "created_at": created, "updated_at": now}
+
+
+def retain_definition(conn, kind: str, definition: dict) -> None:
+    """Retain only a previously unseen revision; old databases are adopted lazily."""
+    key = (kind, definition["id"], definition.get("version", 1))
+    if not conn.execute("SELECT 1 FROM v2_definition_versions WHERE kind=? AND id=? AND version=?", key).fetchone():
+        conn.execute("INSERT INTO v2_definition_versions VALUES(?,?,?,?)", (*key, json.dumps(definition)))
 
 
 def get(kind: str, obj_id: str) -> dict | None:
@@ -134,6 +169,11 @@ def list_objects(kind: str) -> list[dict]:
 
 def remove(kind: str, obj_id: str) -> bool:
     with _conn() as conn:
+        if kind in {"tool", "automation"}:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+            if row:
+                retain_definition(conn, kind, _row(row))
         return conn.execute("DELETE FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).rowcount > 0
 
 

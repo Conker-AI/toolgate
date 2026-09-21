@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
-from toolgate.core import control_plane, legacy_archive, owner_channel, spending, vault
+from toolgate.core import control_plane, legacy_archive, owner_channel, publications, spending, vault
 from toolgate.core import execution_journal as journal
 from toolgate.core.public_https import (
     DestinationDenied,
@@ -475,6 +475,10 @@ class V2Invoke(BaseModel):
     approval_request_id: str | None = None
     action_id: str | None = None
     job_id: str | None = None
+
+
+class V2Publish(BaseModel):
+    expected_version: StrictInt = Field(ge=1)
 
 
 class V2Settings(BaseModel):
@@ -1608,6 +1612,55 @@ def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agen
         deny("POLICY_DENIED", "Your agent key is not allowed to use this tool", 403, "Ask the owner for scope")
     return invoke_tool(tool, payload.args, agent["name"], approval_request_id=payload.approval_request_id,
                        actor_id=agent["id"], action_id=payload.action_id, job_id=payload.job_id)
+
+
+def _publish_definition(kind: str, obj_id: str, payload: V2Publish):
+    validator = require_valid_tool_definition if kind == "tool" else require_valid_automation_definition
+    try:
+        result = publications.publish(kind, obj_id, payload.expected_version, validate=validator,
+                                      validate_tool=require_valid_tool_definition)
+    except publications.PublicationInvalid as exc:
+        raise HTTPException(422, {"code": "INVALID_PUBLICATION", "message": str(exc)}) from exc
+    if result is None:
+        raise HTTPException(404, "definition not found")
+    return result
+
+
+@app.post("/v2/tools/{tool_id}/publish", dependencies=[Depends(require_admin)])
+def publish_tool(tool_id: str, payload: V2Publish):
+    return _publish_definition("tool", tool_id, payload)
+
+
+@app.post("/v2/automations/{automation_id}/publish", dependencies=[Depends(require_admin)])
+def publish_automation(automation_id: str, payload: V2Publish):
+    return _publish_definition("automation", automation_id, payload)
+
+
+@app.get("/v2/tools/{tool_id}/versions", dependencies=[Depends(require_admin)])
+def tool_versions(tool_id: str):
+    return publications.history("tool", tool_id)
+
+
+@app.get("/v2/automations/{automation_id}/versions", dependencies=[Depends(require_admin)])
+def automation_versions(automation_id: str):
+    return publications.history("automation", automation_id)
+
+
+def _definition_version(kind: str, obj_id: str, version: int, published: bool):
+    result = publications.get(kind, obj_id, version, published=published)
+    if result is None:
+        raise HTTPException(404, "definition version not found")
+    return result
+
+
+@app.get("/v2/tools/{tool_id}/versions/{version}", dependencies=[Depends(require_admin)])
+def tool_version(tool_id: str, version: int, published: bool = False):
+    return _definition_version("tool", tool_id, version, published)
+
+
+@app.get("/v2/automations/{automation_id}/versions/{version}", dependencies=[Depends(require_admin)])
+def automation_version(automation_id: str, version: int, published: bool = False):
+    return _definition_version("automation", automation_id, version, published)
 
 
 @app.get("/v2/automations")
