@@ -76,13 +76,39 @@ def _row(row: sqlite3.Row) -> dict:
     return value
 
 
-def _put(kind: str, obj_id: str, body: dict) -> dict:
+class DefinitionConflict(ValueError):
+    """An owner edited an older definition; no write has been applied."""
+
+    def __init__(self, current_version: int | None):
+        super().__init__("Definition changed. Reload it before saving.")
+        self.current_version = current_version
+
+
+def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
+         require_existing: bool = False) -> dict | None:
     now = _now()
     body = {**body, "id": obj_id}
     with _conn() as conn:
-        if kind == "request":
+        definition = kind in {"tool", "automation"}
+        if kind == "request" or definition:
             conn.execute("BEGIN IMMEDIATE")
-        existing = conn.execute("SELECT created_at FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+        existing = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+        if require_existing and not existing:
+            return None
+        if definition:
+            if expected_version is not None and (type(expected_version) is not int or expected_version < 1):
+                raise ValueError("expected_version must be a positive integer")
+            current = _row(existing).get("version", 1) if existing else None
+            initial = body.get("version", 1)
+            if current is not None and (type(current) is not int or current < 1):
+                raise ValueError("Stored definition version is invalid")
+            if expected_version is not None and expected_version != current:
+                raise DefinitionConflict(current)
+            if current is None and (type(initial) is not int or initial < 1):
+                raise ValueError("Initial definition version must be a positive integer")
+            # Legacy callers may omit the precondition, but can never allocate/reset a
+            # stored version. Keep create/upsert compatibility under the same lock.
+            body["version"] = current + 1 if current is not None else initial
         if kind == "request" and existing:
             raise ValueError("Requests cannot be replaced; use the serialized decision or consumption transition")
         created = existing["created_at"] if existing else now
@@ -438,34 +464,32 @@ def with_default_limits(policy: dict | None) -> dict:
     return policy
 
 
-def create_tool(body: dict) -> dict:
+def create_tool(body: dict, *, require_existing: bool = False) -> dict | None:
     tool_id = body["id"]
     return _put("tool", tool_id, {"name": body.get("name", tool_id), "description": body.get("description", ""),
         "service_id": body.get("service_id"), "category": body.get("category", "controlled"),
         "inputs": body.get("inputs", []), "outputs": body.get("outputs", []),
         "execution": body.get("execution", {}), "policy": with_default_limits(body.get("policy")),
-        "authorization": body.get("authorization", "auto"), "version": body.get("version", 1), "status": body.get("status", "active")})
+        "authorization": body.get("authorization", "auto"), "version": body.get("version", 1), "status": body.get("status", "active")},
+        expected_version=body.get("expected_version"), require_existing=require_existing)
 
 
 def update_tool(tool_id: str, body: dict) -> dict | None:
-    if not get("tool", tool_id):
-        return None
-    return create_tool({**body, "id": tool_id, "version": int(body.get("version", 1)) + 1})
+    return create_tool({**body, "id": tool_id}, require_existing=True)
 
 
-def create_automation(body: dict) -> dict:
+def create_automation(body: dict, *, require_existing: bool = False) -> dict | None:
     automation_id = body["id"]
     return _put("automation", automation_id, {"name": body.get("name", automation_id),
         "description": body.get("description", ""), "inputs": body.get("inputs", []),
         "workflow": body.get("workflow", []), "policy": with_default_limits(body.get("policy")),
         "authorization": body.get("authorization", "auto"), "schedule": body.get("schedule"),
-        "version": body.get("version", 1), "status": body.get("status", "draft")})
+        "version": body.get("version", 1), "status": body.get("status", "draft")},
+        expected_version=body.get("expected_version"), require_existing=require_existing)
 
 
 def update_automation(automation_id: str, body: dict) -> dict | None:
-    if not get("automation", automation_id):
-        return None
-    return create_automation({**body, "id": automation_id, "version": int(body.get("version", 1)) + 1})
+    return create_automation({**body, "id": automation_id}, require_existing=True)
 
 
 

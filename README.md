@@ -120,6 +120,29 @@ Arbitrary agent-supplied Python and legacy script execution are intentionally un
 
 ## Automation Engine
 
+### Definition revision compatibility
+
+Tool and automation saves allocate `version` from the currently stored definition
+under one SQLite writer transaction. A replacement increments that stored number;
+the incoming `version` cannot reset or select it. Initial creation retains an
+explicit positive initial version for existing import/bootstrap clients (default 1).
+Legacy POST upserts retain their behavior, but also increment the stored version.
+
+Owner clients can send `expected_version` with POST or PUT to require that exact
+current version. A stale expectation returns HTTP 409 with
+`detail.code = "DEFINITION_CONFLICT"` and `detail.current_version`, without changing
+the definition or emitting its saved/updated event. PUT of a missing object remains
+404; POST with an expectation but no existing object conflicts. Reload and review
+the current definition before resubmitting a conflicted edit.
+
+For compatibility, omitting `expected_version` remains an unconditional replacement
+and does not protect against lost edits, although versions are still monotonic.
+The existing dashboard remains in this compatibility mode until its later adapter
+update. `version` is not a concurrency precondition. This increment provides no
+immutable publication catalogue or historical execution endpoint; deletion ends
+the current object's lifetime. Existing approvals continue to bind the exact
+definition/version and fail closed after changes.
+
 Automations use a typed JSON workflow as their source of truth. The dashboard presents the same definition as a roadmap, layer map, draggable block editor, and editable code view.
 
 Supported blocks are `tool_call`, `set`, `calculation`, `condition`, `switch`, bounded `loop`, bounded `retry`, `delay`, `notification`, and `return`. Expressions may reference `$args.<name>`, `$vars.<name>`, and `$last.<path>`. A tool's declared output is available as `$last.result.<output-name>` and its raw value remains available as `$last.result.result`. Nested depth, total steps, runtime, loop iterations, retry attempts, and delay duration are all capped.

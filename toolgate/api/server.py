@@ -36,6 +36,14 @@ SERVICE_VERSION = "0.3.0"
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
 
 
+@app.exception_handler(control_plane.DefinitionConflict)
+async def definition_conflict(_request: Request, exc: control_plane.DefinitionConflict):
+    return JSONResponse(status_code=409, content={"detail": {
+        "code": "DEFINITION_CONFLICT", "message": str(exc),
+        "current_version": exc.current_version,
+    }})
+
+
 @app.exception_handler(owner_channel.OwnerError)
 async def owner_error(_request: Request, error: owner_channel.OwnerError):
     return JSONResponse({"detail": {"code": error.code, "message": str(error)}},
@@ -240,8 +248,8 @@ def ensure_builtin_research_capabilities() -> None:
             continue
         if existing:
             definition = {**definition, "version": int(existing.get("version", 1)) + 1}
-        control_plane.create_tool(definition)
-        control_plane.event("builtin_tool_synced", "info", "tool", definition["id"], "system", {"version": definition["version"]})
+        saved = control_plane.create_tool(definition)
+        control_plane.event("builtin_tool_synced", "info", "tool", definition["id"], "system", {"version": saved["version"]})
 
 
 HEALTH_CACHE_SECONDS = 15
@@ -422,7 +430,8 @@ class V2Tool(BaseModel):
     execution: dict = {}
     policy: dict = {}
     authorization: str = "auto"
-    version: int = 1
+    version: StrictInt = Field(default=1, ge=1)
+    expected_version: StrictInt | None = Field(default=None, ge=1)
     status: str = "active"
 
 
@@ -435,7 +444,8 @@ class V2Automation(BaseModel):
     policy: dict = {}
     authorization: str = "auto"
     schedule: str | None = None
-    version: int = 1
+    version: StrictInt = Field(default=1, ge=1)
+    expected_version: StrictInt | None = Field(default=None, ge=1)
     status: str = "draft"
 
 
