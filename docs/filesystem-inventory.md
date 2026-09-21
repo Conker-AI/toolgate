@@ -39,3 +39,18 @@ path-based fallback. Tests use a descriptor backend seam on Windows, plus a
 Linux-only temporary-directory test for actual symlink/replacement rejection.
 The latter is skipped on Windows; Windows test success alone does not verify
 native Linux syscalls. No tests inspect production roots.
+# ToolGate API
+
+The reserved `system.files-list` capability accepts `root_id`, relative `path`
+and a bounded `limit` through normal scoped execution and durable receipts.
+Registration only creates a missing definition; owner-disabled state and approval
+policy remain unchanged. Definition and dispatch guards reject replacing this
+reserved name with a different executor or adding caller-controlled root paths.
+Failed reads return static failed receipts. A new observation needs a new action
+ID; retrying the same identity returns its original listing.
+
+`GET /v2/agent/system/file-roots` requires the listing scope. It returns explicit
+configuration only, not directory existence or availability, and disables caching.
+Lockdown or disabled capabilities expose no usable roots. This path does not issue
+keys, broaden scopes or grant file-content access. Pi and frontend transport are
+separate work.

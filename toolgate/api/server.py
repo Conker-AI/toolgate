@@ -36,7 +36,7 @@ from toolgate.core.public_https import (
     public_url,
     resolve_public,
 )
-from toolgate.executors import container_control, process_control, research, system_inventory
+from toolgate.executors import container_control, filesystem_inventory, process_control, research, system_inventory
 
 SERVICE_VERSION = "0.3.0"
 
@@ -132,6 +132,20 @@ def startup():
 
 def ensure_builtin_system_capabilities() -> None:
     """Register fixed operations without changing existing owner policy or key scopes."""
+    if not control_plane.get("tool", "system.files-list"):
+        control_plane.create_tool({
+            "id": "system.files-list", "name": "Directory listing",
+            "description": "List bounded directory metadata beneath an operator-configured root. No file contents, symlink traversal or writes.",
+            "category": "safe", "authorization": "auto", "status": "active",
+            "inputs": [{"name": "root_id", "type": "string", "required": True},
+                       {"name": "path", "type": "string", "required": False, "default": ""},
+                       {"name": "limit", "type": "integer", "required": False, "default": 200,
+                        "minimum": 1, "maximum": 200}],
+            "outputs": [{"name": "listing", "type": "object"}],
+            "execution": {"type": "filesystem_inventory"},
+            "policy": {"usage_limits": {"max_per_minute": 60, "cooldown_seconds": 0,
+                        "max_per_hour": 1000, "max_runtime_seconds": 15}},
+        })
     if not control_plane.get("tool", "system.inventory"):
         control_plane.create_tool({
             "id": "system.inventory", "name": "System inventory",
@@ -567,6 +581,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "echo", "local_echo", "http_json", "memorygate", "ollama_generate", "gemini_generate",
     "research_search", "research_bundle", "research_fetch", "research_fetch_batch",
     "system_inventory",
+    "filesystem_inventory",
     "container_control",
     "process_control",
 }
@@ -656,6 +671,8 @@ def tool_definition_errors(tool: dict) -> list[str]:
     execution = tool.get("execution")
     if tool.get("id") == "system.inventory" and execution != {"type": "system_inventory"}:
         errors.append("system.inventory is reserved for the fixed read-only inventory executor")
+    if tool.get("id") == "system.files-list" and execution != {"type": "filesystem_inventory"}:
+        errors.append("system.files-list is reserved for configured-root metadata listing")
     if tool.get("id") == "system.container-control" and execution != {"type": "container_control"}:
         errors.append("system.container-control is reserved for managed container lifecycle")
     if tool.get("id") == "system.process-control" and execution != {"type": "process_control"}:
@@ -674,6 +691,15 @@ def tool_definition_errors(tool: dict) -> list[str]:
                 field.get("type") != "string" or field.get("required") is not True
                 for field in inputs if isinstance(field, dict)):
             errors.append(f"{kind} requires string {target} and action inputs")
+    elif execution["type"] == "filesystem_inventory":
+        if execution != {"type": "filesystem_inventory"}:
+            errors.append("filesystem_inventory uses only operator-configured roots")
+        if input_names - {"root_id", "path", "limit"} or "root_id" not in input_names:
+            errors.append("filesystem_inventory accepts root_id, path and limit")
+        for field in inputs:
+            if isinstance(field, dict) and field.get("type") != (
+                    "integer" if field.get("name") == "limit" else "string"):
+                errors.append("filesystem_inventory input types are invalid")
     elif execution["type"] == "system_inventory":
         if execution != {"type": "system_inventory"}:
             errors.append("system_inventory uses only the operator-configured fixed endpoint")
@@ -1173,6 +1199,9 @@ def _spending_preflight(tool: dict, args: dict) -> dict | None:
 def _dispatch_tool(tool: dict, args: dict) -> dict:
     # v2 executes only typed, declared executors. Arbitrary Python is intentionally unsupported.
     executor_type = tool.get("execution", {}).get("type")
+    if tool.get("id") == "system.files-list" and tool.get("execution") != {"type": "filesystem_inventory"}:
+        return {"ok": False, "error": "The reserved directory listing definition is invalid.",
+                "error_code": "invalid_files_definition"}
     if tool.get("id") == "system.inventory" and tool.get("execution") != {"type": "system_inventory"}:
         return {"ok": False, "error": "The reserved system inventory definition is invalid.",
                 "error_code": "invalid_inventory_definition"}
@@ -1206,6 +1235,15 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         result = _execute_research_fetch(args)
     elif executor_type == "research_fetch_batch":
         result = _execute_research_fetch_batch(args)
+    elif executor_type == "filesystem_inventory":
+        if tool["execution"] != {"type": "filesystem_inventory"} or set(args) - {"root_id", "path", "limit"}:
+            return {"ok": False, "error": "Provide root_id, path and bounded limit only.",
+                    "error_code": "invalid_arguments"}
+        try:
+            result = {"ok": True, "result": filesystem_inventory.list_directory(
+                args.get("root_id"), args.get("path", ""), args.get("limit", 200))}
+        except filesystem_inventory.FileError as exc:
+            result = {"ok": False, "error": str(exc), "error_code": exc.code}
     elif executor_type == "process_control":
         if set(args) != {"service_id", "action"}:
             return {"ok": False, "error": "Provide only service_id and action.",
@@ -1838,6 +1876,24 @@ def agent_system_services(agent: dict = Depends(require_agent)):
             result["actions"] = ["start", "stop", "restart"]
         except process_control.ControlError as exc:
             result["status"] = exc.code
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v2/agent/system/file-roots")
+def agent_file_roots(agent: dict = Depends(require_agent)):
+    tool_id = "system.files-list"
+    if not control_plane.is_scoped(agent, tool_id):
+        deny("POLICY_DENIED", "Directory listing scope is required", 403)
+    tool = control_plane.get("tool", tool_id)
+    if (control_plane.settings().get("lockdown") or not tool or tool.get("status") != "active"
+            or tool.get("authorization") == "blocked"
+            or tool.get("execution") != {"type": "filesystem_inventory"}):
+        return JSONResponse({"mode": "unavailable", "code": "disabled", "roots": []},
+                            headers={"Cache-Control": "no-store"})
+    try:
+        result = filesystem_inventory.roots()
+    except filesystem_inventory.FileError as exc:
+        result = {"mode": "unavailable", "code": exc.code, "roots": []}
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
