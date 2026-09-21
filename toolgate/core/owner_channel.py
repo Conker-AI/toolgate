@@ -118,7 +118,7 @@ def project(db, record):
         reason = "invalid_action"
     elif args is None:
         reason = "arguments_unavailable"
-    elif subject_type != "tool":
+    elif subject_type != "tool" and binding.get("publication_digest") is None:
         reason = "unsupported_subject"
     elif binding.get("consumed_at"):
         reason = "consumed"
@@ -126,6 +126,19 @@ def project(db, record):
         reason = "expired"
     elif record.get("status") != "pending":
         reason = "already_decided"
+    publication_view = None
+    if origin_valid and isinstance(binding.get("publication_digest"), str) and re.fullmatch(r"[a-f0-9]{64}", binding["publication_digest"]):
+        publication_view = {"version": version, "digest": binding["publication_digest"],
+                            "dependencies": binding.get("child_tools", {})}
+    if reason is None and binding.get("publication_digest") is not None:
+        from toolgate.core import publications
+        try:
+            publication = publications.for_execution(db, subject_type, subject_id, version)
+            if (binding["publication_digest"] != publication["digest"]
+                    or binding.get("child_tools") != cp.child_bindings(publication["tools"])):
+                reason = "invalid_publication"
+        except ValueError:
+            reason = "publication_unavailable"
     decision = record.get("decision")
     decision = ({"status": _text(record.get("status"), 32),
                  "actor": _text(decision.get("actor"), 200),
@@ -138,7 +151,8 @@ def project(db, record):
         "created_at": _date(record.get("created_at")), "updated_at": _date(record.get("updated_at")),
         "decision": decision,
         "action": {"subject_type": subject_type, "subject_id": subject_id,
-                   "version": version, "args": args},
+                   "version": version, "args": args,
+                   **({"publication": publication_view} if publication_view else {})},
         "approval": {"expires_at": expires, "consumed_at": consumed, "origin_valid": origin_valid},
         "reviewable": reason is None, "unavailable_reason": reason,
     }
@@ -192,7 +206,7 @@ def decide(identity, status, note):
             raise OwnerError("not_found", "Owner request not found.", 404)
         view = project(db, record)
         permitted = (view["reviewable"] if status == "approved" else
-                     view["unavailable_reason"] in {None, "expired", "unsupported_subject"})
+                     view["unavailable_reason"] in {None, "expired", "unsupported_subject", "publication_unavailable"})
         if not view["approval"]["origin_valid"] or not permitted:
             raise OwnerError("not_reviewable", "This exact action cannot be approved from this view.")
     try:

@@ -164,11 +164,43 @@ on a `tool_call` must match that tool's current version at publication; otherwis
 resolved current version is pinned in the envelope. Later tool changes never rewrite
 the snapshot. Workflows are limited to 500 blocks and four nested levels. Nested
 automation calls, including cycles, are unsupported and rejected. Vault references
-remain references; publication never resolves or copies vault credentials.
+remain references; publication never resolves or copies vault credentials. Definition
+fields still permit owner-authored literal configuration, so publications are not a
+general secret scrubber: do not embed credentials in URLs, headers, arguments, or
+other literal fields. Use supported vault-reference fields instead.
 
-The publication catalogue alone does not change existing live execution routes or
-bind scheduled jobs. Explicit published-version execution must be implemented before
-using these snapshots as job targets; the legacy run route still uses current definitions.
+### Executing a published target
+
+The existing agent routes `POST /v2/tools/{id}/invoke` and
+`POST /v2/automations/{id}/run` accept `published_version`, a positive integer.
+Include a stable `action_id`, exact `args`, and optional `job_id`. The requested
+publication must exist: unavailable/revoked versions fail with
+`PUBLICATION_UNAVAILABLE`, without falling back to a current draft. Omitting the
+field deliberately retains legacy live-definition execution. A job integration must
+persist and send the published version; ToolGate does not create or schedule jobs here.
+
+Published workflows execute the saved workflow and pinned child definitions, even
+after their working definitions are edited. Current agent scopes, lockdown, usage
+limits and spending enforcement still apply. Every dispatch rechecks that the target
+and children remain active, unblocked, and in the same definition lifetime. Any owner
+authorization or policy change invalidates the publication for execution (even a
+loosening); review and publish a new revision to resume. Deletion/recreation cannot
+revive an old publication. Revocation prevents subsequent dispatches; it cannot undo
+effects already dispatched.
+
+Owner confirmation binds the exact publication digest, arguments, originating agent,
+version, and pinned child bindings. Dedicated owner review includes the publication
+digest and child version/digest metadata, and rechecks current revocations before
+approval. Published automation approvals are supported by this backend projection;
+the separate gateway/frontend must explicitly support that shape before enabling its
+review controls. Legacy live-automation review remains unavailable on that channel.
+
+Execution receipts retain an immutable publication digest and definition version,
+including uncertain outcomes. Reusing an action ID for another publication, or
+switching between published and live execution, conflicts instead of dispatching.
+Identical retries return the existing receipt; an unknown outcome never authorizes
+redispatch. Existing journal records are upgraded additively and preserve their
+original legacy invocation identity.
 
 Automations use a typed JSON workflow as their source of truth. The dashboard presents the same definition as a roadmap, layer map, draggable block editor, and editable code view.
 

@@ -21,7 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
-from toolgate.core import control_plane, legacy_archive, owner_channel, publications, spending, vault
+from toolgate.core import (
+    control_plane,
+    legacy_archive,
+    owner_channel,
+    publications,
+    spending,
+    vault,
+)
 from toolgate.core import execution_journal as journal
 from toolgate.core.public_https import (
     DestinationDenied,
@@ -34,6 +41,13 @@ from toolgate.executors import research
 SERVICE_VERSION = "0.3.0"
 
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
+
+
+@app.exception_handler(publications.PublicationInvalid)
+async def publication_invalid(_request: Request, exc: publications.PublicationInvalid):
+    return JSONResponse(status_code=409, content={"detail": {
+        "code": "PUBLICATION_UNAVAILABLE", "message": str(exc),
+    }})
 
 
 @app.exception_handler(control_plane.DefinitionConflict)
@@ -475,6 +489,7 @@ class V2Invoke(BaseModel):
     approval_request_id: str | None = None
     action_id: str | None = None
     job_id: str | None = None
+    published_version: StrictInt | None = Field(default=None, ge=1)
 
 
 class V2Publish(BaseModel):
@@ -968,12 +983,13 @@ def _shape_tool_result(tool: dict, result: dict) -> dict:
 def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str | None = None,
                 approval_granted: bool = False, actor_id: str | None = None,
                 action_id: str | None = None, job_id: str | None = None,
-                parent_action_id: str | None = None) -> dict:
+                parent_action_id: str | None = None, publication: dict | None = None) -> dict:
     identity = actor_id or actor
+    publication_digest = publication["digest"] if publication else None
     if action_id:
         try:
             previous = journal.existing(action_id, "tool", tool["id"], args, identity,
-                                        job_id, parent_action_id)
+                                        job_id, parent_action_id, publication_digest=publication_digest)
         except (journal.ExecutionConflict, ValueError) as exc:
             deny("ACTION_CONFLICT", str(exc), 409)
         if previous:
@@ -995,7 +1011,8 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
             request = control_plane.create_verification_request(
                 f"Run {tool['name']}",
                 "Owner confirmation is required for this exact immutable tool invocation.",
-                actor, "tool", tool["id"], args, tool.get("version"), expiry, actor_id)
+                actor, "tool", tool["id"], args, tool.get("version"), expiry, actor_id,
+                publication_digest=publication_digest)
             return {"code": "CONFIRMATION_REQUIRED", "message": "This exact action is queued for owner review.",
                     "request_id": request["id"], "expires_at": request["payload"]["binding"]["expires_at"],
                     "next_action": f"After approval, retry with --approval-request-id {request['id']}"}
@@ -1011,15 +1028,19 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
         deny("BUDGET_DENIED", str(exc), 403)
 
     def authorize(conn):
+        if publication:
+            publications.for_execution(conn, publication["kind"], publication["id"], publication["version"])
         if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
             approved, reason = control_plane.consume_verification_in_transaction(
-                conn, approval_request_id, "tool", tool["id"], args, tool.get("version"), actor, actor_id)
+                conn, approval_request_id, "tool", tool["id"], args, tool.get("version"), actor, actor_id,
+                publication_digest=publication_digest)
             if not approved:
                 deny("APPROVAL_INVALID", reason, 409, "Request a new confirmation for this exact action")
     try:
         record, dispatch = journal.begin(action_id, "tool", tool["id"], args, identity,
                                          tool.get("version"), job_id=job_id,
                                          parent_action_id=parent_action_id, authorize=authorize,
+                                         publication_digest=publication_digest,
                                          reserve=(lambda conn: spending.reserve(
                                              conn, action_id, job_id, identity, parent_action_id, price))
                                          if price else None)
@@ -1036,6 +1057,9 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
         return journal.response(journal.get(action_id))
     envelope = {"code": "OK" if result["ok"] else "TOOL_UNAVAILABLE",
                 "message": "Tool completed" if result["ok"] else result["error"], "result": result}
+    if publication:
+        envelope["publication"] = {"kind": publication["kind"], "id": publication["id"],
+                                   "version": publication["version"], "digest": publication_digest}
     usage = result.get("result", {}).get("usage") if isinstance(result.get("result"), dict) else None
     record = journal.finish(action_id, envelope, reconcile=(
         lambda conn: spending.reconcile(conn, action_id, usage)) if price else None)
@@ -1268,7 +1292,8 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
                 f"{parent_id}:{state['count']}".encode()).hexdigest()) if parent_id else None
             result = invoke_tool(tool, call_args, actor, approval_granted=approval_granted,
                                  actor_id=state.get("actor_id"), action_id=child_id,
-                                 job_id=state.get("job_id"), parent_action_id=parent_id)
+                                 job_id=state.get("job_id"), parent_action_id=parent_id,
+                                 publication=state.get("publication"))
             if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:
                 deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)
         elif kind == "set":
@@ -1605,13 +1630,24 @@ def delete_tool(tool_id: str, _tier: str = Depends(require_admin)):
 
 @app.post("/v2/tools/{tool_id}/invoke")
 def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agent)):
-    tool = control_plane.get("tool", tool_id)
+    publication = _requested_publication("tool", tool_id, payload)
+    tool = publication["definition"] if publication else control_plane.get("tool", tool_id)
     if not tool:
         deny("TOOL_UNAVAILABLE", f"Tool '{tool_id}' was not found", 404, "Run `toolgate tool list`")
     if tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):
         deny("POLICY_DENIED", "Your agent key is not allowed to use this tool", 403, "Ask the owner for scope")
     return invoke_tool(tool, payload.args, agent["name"], approval_request_id=payload.approval_request_id,
-                       actor_id=agent["id"], action_id=payload.action_id, job_id=payload.job_id)
+                       actor_id=agent["id"], action_id=payload.action_id, job_id=payload.job_id,
+                       publication=publication)
+
+
+def _requested_publication(kind: str, obj_id: str, payload: V2Invoke) -> dict | None:
+    if payload.published_version is None:
+        return None
+    if not payload.action_id:
+        deny("ACTION_ID_REQUIRED", "Published runs require a stable action_id", 422)
+    with control_plane._conn() as conn:
+        return publications.for_execution(conn, kind, obj_id, payload.published_version)
 
 
 def _publish_definition(kind: str, obj_id: str, payload: V2Publish):
@@ -1732,7 +1768,9 @@ def delete_automation(automation_id: str, _tier: str = Depends(require_admin)):
 
 @app.post("/v2/automations/{automation_id}/run")
 def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(require_agent)):
-    automation = control_plane.get("automation", automation_id)
+    publication = _requested_publication("automation", automation_id, payload)
+    publication_digest = publication["digest"] if publication else None
+    automation = publication["definition"] if publication else control_plane.get("automation", automation_id)
     if not automation or automation.get("status") != "active":
         deny("TOOL_UNAVAILABLE", "Automation is not active", 404)
     if not control_plane.is_scoped(agent, f"automation:{automation_id}"):
@@ -1741,7 +1779,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         deny("ACTION_ID_REQUIRED", "Supply a stable action_id for this workflow run", 422)
     try:
         previous = journal.existing(payload.action_id, "automation", automation_id, payload.args,
-                                    agent["id"], payload.job_id)
+                                    agent["id"], payload.job_id, publication_digest=publication_digest)
     except (journal.ExecutionConflict, ValueError) as exc:
         deny("ACTION_CONFLICT", str(exc), 409)
     if previous:
@@ -1764,7 +1802,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
                 f"Run {automation['name']}",
                 "Owner confirmation is required for this exact immutable automation run.",
                 agent["name"], "automation", automation_id, payload.args,
-                automation.get("version"), expiry, agent["id"])
+                automation.get("version"), expiry, agent["id"], publication_digest=publication_digest)
             return {"code": "CONFIRMATION_REQUIRED", "message": "Automation queued for owner review",
                     "request_id": request["id"], "expires_at": request["payload"]["binding"]["expires_at"],
                     "next_action": f"After approval, retry with --approval-request-id {request['id']}"}
@@ -1772,22 +1810,26 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
     limits = automation.get("policy", {}).get("usage_limits", {})
     def authorize(conn):
         nonlocal approval_granted, tool_snapshot
-        tool_snapshot = control_plane.automation_tool_snapshot(conn, automation_id, automation.get("version"))
+        if publication:
+            tool_snapshot = publications.for_execution(conn, "automation", automation_id, publication["version"])["tools"]
+        else:
+            tool_snapshot = control_plane.automation_tool_snapshot(conn, automation_id, automation.get("version"))
         if authorization != "auto":
             approval_granted, reason = control_plane.consume_verification_in_transaction(
                 conn, payload.approval_request_id, "automation", automation_id, payload.args,
-                automation.get("version"), agent["name"], agent["id"])
+                automation.get("version"), agent["name"], agent["id"], publication_digest=publication_digest)
             if not approval_granted:
                 deny("APPROVAL_INVALID", reason, 409)
     try:
         record, dispatch = journal.begin(payload.action_id, "automation", automation_id,
                                          payload.args, agent["id"], automation.get("version"),
-                                         job_id=payload.job_id, authorize=authorize)
+                                         job_id=payload.job_id, authorize=authorize, publication_digest=publication_digest)
     except (journal.ExecutionConflict, ValueError) as exc:
         deny("ACTION_CONFLICT", str(exc), 409)
     if not dispatch:
         return journal.response(record)
     state = {"automation_id": automation_id, "tool_snapshot": tool_snapshot, "action_id": payload.action_id,
+             "publication": publication,
              "job_id": payload.job_id, "actor_id": agent["id"], "args": payload.args, "vars": {}, "last": None,
              "results": [], "count": 0, "max_steps": int(limits.get("max_steps", 100)),
              "started_at": time.monotonic(),
@@ -1799,6 +1841,9 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         return journal.response(journal.get(payload.action_id))
     envelope = {"code": "OK", "message": "Automation completed", "result": final,
                 "steps": state["results"], "variables": state["vars"]}
+    if publication:
+        envelope["publication"] = {"kind": "automation", "id": automation_id,
+                                   "version": publication["version"], "digest": publication_digest}
     record = journal.finish(payload.action_id, envelope)
     control_plane.event("automation_executed", "info", "automation", automation_id, agent["name"],
                         {"steps": state["count"], "version": automation.get("version")})

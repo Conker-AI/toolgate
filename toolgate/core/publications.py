@@ -55,6 +55,29 @@ def history(kind: str, obj_id: str) -> list[dict]:
             for version, definition in sorted(definitions.items(), reverse=True)]
 
 
+def for_execution(conn, kind: str, obj_id: str, version: int) -> dict:
+    """Resolve only the requested publication and enforce current owner revocations."""
+    _kind(kind)
+    row = conn.execute("SELECT body FROM v2_publications WHERE kind=? AND id=? AND version=?",
+                       (kind, obj_id, version)).fetchone()
+    if not row:
+        raise PublicationInvalid("The exact published version was not found")
+    publication = json.loads(row["body"])
+    subjects = [(kind, publication["definition"])]
+    subjects.extend(("tool", tool) for tool in publication["tools"].values())
+    for subject_kind, saved in subjects:
+        current_row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?",
+                                   (subject_kind, saved["id"])).fetchone()
+        current = cp._row(current_row) if current_row else None
+        if (not current or current.get("status") != "active"
+                or current.get("created_at") != saved.get("created_at")
+                or current.get("authorization") == "blocked"
+                or current.get("authorization") != saved.get("authorization")
+                or current.get("policy") != saved.get("policy")):
+            raise PublicationInvalid(f"Published dependency '{saved['id']}' is revoked or its owner policy changed")
+    return publication
+
+
 def dependencies(conn, definition: dict) -> dict:
     """Visit every possible branch, bounded independently of runtime control flow."""
     tools = {}

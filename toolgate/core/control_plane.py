@@ -666,7 +666,8 @@ def child_bindings(tools: dict) -> dict:
 
 def create_verification_request(title: str, details: str, actor: str, subject_type: str,
                                 subject_id: str, args: dict, version: int | None,
-                                expiry_seconds: int = 60, actor_id: str | None = None) -> dict:
+                                expiry_seconds: int = 60, actor_id: str | None = None, *,
+                                publication_digest: str | None = None) -> dict:
     expiry = datetime.now(timezone.utc) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
     binding = {
         "subject_type": subject_type,
@@ -679,7 +680,14 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
     }
     with _conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        if subject_type == "automation":
+        if publication_digest is not None:
+            from toolgate.core import publications
+            publication = publications.for_execution(conn, subject_type, subject_id, version)
+            if publication["digest"] != publication_digest:
+                raise ValueError("Publication identity changed")
+            binding["publication_digest"] = publication_digest
+            binding["child_tools"] = child_bindings(publication["tools"])
+        elif subject_type == "automation":
             binding["child_tools"] = child_bindings(automation_tool_snapshot(conn, subject_id, version))
         record = _insert_request(conn, {
             "kind": "verification", "title": title, "details": details, "actor": actor,
@@ -704,7 +712,8 @@ def consume_verification(request_id: str, subject_type: str, subject_id: str,
 
 def consume_verification_in_transaction(conn, request_id: str, subject_type: str, subject_id: str,
                                         args: dict, version: int | None, actor: str,
-                                        actor_id: str | None = None) -> tuple[bool, str]:
+                                        actor_id: str | None = None, *,
+                                        publication_digest: str | None = None) -> tuple[bool, str]:
     now = datetime.now(timezone.utc)
     row = conn.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
     if not row:
@@ -731,7 +740,17 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
     expected = action_digest(subject_type, subject_id, args, version)
     if not secrets.compare_digest(str(binding.get("args_digest", "")), expected):
         return False, "Approval does not match this exact action"
-    if subject_type == "automation":
+    if binding.get("publication_digest") != publication_digest:
+        return False, "Approval does not match this exact publication"
+    if publication_digest is not None:
+        from toolgate.core import publications
+        try:
+            publication = publications.for_execution(conn, subject_type, subject_id, version)
+        except ValueError as exc:
+            return False, str(exc)
+        if publication["digest"] != publication_digest or binding.get("child_tools") != child_bindings(publication["tools"]):
+            return False, "Publication identity changed; request fresh confirmation"
+    elif subject_type == "automation":
         try:
             current = child_bindings(automation_tool_snapshot(conn, subject_id, version))
         except ValueError as exc:

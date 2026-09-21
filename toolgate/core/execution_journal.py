@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS v2_actions (
     args TEXT NOT NULL,
     job_id TEXT,
     parent_action_id TEXT REFERENCES v2_actions(action_id),
+    publication_digest TEXT,
     status TEXT NOT NULL CHECK(status IN ('dispatching','completed','outcome_unknown')),
     response TEXT,
     created_at REAL NOT NULL,
@@ -48,21 +49,37 @@ class ExecutionConflict(ValueError):
 
 def initialize(conn) -> None:
     conn.executescript(SCHEMA)
+    # Additive upgrade: legacy identities keep their exact original fingerprint.
+    if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
+        conn.execute("BEGIN IMMEDIATE")
+        if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
+            conn.execute("ALTER TABLE v2_actions ADD COLUMN publication_digest TEXT")
+        conn.commit()
+    conn.executescript("""
+    CREATE TRIGGER IF NOT EXISTS v2_action_publication_immutable BEFORE UPDATE ON v2_actions
+    WHEN NEW.publication_digest IS NOT OLD.publication_digest
+    BEGIN SELECT RAISE(ABORT, 'action publication is immutable'); END;
+    """)
     spending.initialize(conn)
 
 
 def fingerprint(subject_type: str, subject_id: str, args: dict, actor_id: str,
-                job_id: str | None, parent_action_id: str | None) -> str:
-    encoded = json.dumps([subject_type, subject_id, args, actor_id, job_id, parent_action_id],
+                job_id: str | None, parent_action_id: str | None,
+                publication_digest: str | None = None) -> str:
+    identity = [subject_type, subject_id, args, actor_id, job_id, parent_action_id]
+    if publication_digest is not None:
+        identity.append({"publication_digest": publication_digest})
+    encoded = json.dumps(identity,
                          sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def existing(action_id: str, subject_type: str, subject_id: str, args: dict, actor_id: str,
-             job_id: str | None = None, parent_action_id: str | None = None) -> dict | None:
+             job_id: str | None = None, parent_action_id: str | None = None, *,
+             publication_digest: str | None = None) -> dict | None:
     if not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,160}", action_id):
         raise ExecutionConflict("Use an action_id of 1-160 ASCII letters, digits or _ . : / -")
-    expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id)
+    expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest)
     with control_plane._conn() as conn:
         initialize(conn)
         row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
@@ -78,8 +95,9 @@ def _row(row) -> dict:
 
 def begin(action_id: str, subject_type: str, subject_id: str, args: dict, actor_id: str,
           version: int | None, *, job_id: str | None = None,
-          parent_action_id: str | None = None, authorize=None, reserve=None) -> tuple[dict, bool]:
-    expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id)
+          parent_action_id: str | None = None, authorize=None, reserve=None,
+          publication_digest: str | None = None) -> tuple[dict, bool]:
+    expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest)
     with control_plane._conn() as conn:
         initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
@@ -97,9 +115,11 @@ def begin(action_id: str, subject_type: str, subject_id: str, args: dict, actor_
         if authorize:
             authorize(conn)
         now = time.time()
-        conn.execute("INSERT INTO v2_actions VALUES (?,?,?,?,?,?,?,?,?,'dispatching',NULL,?,?)",
+        conn.execute("INSERT INTO v2_actions(action_id,fingerprint,actor_id,subject_type,subject_id,version,args,"
+                     "job_id,parent_action_id,publication_digest,status,response,created_at,updated_at) "
+                     "VALUES (?,?,?,?,?,?,?,?,?,?,'dispatching',NULL,?,?)",
                      (action_id, expected, actor_id, subject_type, subject_id, version,
-                      json.dumps(args, allow_nan=False), job_id, parent_action_id, now, now))
+                      json.dumps(args, allow_nan=False), job_id, parent_action_id, publication_digest, now, now))
         if reserve:
             reserve(conn)
         row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
@@ -150,8 +170,9 @@ def list_actions(limit: int = 100) -> list[dict]:
 
 
 def response(record: dict) -> dict:
+    target = {"definition_version": record["version"], "publication_digest": record["publication_digest"]} if record.get("publication_digest") else {}
     if record["response"] is not None:
-        return {**record["response"], "action_id": record["action_id"], "status": "completed"}
-    return {"code": "OUTCOME_UNKNOWN" if record["status"] == "outcome_unknown" else "IN_PROGRESS",
+        return {**record["response"], **target, "action_id": record["action_id"], "status": "completed"}
+    return {**target, "code": "OUTCOME_UNKNOWN" if record["status"] == "outcome_unknown" else "IN_PROGRESS",
             "action_id": record["action_id"], "status": record["status"],
             "message": "Dispatch is recorded but its outcome is not confirmed. Do not repeat it."}
