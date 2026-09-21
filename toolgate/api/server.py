@@ -626,6 +626,8 @@ def tool_definition_errors(tool: dict) -> list[str]:
         inputs = []
     input_names = {field.get("name") for field in inputs if isinstance(field, dict)}
     execution = tool.get("execution")
+    if tool.get("id") == "system.inventory" and execution != {"type": "system_inventory"}:
+        errors.append("system.inventory is reserved for the fixed read-only inventory executor")
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}")
         return errors
@@ -1128,6 +1130,9 @@ def _spending_preflight(tool: dict, args: dict) -> dict | None:
 def _dispatch_tool(tool: dict, args: dict) -> dict:
     # v2 executes only typed, declared executors. Arbitrary Python is intentionally unsupported.
     executor_type = tool.get("execution", {}).get("type")
+    if tool.get("id") == "system.inventory" and tool.get("execution") != {"type": "system_inventory"}:
+        return {"ok": False, "error": "The reserved system inventory definition is invalid.",
+                "error_code": "invalid_inventory_definition"}
     if executor_type == "echo":
         result = {"ok": True, "result": args}
     elif executor_type == "local_echo":

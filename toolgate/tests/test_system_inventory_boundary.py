@@ -86,8 +86,7 @@ def test_definition_and_dispatch_cannot_choose_private_destination(setup):
     changed = copy.deepcopy(tool)
     changed["execution"]["url"] = "http://another.internal/secrets"
     assert server.tool_definition_errors(changed)
-    with pytest.raises(HTTPException):
-        server._dispatch_tool(changed, {})
+    assert server._dispatch_tool(changed, {})["ok"] is False
     with pytest.raises(HTTPException):
         server._dispatch_tool(tool, {"path": "/files"})
     assert setup == []
@@ -106,3 +105,15 @@ def test_failed_read_is_durable_failure_not_unknown_effect(setup, monkeypatch):
     assert result["result"]["error_code"] == "not_configured"
     assert server.run_tool("system.inventory", body, agent) == result
     assert setup == []
+
+
+def test_reserved_inventory_name_cannot_be_repurposed_for_an_effect(setup, monkeypatch):
+    tool = cp.get("tool", "system.inventory")
+    tool["execution"] = {"type": "http_json", "method": "POST", "url": "https://example.com"}
+    assert server.tool_definition_errors(tool)
+    calls = []
+    monkeypatch.setattr(server, "_execute_http_json", lambda *a: calls.append(a))
+    result = server._dispatch_tool(tool, {})
+    assert result["ok"] is False
+    assert result["error_code"] == "invalid_inventory_definition"
+    assert calls == [] and setup == []
