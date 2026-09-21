@@ -80,3 +80,26 @@ Payload construction alone does not prove replacement fidelity on a real daemon.
 Durable private storage, step journaling, network detach/reattach, rollback/unknown
 reconciliation and managed replacement identity remain executor work. No raw
 configuration should be included in public receipts, logs or API responses.
+
+## Durable private payload and step records
+
+`core.port_replacements` adds private payload/step tables beneath the existing
+`v2_actions` identity. It requires an active `system.port-control` parent and the
+same target container. Payload encryption reuses the existing vault key and salt;
+the encrypted envelope binds the action and its fingerprint. Wrong-key,
+cleartext and cross-action payload reads fail. Deployment backup must retain the
+vault key/salt separately; losing them makes private recovery data unreadable.
+
+Step claims commit before dispatch and require an authorization callback. Concurrent
+or repeated claims never authorize another effect. Only ordered, observed previous
+steps allow the next claim. Parent startup recovery blocks continuation and makes
+unfinished steps read as outcome-unknown. Late observations improve evidence but
+do not reopen the parent. Public step references accept only image/container IDs,
+not arbitrary diagnostics. Payloads and completed observations have SQL immutability
+guards. This is internal storage, not a new externally accessible owner API.
+
+44 payload/journal/specification tests passed against temporary SQLite and the real
+vault cipher with synthetic keys. Existing FastAPI/Starlette deprecation warnings
+remain. The actual executor must enforce its planned step sequence, perform scope
+checks, and use claims correctly; storage tests do not prove that integration.
+No automatic rollback/retry or Docker effect is implemented by these records.
