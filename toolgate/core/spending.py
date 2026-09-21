@@ -75,7 +75,9 @@ class BudgetDenied(ValueError):
 
 
 def initialize(conn) -> None:
+    from toolgate.core import spending_allowances
     conn.executescript(SCHEMA)
+    conn.executescript(spending_allowances.SCHEMA)
 
 
 def _integer(value, label: str, minimum: int = 0) -> int:
@@ -175,6 +177,9 @@ def reserve(conn, action_id: str, job_id: str | None, actor_id: str,
             root = parent["action_id"]
     if root != job["root_action_id"]:
         raise BudgetDenied("Child spending belongs to another root job")
+    from toolgate.core import spending_allowances
+    spending_allowances.enforce(conn, job, conn.execute(
+        "SELECT * FROM v2_actions WHERE action_id=?", (root,)).fetchone())
     reserved = amount(price, price["max_input_tokens"], price["max_output_tokens"])
     used = conn.execute("SELECT COALESCE(SUM(effective),0)"
                         " FROM v2_spend_effective").fetchone()[0]
