@@ -36,7 +36,7 @@ from toolgate.core.public_https import (
     public_url,
     resolve_public,
 )
-from toolgate.executors import research
+from toolgate.executors import research, system_inventory
 
 SERVICE_VERSION = "0.3.0"
 
@@ -127,6 +127,23 @@ def startup():
         scopes = [scope.strip() for scope in os.environ.get("TOOLGATE_BOOTSTRAP_SCOPES", "").split(",") if scope.strip()]
         control_plane.ensure_bootstrap_agent_key(bootstrap_key, scopes)
     ensure_builtin_research_capabilities()
+    ensure_builtin_system_capabilities()
+
+
+def ensure_builtin_system_capabilities() -> None:
+    """Register a fixed read operation without changing owner policy or key scopes."""
+    if not control_plane.get("tool", "system.inventory"):
+        control_plane.create_tool({
+            "id": "system.inventory", "name": "System inventory",
+            "description": "Read bounded process, container and port observations from the configured SystemGate. No commands or mutations.",
+            "category": "safe", "authorization": "auto", "status": "active",
+            "inputs": [{"name": "limit", "type": "integer", "required": False,
+                        "default": 100, "minimum": 1, "maximum": 200}],
+            "outputs": [{"name": "inventory", "type": "object"}],
+            "execution": {"type": "system_inventory"},
+            "policy": {"usage_limits": {"max_per_minute": 12, "cooldown_seconds": 0,
+                        "max_per_hour": 120, "max_runtime_seconds": 15}},
+        })
 
 
 def ensure_builtin_research_capabilities() -> None:
@@ -523,6 +540,7 @@ def deny(code: str, message: str, status: int = 403, next_action: str = ""):
 SUPPORTED_TOOL_EXECUTORS = {
     "echo", "local_echo", "http_json", "memorygate", "ollama_generate", "gemini_generate",
     "research_search", "research_bundle", "research_fetch", "research_fetch_batch",
+    "system_inventory",
 }
 AUTHORIZATION_MODES = {"auto", "ai_review", "owner_confirmation", "blocked"}
 CAPABILITY_STATUSES = {"draft", "active", "disabled"}
@@ -611,7 +629,15 @@ def tool_definition_errors(tool: dict) -> list[str]:
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}")
         return errors
-    if execution["type"] == "http_json":
+    if execution["type"] == "system_inventory":
+        if execution != {"type": "system_inventory"}:
+            errors.append("system_inventory uses only the operator-configured fixed endpoint")
+        if input_names - {"limit"}:
+            errors.append("system_inventory accepts only limit")
+        for field in inputs:
+            if isinstance(field, dict) and field.get("name") == "limit" and field.get("type") != "integer":
+                errors.append("system_inventory.limit must be an integer")
+    elif execution["type"] == "http_json":
         method = str(execution.get("method", "")).upper()
         if method not in {"GET", "POST"}:
             errors.append("http_json supports GET and POST only")
@@ -1122,6 +1148,15 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         result = _execute_research_fetch(args)
     elif executor_type == "research_fetch_batch":
         result = _execute_research_fetch_batch(args)
+    elif executor_type == "system_inventory":
+        if tool["execution"] != {"type": "system_inventory"} or set(args) - {"limit"}:
+            deny("VALIDATION_ERROR", "System inventory accepts only a bounded limit.", 422)
+        try:
+            result = {"ok": True, "result": system_inventory.collect(args.get("limit", 100))}
+        except system_inventory.InventoryError as exc:
+            # This executor only observes. A refused/failed read is a known
+            # failure, not an ambiguous external mutation to reconcile.
+            result = {"ok": False, "error": str(exc), "error_code": exc.code}
     else:
         result = {"ok": False, "error": "No restricted executor is configured for this typed tool."}
     result = _shape_tool_result(tool, result)
