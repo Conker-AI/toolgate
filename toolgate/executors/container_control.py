@@ -49,7 +49,7 @@ class OutcomeUnknown(RuntimeError):
         return str(self)
 
 
-def _configuration(container_id):
+def _configuration(container_id=None):
     socket = os.environ.get("TOOLGATE_DOCKER_SOCKET", "")
     raw = os.environ.get("TOOLGATE_MANAGED_CONTAINER_IDS", "")
     if not socket or not raw:
@@ -67,9 +67,15 @@ def _configuration(container_id):
             raise ValueError()
     except (ValueError, RecursionError):
         raise ControlError("invalid_configuration") from None
-    if container_id not in ids:
+    if container_id is not None and container_id not in ids:
         raise ControlError("not_managed")
     return socket, frozenset(ids)
+
+
+def targets():
+    """Configuration only: no daemon call, socket path, or inferred live status."""
+    _, identities = _configuration()
+    return sorted(identities)
 
 
 def _pairs(pairs):

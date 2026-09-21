@@ -57,3 +57,11 @@ that a particular restart occurred, so unknown receipts are not automatically
 promoted to success. Existing scope, lockdown, publication and revocation checks
 remain in force. The owner-facing Pi API and final frontend integration are
 separate work.
+
+`GET /v2/agent/system/targets` requires the container-control execution scope and
+returns only configured full IDs, supported actions, required approval, and an
+explicit configuration state. It makes no daemon call and sets `observed=false`.
+Missing/invalid configuration, disabled capability and lockdown return no usable
+targets/actions. Revoked keys are rejected. The socket path is never returned;
+responses use `Cache-Control: no-store`. This is configuration discovery, not a
+live container list or a guarantee that a future action will be permitted.

@@ -1762,6 +1762,30 @@ def agent_tool_info(tool_id: str, agent: dict = Depends(require_agent)):
     return tool
 
 
+@app.get("/v2/agent/system/targets")
+def agent_system_targets(agent: dict = Depends(require_agent)):
+    tool_id = "system.container-control"
+    if not control_plane.is_scoped(agent, tool_id):
+        deny("POLICY_DENIED", "Managed container scope is required", 403)
+    result = {"kind": "configured-targets", "status": "configured", "containers": [],
+              "actions": [], "requiresApproval": True, "observed": False,
+              "source": "toolgate/container-control"}
+    tool = control_plane.get("tool", tool_id)
+    if control_plane.settings().get("lockdown"):
+        result["status"] = "locked_down"
+    elif (not tool or tool.get("status") != "active"
+          or tool.get("authorization") != "owner_confirmation"
+          or tool.get("execution") != {"type": "container_control"}):
+        result["status"] = "disabled"
+    else:
+        try:
+            result["containers"] = container_control.targets()
+            result["actions"] = ["start", "stop", "restart"]
+        except container_control.ControlError as exc:
+            result["status"] = exc.code
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 @app.post("/v2/tools")
 def create_tool(payload: V2Tool, _tier: str = Depends(require_admin)):
     body = payload.model_dump()
