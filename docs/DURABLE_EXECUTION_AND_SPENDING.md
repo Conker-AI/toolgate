@@ -128,3 +128,14 @@ It covers durable dispatch, receipt replay, argument/actor binding, uncertain re
 workflow retry holds, transactional approvals/reservations, caps shared by children,
 concurrent jobs, missing usage, paid fallbacks, and provider bounds. Process-death
 tests use an external effect file and `os._exit` before receipt recording.
+
+
+## Scoped budget metadata for schedulers
+
+`GET /v2/agent/spending/jobs/{job_id}` accepts an execution credential and returns
+only `job_id`, `root_action_id`, and `cap` for that actor. Other actors and missing
+records receive 404. It creates no grant and does not guarantee remaining credit:
+the existing dispatch reservation enforces current policy, prices, root lineage
+and cumulative/per-job ceilings. Pi can bind this existing authority to a held
+scheduled run without receiving a ToolGate administrative key. Repeating schedules
+still need separately authorized budgets for their distinct root actions.

@@ -273,3 +273,21 @@ def test_price_change_before_reservation_cannot_use_old_rates(paid):
                       reserve=lambda db: spending.reserve(db, "root", job, "agent", None, price))
     assert journal.get("root") is None
     assert spending.status()["accounted_and_reserved_microusd"] == 0
+
+
+def test_execution_identity_can_only_read_own_budget(paid):
+    job = setup_budget(root="scheduled_run", actor="agent")
+    assert spending.agent_job(job, "other") is None
+    assert spending.agent_job(job, "agent") == {
+        "job_id": job, "root_action_id": "scheduled_run", "cap": 10_000_000,
+    }
+    client = TestClient(server.app)
+    path = f"/v2/agent/spending/jobs/{job}"
+    assert client.get(path).status_code in (401, 403)
+    server.app.dependency_overrides[server.require_agent] = lambda: {"id": "other"}
+    try:
+        assert client.get(path).status_code == 404
+        server.app.dependency_overrides[server.require_agent] = lambda: {"id": "agent"}
+        assert client.get(path).json() == spending.agent_job(job, "agent")
+    finally:
+        server.app.dependency_overrides.pop(server.require_agent, None)

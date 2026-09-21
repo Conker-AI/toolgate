@@ -2204,6 +2204,14 @@ def list_actions(_tier: str = Depends(require_admin)):
     return {"results": journal.list_actions()}
 
 
+@app.get("/v2/agent/spending/jobs/{job_id}")
+def agent_spending_job(job_id: str, agent: dict = Depends(require_agent)):
+    result = spending.agent_job(job_id, agent["id"])
+    if result is None:
+        raise HTTPException(404, "budget not found")
+    return result
+
+
 @app.get("/v2/agent/actions/{action_id:path}")
 def agent_action(action_id: str, agent: dict = Depends(require_agent)):
     record = journal.get(action_id)

@@ -244,3 +244,14 @@ def release_hold(action_id: str, evidence: str, confirmed_not_executed: bool) ->
                      (action_id, evidence.strip(), time.time(), "owner"))
         receipt = dict(conn.execute("SELECT * FROM v2_spend_releases WHERE action_id=?", (action_id,)).fetchone())
         return {**receipt, "status": "local_hold_released", "released_microusd": row["reserved"]}
+
+
+def agent_job(job_id: str, actor_id: str) -> dict | None:
+    """Read only this execution identity's budget; never issue new authority."""
+    with control_plane._conn() as conn:
+        initialize(conn)
+        row = conn.execute(
+            "SELECT job_id,root_action_id,cap FROM v2_spend_jobs WHERE job_id=? AND actor_id=?",
+            (job_id, actor_id),
+        ).fetchone()
+        return dict(row) if row else None
