@@ -188,6 +188,14 @@ loosening); review and publish a new revision to resume. Deletion/recreation can
 revive an old publication. Revocation prevents subsequent dispatches; it cannot undo
 effects already dispatched.
 
+The journal writer transaction also rechecks lockdown and the originating key's
+current active state and required scope before every new root/child dispatch,
+before consuming confirmation or reserving spending. Workflow children inherit the
+required workflow scope: current child-tool scopes are never unioned with an old
+workflow grant to keep a revoked workflow alive. A revocation between children stops
+subsequent dispatches; already committed effects remain in the journal. Partial runs
+are held for reconciliation instead of automatically restarting.
+
 Owner confirmation binds the exact publication digest, arguments, originating agent,
 version, and pinned child bindings. Dedicated owner review includes the publication
 digest and child version/digest metadata, and rechecks current revocations before

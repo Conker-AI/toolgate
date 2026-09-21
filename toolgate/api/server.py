@@ -980,10 +980,24 @@ def _shape_tool_result(tool: dict, result: dict) -> dict:
     return result
 
 
+def require_current_dispatch_authority(conn, actor_id: str | None, capability: str | None) -> None:
+    """Called inside the journal writer transaction, before consuming or dispatching."""
+    settings = conn.execute("SELECT * FROM v2_objects WHERE kind='settings' AND id='control-plane'").fetchone()
+    if settings and control_plane._row(settings).get("lockdown"):
+        deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423)
+    if capability is not None:
+        row = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (actor_id,)).fetchone()
+        if not row or row["status"] != "active":
+            deny("AGENT_REVOKED", "The originating agent key is no longer active", 403)
+        if not control_plane.is_scoped(control_plane.public_agent_key(row), capability):
+            deny("POLICY_DENIED", "The originating agent no longer has the required scope", 403)
+
+
 def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str | None = None,
                 approval_granted: bool = False, actor_id: str | None = None,
                 action_id: str | None = None, job_id: str | None = None,
-                parent_action_id: str | None = None, publication: dict | None = None) -> dict:
+                parent_action_id: str | None = None, publication: dict | None = None,
+                authority_scope: str | None = None) -> dict:
     identity = actor_id or actor
     publication_digest = publication["digest"] if publication else None
     if action_id:
@@ -1028,6 +1042,7 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
         deny("BUDGET_DENIED", str(exc), 403)
 
     def authorize(conn):
+        require_current_dispatch_authority(conn, actor_id, authority_scope)
         if publication:
             publications.for_execution(conn, publication["kind"], publication["id"], publication["version"])
         if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
@@ -1293,7 +1308,7 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             result = invoke_tool(tool, call_args, actor, approval_granted=approval_granted,
                                  actor_id=state.get("actor_id"), action_id=child_id,
                                  job_id=state.get("job_id"), parent_action_id=parent_id,
-                                 publication=state.get("publication"))
+                                 publication=state.get("publication"), authority_scope=state.get("authority_scope"))
             if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:
                 deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)
         elif kind == "set":
@@ -1638,7 +1653,7 @@ def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agen
         deny("POLICY_DENIED", "Your agent key is not allowed to use this tool", 403, "Ask the owner for scope")
     return invoke_tool(tool, payload.args, agent["name"], approval_request_id=payload.approval_request_id,
                        actor_id=agent["id"], action_id=payload.action_id, job_id=payload.job_id,
-                       publication=publication)
+                       publication=publication, authority_scope=tool_id)
 
 
 def _requested_publication(kind: str, obj_id: str, payload: V2Invoke) -> dict | None:
@@ -1810,6 +1825,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
     limits = automation.get("policy", {}).get("usage_limits", {})
     def authorize(conn):
         nonlocal approval_granted, tool_snapshot
+        require_current_dispatch_authority(conn, agent["id"], f"automation:{automation_id}")
         if publication:
             tool_snapshot = publications.for_execution(conn, "automation", automation_id, publication["version"])["tools"]
         else:
@@ -1830,6 +1846,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         return journal.response(record)
     state = {"automation_id": automation_id, "tool_snapshot": tool_snapshot, "action_id": payload.action_id,
              "publication": publication,
+             "authority_scope": f"automation:{automation_id}",
              "job_id": payload.job_id, "actor_id": agent["id"], "args": payload.args, "vars": {}, "last": None,
              "results": [], "count": 0, "max_steps": int(limits.get("max_steps", 100)),
              "started_at": time.monotonic(),

@@ -149,7 +149,7 @@ def test_workflow_retry_block_never_repeats_uncertain_child(tool, monkeypatch):
         raise HTTPException(502, "reply lost after effect")
 
     monkeypatch.setattr(server, "_dispatch_tool", interrupted)
-    agent = {"id": "agent", "name": "Actor", "scopes": ["automation:flow"]}
+    agent, _ = control_plane.issue_agent_key("Actor", ["automation:flow"])
     payload = server.V2Invoke(action_id="flow-1")
     result = server.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"

@@ -20,7 +20,7 @@ def published(tmp_path, monkeypatch):
                                  "status": "active", "workflow": [{"type": "tool_call", "tool_id": "child"}]})
     pub.publish("tool", "child", 1)
     pub.publish("automation", "flow", 1)
-    agent = {"id": "caller", "name": "Caller", "scopes": ["child", "automation:flow"]}
+    agent, _ = cp.issue_agent_key("Caller", ["child", "automation:flow"])
     calls = []
     monkeypatch.setattr(server, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
     return tool, flow, agent, calls

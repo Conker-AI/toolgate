@@ -26,11 +26,11 @@ def paid(tmp_path, monkeypatch):
                 "prompt_template": "hello", "secret_ref": "GOOGLE_API_KEY", "max_tokens": 128}}
 
 
-def setup_budget(root="root", cap=10_000_000, cumulative=20_000_000):
+def setup_budget(root="root", cap=10_000_000, cumulative=20_000_000, actor="agent"):
     spending.configure(True, cumulative, min(cap, cumulative))
     spending.set_price(spending.MODEL, 1_000_000, 2_000_000,
                        time.time() + 3600, "https://provider.example/pricing")
-    return spending.create_job("agent", root, cap)["job_id"]
+    return spending.create_job(actor, root, cap)["job_id"]
 
 
 def invoke(paid, job=None, action="root", actor="agent", **kwargs):
@@ -144,7 +144,8 @@ def test_job_cannot_be_reused_by_another_agent_or_root(paid, monkeypatch, actor,
 
 
 def test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run(paid, monkeypatch):
-    job = setup_budget(cap=1_100_000)
+    agent, _ = control_plane.issue_agent_key("Actor", ["automation:flow"])
+    job = setup_budget(cap=1_100_000, actor=agent["id"])
     paid["policy"] = {"usage_limits": {"cooldown_seconds": 0, "max_per_minute": 60, "max_per_hour": 600}}
     control_plane.create_tool(paid)
     automation = {"id": "flow", "name": "Flow", "version": 1, "status": "active",
@@ -153,7 +154,6 @@ def test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run(paid,
                       {"type": "loop", "items": [1, 2], "max_iterations": 2, "steps": [{"type": "tool_call", "tool_id": "paid"}]}]}
     control_plane.create_automation(automation)
     calls = provider(monkeypatch)
-    agent = {"id": "agent", "name": "Actor", "scopes": ["automation:flow"]}
     payload = server.V2Invoke(action_id="root", job_id=job)
     result = server.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"

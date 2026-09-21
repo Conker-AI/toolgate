@@ -15,7 +15,7 @@ def flow(tmp_path, monkeypatch):
                           "authorization": "owner_confirmation", "workflow": [
                               {"type": "condition", "left": 1, "operator": "equals", "right": 1,
                                "then": [{"type": "tool_call", "tool_id": "child"}]}]})
-    agent = {"id": "caller", "name": "Caller", "scopes": ["automation:flow"]}
+    agent, _ = cp.issue_agent_key("Caller", ["automation:flow"])
     payload = server.V2Invoke(action_id="root")
     pending = server.run_automation("flow", payload, agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
