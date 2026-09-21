@@ -367,7 +367,7 @@ def _probe_control_plane() -> dict:
     return {"status": "ok"}
 
 
-def _probe_http(url: str, path: str) -> dict:
+def _probe_http(url: str, path: str, expected_service: str | None = None) -> dict:
     """Coarse reachability of one upstream. Never returns the host or the body."""
     try:
         response = httpx.get(f"{url.rstrip('/')}{path}", timeout=HEALTH_PROBE_TIMEOUT_SECONDS)
@@ -378,6 +378,18 @@ def _probe_http(url: str, path: str) -> dict:
         return {"status": "unavailable", "reason": type(exc).__name__}
     if response.status_code >= 500:
         return {"status": "degraded", "reason": "upstream_5xx"}
+    if not 200 <= response.status_code < 300:
+        return {"status": "unavailable", "reason": "upstream_http_error"}
+    if expected_service is not None:
+        try:
+            body = response.json()
+        except ValueError:
+            return {"status": "unavailable", "reason": "invalid_health_response"}
+        if (not isinstance(body, dict) or body.get("service") != expected_service
+                or body.get("status") not in {"ok", "degraded", "unavailable"}):
+            return {"status": "unavailable", "reason": "invalid_health_response"}
+        if body["status"] != "ok":
+            return {"status": body["status"], "reason": "upstream_reports_" + body["status"]}
     return {"status": "ok"}
 
 
@@ -412,7 +424,8 @@ def _run_dependency_checks() -> dict:
         checks["generation"] = {"status": "not_configured"}
 
     with ThreadPoolExecutor(max_workers=len(probes)) as pool:
-        results = {name: pool.submit(_probe_http, url, path) for name, (url, path) in probes.items()}
+        results = {name: pool.submit(_probe_http, url, path, "memorygate" if name == "memorygate" else None)
+                   for name, (url, path) in probes.items()}
     checks.update({name: future.result() for name, future in results.items()})
 
     failing = sorted(name for name, check in checks.items() if check["status"] not in _HEALTHY_STATUSES)

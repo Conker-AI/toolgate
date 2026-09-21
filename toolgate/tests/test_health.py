@@ -6,6 +6,7 @@ real socket, and the "down" cases point at a port nothing is listening on and
 at a database that genuinely cannot be opened.
 """
 import os
+import json
 import sqlite3
 import tempfile
 import threading
@@ -22,10 +23,12 @@ from toolgate.core import control_plane, vault
 
 class _AlwaysOk(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's naming
-        self.send_response(200)
-        self.send_header("Content-Length", "2")
+        body = getattr(self.server, "health_body", {"service": "memorygate", "status": "ok"})
+        encoded = json.dumps(body).encode()
+        self.send_response(getattr(self.server, "response_status", 200))
+        self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(encoded)
 
     def log_message(self, *args):
         pass
@@ -107,6 +110,31 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(body["degraded"], ["generation", "memorygate", "searxng"])
         self.assertEqual(body["checks"]["searxng"]["status"], "unavailable")
         self.assertEqual(body["checks"]["control_plane_db"]["status"], "ok")
+
+    def test_memorygate_degradation_is_not_hidden_by_http_success(self):
+        self.point_upstreams_at(self.upstream_url)
+        self.configure_memorygate()
+        self.upstream.health_body = {"service": "memorygate", "status": "degraded",
+                                     "checks": {"private": "do-not-forward-this"}}
+        body = self.health()
+        self.assertEqual({"status": "degraded", "reason": "upstream_reports_degraded"},
+                         body["checks"]["memorygate"])
+        self.assertNotIn("do-not-forward-this", json.dumps(body))
+
+    def test_http_errors_and_redirects_are_not_reported_as_healthy(self):
+        for code in (301, 401, 403, 404):
+            with self.subTest(code=code):
+                self.upstream.response_status = code
+                self.assertEqual({"status": "unavailable", "reason": "upstream_http_error"},
+                                 server._probe_http(self.upstream_url, "/health"))
+
+    def test_memorygate_probe_rejects_wrong_service_or_health_shape(self):
+        for body in ([], {"service": "other", "status": "ok"},
+                     {"service": "memorygate", "status": "surprise"}):
+            with self.subTest(body=body):
+                self.upstream.health_body = body
+                self.assertEqual({"status": "unavailable", "reason": "invalid_health_response"},
+                                 server._probe_http(self.upstream_url, "/health", "memorygate"))
 
     def test_health_reports_degraded_when_the_control_plane_database_is_gone(self):
         self.point_upstreams_at(self.upstream_url)
