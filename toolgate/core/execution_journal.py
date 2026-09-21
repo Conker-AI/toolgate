@@ -6,7 +6,7 @@ import json
 import re
 import time
 
-from toolgate.core import control_plane, spending
+from toolgate.core import container_admission, control_plane, spending
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS v2_actions (
@@ -49,6 +49,7 @@ class ExecutionConflict(ValueError):
 
 def initialize(conn) -> None:
     conn.executescript(SCHEMA)
+    conn.executescript(container_admission.SCHEMA)
     # Additive upgrade: legacy identities keep their exact original fingerprint.
     if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
         conn.execute("BEGIN IMMEDIATE")

@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from toolgate.core import (
+    container_admission,
     control_plane,
     legacy_archive,
     owner_channel,
@@ -1209,6 +1210,8 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
     def reserve(conn):
         if price:
             spending.reserve(conn, action_id, job_id, identity, parent_action_id, price)
+        if is_port or tool.get("execution", {}).get("type") == "container_control":
+            container_admission.reserve(conn, action_id, args.get("container_id"))
         if is_port:
             port_reviews.consume_in_transaction(conn, args["review_id"], identity, action_id)
 
@@ -1217,7 +1220,7 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
                                          tool.get("version"), job_id=job_id,
                                          parent_action_id=parent_action_id, authorize=authorize,
                                          publication_digest=publication_digest,
-                                         reserve=reserve if price or is_port else None)
+                                         reserve=reserve)
     except spending.BudgetDenied as exc:
         deny("BUDGET_DENIED", str(exc), 403)
     except (journal.ExecutionConflict, ValueError) as exc:

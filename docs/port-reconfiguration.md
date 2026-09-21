@@ -199,3 +199,20 @@ synthetic vault keys and simulated Docker. Existing warnings remain. Scope check
 and host effects are not a cross-process atomic transaction: competing ordinary
 lifecycle operations still need shared target admission to close their final
 check-to-dispatch race. Recovery and real-Docker verification remain open.
+
+## Shared mutation admission
+
+The ToolGate lifecycle/replacement race above is now closed at journal admission.
+Both executors reserve the full container ID in the same transaction that records
+dispatch and consumes approval. Conflicting pending/unknown actions reject before
+dispatch, including legacy reserved-tool records and claimed lifecycle aliases.
+A failed competing admission rolls back approval/review consumption. Completed
+actions release effective reservation through their immutable journal state;
+uncertain actions do not expire into permission to repeat effects.
+
+51 admission/boundary/journal/spending tests passed; four concurrency/admission
+tests were rerun after a test-fixture import correction. Tests cover both lifecycle-
+first and replacement-first contention, unknown ownership and completion. Scoped
+lint/shared undefined-name/diff checks pass. Existing warnings remain. This
+coordinates ToolGate actions, not independent operator Docker clients. Recovery
+of uncertain reservations remains part of the unfinished recovery interface.
