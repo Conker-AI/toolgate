@@ -3,13 +3,15 @@ import json
 import httpx
 import pytest
 
+from toolgate.core import control_plane
 from toolgate.executors import container_control as adapter
 
 CID = "a" * 64
 
 
 @pytest.fixture(autouse=True)
-def configured(monkeypatch):
+def configured(monkeypatch, tmp_path):
+    monkeypatch.setattr(control_plane, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", "/synthetic/docker.sock")
     monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", json.dumps([CID]))
 

@@ -176,3 +176,26 @@ All transport is simulated; real vault encryption uses synthetic keys/temporary
 storage. Existing deprecation warnings remain. No frontend wiring or deployment.
 Pi transport, retained-container recovery, replacement-target lineage and the
 real-Docker verification/retention work remain incomplete.
+
+## Managed replacement lineage
+
+Verified replacement IDs are recorded privately against the action, source and
+configured socket identity. Only a completed successful parent receipt activates
+the relationship. Target discovery follows replacement chains from the current
+operator allowlist and exposes the current leaf; retained ancestors are excluded.
+Removing an allowed root revokes its derived descendants unless the operator
+explicitly allows them separately. Changing socket configuration does not inherit
+another socket's replacement IDs. The digest binds the socket path, not a daemon
+cryptographic identity; operator control of that endpoint remains required.
+
+Pending/unknown replacement sources are omitted from ordinary target discovery and
+refused by lifecycle control. Distinct reviews cannot concurrently admit another
+replacement for the same source. Uncertain operations require recovery instead of
+automatic lease expiry. A new container from an uncertain parent is not granted
+ordinary management authority just because its creation ID was observed.
+
+63 lineage/lifecycle/executor/boundary/review checks pass with temporary SQLite,
+synthetic vault keys and simulated Docker. Existing warnings remain. Scope checks
+and host effects are not a cross-process atomic transaction: competing ordinary
+lifecycle operations still need shared target admission to close their final
+check-to-dispatch race. Recovery and real-Docker verification remain open.

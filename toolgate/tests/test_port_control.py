@@ -158,6 +158,7 @@ def test_network_name_rebound_to_other_identity_is_not_success(setup):
 @pytest.mark.parametrize("running", [True, False])
 @pytest.mark.parametrize("operation", ["edit", "remove"])
 def test_edit_and_remove_preserve_original_running_state(setup, running, operation):
+    journal.finish("change-1", {"code": "CANCELLED"})
     setup.action_id = "change-2"
     setup.original["State"].update(Running=running, Status="running" if running else "exited")
     ports = {"80/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8080"}]}

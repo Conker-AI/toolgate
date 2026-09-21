@@ -77,6 +77,13 @@ def save_in_transaction(conn, action_id, replacement):
     args = json.loads(parent["args"])
     if args.get("container_id") != replacement.preview["containerId"]:
         raise ReplacementError()
+    # Different reviews/action IDs must not replace the same source concurrently.
+    pending = conn.execute(
+        "SELECT 1 FROM v2_port_replacements p JOIN v2_actions a ON a.action_id=p.action_id"
+        " WHERE a.status IN ('dispatching','outcome_unknown') AND json_extract(a.args,'$.container_id')=?",
+        (replacement.preview["containerId"],)).fetchone()
+    if pending:
+        raise ReplacementError()
     payload = json.dumps({"action_id": action_id, "fingerprint": parent["fingerprint"],
                           "preview": replacement.preview, "body": replacement._body,
                           "source": replacement._source, "name": replacement.name}, allow_nan=False)

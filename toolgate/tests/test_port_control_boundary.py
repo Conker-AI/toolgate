@@ -9,7 +9,7 @@ from toolgate.api import server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import vault
-from toolgate.executors import port_control
+from toolgate.executors import container_control, port_control
 from toolgate.tests.test_port_control import Daemon
 from toolgate.tests.test_port_spec import CID, MAPPING
 
@@ -63,6 +63,7 @@ def test_full_review_owner_approval_real_executor_receipt_replay(setup):
     result = server.run_tool(TOOL, approved, agent)
     assert result["code"] == "OK", result
     assert result["result"]["result"]["originalRetained"]
+    assert container_control.targets() == [result["result"]["result"]["replacementId"]]
     count = len(daemon.requests)
     assert server.run_tool(TOOL, approved, agent) == result
     assert len(daemon.requests) == count

@@ -7,6 +7,7 @@ import time
 
 import httpx
 
+from toolgate.core import container_lineage
 from toolgate.core import port_replacements as records
 from toolgate.executors import container_control as docker
 from toolgate.executors.port_plan import _identity, _mapping
@@ -170,6 +171,9 @@ def execute(action_id, *, authorize, transport=None):
                 raise ReplacementUnknown()
             records.observed(action_id, ordinal, reference=new_id)
             claimed = False
+            if docker._configuration(cid) != configuration:
+                raise docker.ControlError("configuration_changed")
+            container_lineage.record(action_id, cid, new_id, configuration[0])
             return {"containerId": cid, "replacementId": new_id, "snapshotImage": snapshot,
                     "originalRetained": True, "outcome": "observed", "dispatched": True,
                     "bindings": normalized}

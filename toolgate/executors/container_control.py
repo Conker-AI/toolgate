@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import time
 
 import httpx
+
+from toolgate.core import container_lineage
 
 MAX_BYTES = 1024 * 1024
 DEADLINE_SECONDS = 25.0
@@ -29,6 +32,7 @@ class ControlError(RuntimeError):
             "invalid_response": "Container inspection returned an invalid response.",
             "response_limit": "Container inspection exceeded its response limit.",
             "deadline": "Container control exceeded its deadline before dispatch.",
+            "replacement_pending": "Container replacement is pending or requires recovery.",
         }[code])
 
     @property
@@ -67,6 +71,10 @@ def _configuration(container_id=None):
             raise ValueError()
     except (ValueError, RecursionError):
         raise ControlError("invalid_configuration") from None
+    try:
+        ids = container_lineage.targets(socket, ids)
+    except (ValueError, KeyError, TypeError, AttributeError, OSError, sqlite3.Error):
+        raise ControlError("invalid_configuration") from None
     if container_id is not None and container_id not in ids:
         raise ControlError("not_managed")
     return socket, frozenset(ids)
@@ -75,7 +83,7 @@ def _configuration(container_id=None):
 def targets():
     """Configuration only: no daemon call, socket path, or inferred live status."""
     _, identities = _configuration()
-    return sorted(identities)
+    return sorted(identity for identity in identities if not container_lineage.busy(identity))
 
 
 def _pairs(pairs):
@@ -132,6 +140,8 @@ def control(container_id, action, *, transport=None):
             or not isinstance(action, str) or action not in {"start", "stop", "restart"}):
         raise ControlError("invalid_arguments")
     configuration = _configuration(container_id)
+    if container_lineage.busy(container_id):
+        raise ControlError("replacement_pending")
     dispatched = False
     deadline = time.monotonic() + DEADLINE_SECONDS
     try:
@@ -143,6 +153,8 @@ def control(container_id, action, *, transport=None):
             before = _inspect(client, container_id, deadline)
             if _configuration(container_id) != configuration:
                 raise ControlError("configuration_changed")
+            if container_lineage.busy(container_id):
+                raise ControlError("replacement_pending")
             if time.monotonic() > deadline:
                 raise ControlError("deadline")
             dispatched = True
