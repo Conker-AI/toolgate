@@ -29,6 +29,7 @@ from toolgate.core import (
     port_finalization,
     port_reviews,
     publications,
+    recovery_journal,
     spending,
     spending_allowances,
     vault,
@@ -117,6 +118,8 @@ def require_owner(x_toolgate_owner_key: str | None = Header(None, alias="X-ToolG
 
 @app.on_event("startup")
 def startup():
+    with control_plane._conn() as conn:
+        recovery_journal.assert_not_held(conn)
     control_plane.purge_legacy_state()
     try:
         legacy_archive.migrate()

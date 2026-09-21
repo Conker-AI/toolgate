@@ -6,7 +6,7 @@ import json
 import re
 import time
 
-from toolgate.core import container_admission, control_plane, spending
+from toolgate.core import container_admission, control_plane, spending, recovery_journal
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS v2_actions (
@@ -49,6 +49,7 @@ class ExecutionConflict(ValueError):
 
 def initialize(conn) -> None:
     conn.executescript(SCHEMA)
+    conn.executescript(recovery_journal.SCHEMA)
     conn.executescript(container_admission.SCHEMA)
     # Additive upgrade: legacy identities keep their exact original fingerprint.
     if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
@@ -83,7 +84,7 @@ def existing(action_id: str, subject_type: str, subject_id: str, args: dict, act
     expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest)
     with control_plane._conn() as conn:
         initialize(conn)
-        row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
+        row = recovery_journal.lookup(conn, action_id)
         if row and row["fingerprint"] != expected:
             raise ExecutionConflict("This action_id is already bound to a different invocation")
         return _row(row) if row else None
@@ -102,11 +103,13 @@ def begin(action_id: str, subject_type: str, subject_id: str, args: dict, actor_
     with control_plane._conn() as conn:
         initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
+        row = recovery_journal.lookup(conn, action_id)
         if row:
             if row["fingerprint"] != expected:
                 raise ExecutionConflict("This action_id is already bound to a different invocation")
             return _row(row), False
+        if conn.execute("SELECT 1 FROM v2_recovery_hold").fetchone():
+            raise ExecutionConflict("Recovery is held; new effects are disabled.")
         if parent_action_id:
             parent = conn.execute("SELECT * FROM v2_actions WHERE action_id=?",
                                   (parent_action_id,)).fetchone()
@@ -132,6 +135,7 @@ def finish(action_id: str, response: dict, reconcile=None) -> dict:
     with control_plane._conn() as conn:
         initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
+        recovery_journal.assert_not_held(conn)
         row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
         if row["status"] == "completed":
             return _row(row)
@@ -145,6 +149,7 @@ def finish(action_id: str, response: dict, reconcile=None) -> dict:
 def unknown(action_id: str) -> None:
     with control_plane._conn() as conn:
         initialize(conn)
+        recovery_journal.assert_not_held(conn)
         conn.execute("UPDATE v2_actions SET status='outcome_unknown',updated_at=?"
                      " WHERE action_id=? AND status='dispatching'", (time.time(), action_id))
 
@@ -152,6 +157,7 @@ def unknown(action_id: str) -> None:
 def recover_interrupted() -> int:
     with control_plane._conn() as conn:
         initialize(conn)
+        recovery_journal.assert_not_held(conn)
         return conn.execute("UPDATE v2_actions SET status='outcome_unknown',updated_at=?"
                             " WHERE status='dispatching'", (time.time(),)).rowcount
 
@@ -159,15 +165,18 @@ def recover_interrupted() -> int:
 def get(action_id: str) -> dict | None:
     with control_plane._conn() as conn:
         initialize(conn)
-        row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
+        row = recovery_journal.lookup(conn, action_id)
         return _row(row) if row else None
 
 
 def list_actions(limit: int = 100) -> list[dict]:
     with control_plane._conn() as conn:
         initialize(conn)
-        return [_row(row) for row in conn.execute(
-            "SELECT * FROM v2_actions ORDER BY created_at DESC LIMIT ?", (limit,))]
+        records = {row["action_id"]: dict(row) for row in conn.execute(
+            "SELECT * FROM v2_actions ORDER BY created_at DESC LIMIT ?", (limit,))}
+        records.update({row["action_id"]: json.loads(row["record"]) for row in conn.execute(
+            "SELECT * FROM v2_recovery_receipts ORDER BY json_extract(record, '$.created_at') DESC LIMIT ?", (limit,))})
+        return [_row(row) for row in sorted(records.values(), key=lambda row: row["created_at"], reverse=True)[:limit]]
 
 
 def response(record: dict) -> dict:
