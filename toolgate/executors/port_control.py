@@ -11,6 +11,25 @@ from toolgate.core import port_replacements as records
 from toolgate.executors import container_control as docker
 from toolgate.executors.port_plan import _identity, _mapping
 from toolgate.executors.port_preview import _bindings
+from toolgate.executors.port_spec import prepare
+
+
+def inspect_review(container_id, operation, *, mapping=None, original=None, transport=None):
+    configuration = docker._configuration(container_id)
+    deadline = time.monotonic() + docker.DEADLINE_SECONDS
+    try:
+        with httpx.Client(base_url="http://docker", trust_env=False, follow_redirects=False,
+                          transport=transport or httpx.HTTPTransport(uds=configuration[0]),
+                          timeout=httpx.Timeout(12.0, connect=2.0),
+                          headers={"Accept-Encoding": "identity"}) as client:
+            inspection = _inspect(client, container_id, deadline)
+        if docker._configuration(container_id) != configuration:
+            raise docker.ControlError("configuration_changed")
+        replacement = prepare(container_id, inspection, operation, mapping=mapping, original=original)
+        replacement.preview["execution"] = "owner_approval_required"
+        return replacement
+    except (httpx.HTTPError, OSError):
+        raise docker.ControlError("unavailable") from None
 
 
 class ReplacementUnknown(RuntimeError):

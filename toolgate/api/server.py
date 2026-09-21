@@ -25,6 +25,7 @@ from toolgate.core import (
     control_plane,
     legacy_archive,
     owner_channel,
+    port_reviews,
     publications,
     spending,
     vault,
@@ -36,7 +37,8 @@ from toolgate.core.public_https import (
     public_url,
     resolve_public,
 )
-from toolgate.executors import container_control, filesystem_inventory, process_control, research, system_inventory
+from toolgate.executors import container_control, filesystem_inventory, port_control, process_control, research, system_inventory
+from toolgate.executors.port_plan import PlanError
 
 SERVICE_VERSION = "0.3.0"
 
@@ -132,6 +134,18 @@ def startup():
 
 def ensure_builtin_system_capabilities() -> None:
     """Register fixed operations without changing existing owner policy or key scopes."""
+    if not control_plane.get("tool", "system.port-control"):
+        control_plane.create_tool({
+            "id": "system.port-control", "name": "Reviewed port replacement",
+            "description": "Apply one inspected port change by replacing a managed container, retaining the original for recovery. Requires exact owner approval.",
+            "category": "system", "authorization": "owner_confirmation", "status": "active",
+            "inputs": [{"name": "container_id", "type": "string", "required": True},
+                       {"name": "review_id", "type": "string", "required": True}],
+            "outputs": [{"name": "observation", "type": "object"}],
+            "execution": {"type": "port_control"},
+            "policy": {"usage_limits": {"max_per_minute": 3, "cooldown_seconds": 0,
+                        "max_per_hour": 12, "max_runtime_seconds": 180}},
+        })
     if not control_plane.get("tool", "system.files-list"):
         control_plane.create_tool({
             "id": "system.files-list", "name": "Directory listing",
@@ -554,6 +568,22 @@ class V2Publish(BaseModel):
     expected_version: StrictInt = Field(ge=1)
 
 
+class PortMapping(BaseModel):
+    model_config = {"extra": "forbid"}
+    hostAddress: str = Field(min_length=1, max_length=45)
+    hostPort: StrictInt = Field(ge=1, le=65535)
+    containerPort: StrictInt = Field(ge=1, le=65535)
+    protocol: Literal["tcp", "udp"]
+
+
+class PortReviewRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    container_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    operation: Literal["create", "edit", "remove"]
+    mapping: PortMapping | None = None
+    original: PortMapping | None = None
+
+
 class V2Settings(BaseModel):
     generation_model: str = "qwen3:4b"
     event_retention_days: int = 90
@@ -584,6 +614,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "filesystem_inventory",
     "container_control",
     "process_control",
+    "port_control",
 }
 AUTHORIZATION_MODES = {"auto", "ai_review", "owner_confirmation", "blocked"}
 CAPABILITY_STATUSES = {"draft", "active", "disabled"}
@@ -677,10 +708,20 @@ def tool_definition_errors(tool: dict) -> list[str]:
         errors.append("system.container-control is reserved for managed container lifecycle")
     if tool.get("id") == "system.process-control" and execution != {"type": "process_control"}:
         errors.append("system.process-control is reserved for managed service lifecycle")
+    if tool.get("id") == "system.port-control" and execution != {"type": "port_control"}:
+        errors.append("system.port-control is reserved for reviewed port replacement")
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}")
         return errors
-    if execution["type"] in {"container_control", "process_control"}:
+    if execution["type"] == "port_control":
+        if (execution != {"type": "port_control"} or tool.get("id") != "system.port-control"
+                or tool.get("authorization") != "owner_confirmation"):
+            errors.append("Port replacement requires its reserved executor and owner confirmation")
+        if input_names != {"container_id", "review_id"} or any(
+                field.get("type") != "string" or field.get("required") is not True
+                for field in inputs if isinstance(field, dict)):
+            errors.append("Port replacement requires container_id and review_id strings")
+    elif execution["type"] in {"container_control", "process_control"}:
         kind = execution["type"]
         target = "container_id" if kind == "container_control" else "service_id"
         if execution != {"type": kind}:
@@ -1115,6 +1156,20 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
         control_plane.event("validation_failed", "warning", "tool", tool["id"], actor, {"errors": errors})
         deny("VALIDATION_ERROR", "; ".join(errors), 422, "Run `toolgate tool <name> info`")
     authorization = tool.get("authorization", "auto")
+    is_port = tool.get("id") == "system.port-control" or tool.get("execution", {}).get("type") == "port_control"
+    port_review = None
+    if is_port:
+        if (tool.get("id") != "system.port-control" or tool.get("execution") != {"type": "port_control"}
+                or authorization != "owner_confirmation" or approval_granted
+                or set(args) != {"container_id", "review_id"}):
+            deny("POLICY_DENIED", "Port replacement requires its exact review and direct owner confirmation", 403)
+        try:
+            port_review = port_reviews.get(args["review_id"], identity)
+        except port_reviews.ReviewError:
+            deny("REVIEW_INVALID", "Create a current port-change review first", 409)
+        if (port_review["expired"] or port_review["consumed"]
+                or port_review["preview"]["containerId"] != args["container_id"]):
+            deny("REVIEW_INVALID", "Create a current port-change review for this container", 409)
     if authorization == "blocked":
         control_plane.event("execution_blocked", "warning", "tool", tool["id"], actor, {"code": "POLICY_DENIED"})
         deny("POLICY_DENIED", "This tool is permanently blocked by its owner policy")
@@ -1123,7 +1178,8 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
             expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
             request = control_plane.create_verification_request(
                 f"Run {tool['name']}",
-                "Owner confirmation is required for this exact immutable tool invocation.",
+                ("Replace the container using this exact inspected port change: " + json.dumps(port_review["preview"]))
+                if is_port else "Owner confirmation is required for this exact immutable tool invocation.",
                 actor, "tool", tool["id"], args, tool.get("version"), expiry, actor_id,
                 publication_digest=publication_digest)
             return {"code": "CONFIRMATION_REQUIRED", "message": "This exact action is queued for owner review.",
@@ -1150,14 +1206,18 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
                 publication_digest=publication_digest)
             if not approved:
                 deny("APPROVAL_INVALID", reason, 409, "Request a new confirmation for this exact action")
+    def reserve(conn):
+        if price:
+            spending.reserve(conn, action_id, job_id, identity, parent_action_id, price)
+        if is_port:
+            port_reviews.consume_in_transaction(conn, args["review_id"], identity, action_id)
+
     try:
         record, dispatch = journal.begin(action_id, "tool", tool["id"], args, identity,
                                          tool.get("version"), job_id=job_id,
                                          parent_action_id=parent_action_id, authorize=authorize,
                                          publication_digest=publication_digest,
-                                         reserve=(lambda conn: spending.reserve(
-                                             conn, action_id, job_id, identity, parent_action_id, price))
-                                         if price else None)
+                                         reserve=reserve if price or is_port else None)
     except spending.BudgetDenied as exc:
         deny("BUDGET_DENIED", str(exc), 403)
     except (journal.ExecutionConflict, ValueError) as exc:
@@ -1165,7 +1225,22 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
     if not dispatch:
         return journal.response(record)
     try:
-        result = _dispatch_tool(tool, args)
+        if is_port:
+            def step_authority(conn):
+                require_current_dispatch_authority(conn, actor_id, authority_scope)
+                if publication:
+                    publications.for_execution(conn, publication["kind"], publication["id"], publication["version"])
+                row = conn.execute("SELECT body FROM v2_objects WHERE kind='tool' AND id='system.port-control'").fetchone()
+                current = json.loads(row["body"]) if row else {}
+                if (current.get("status") != "active" or current.get("authorization") != "owner_confirmation"
+                        or current.get("execution") != {"type": "port_control"}):
+                    deny("POLICY_DENIED", "Port replacement policy changed", 403)
+            try:
+                result = {"ok": True, "result": port_control.execute(action_id, authorize=step_authority)}
+            except container_control.ControlError as exc:
+                result = {"ok": False, "error": str(exc), "error_code": exc.code}
+        else:
+            result = _dispatch_tool(tool, args)
     except Exception:
         journal.unknown(action_id)
         return journal.response(journal.get(action_id))
@@ -1199,6 +1274,8 @@ def _spending_preflight(tool: dict, args: dict) -> dict | None:
 def _dispatch_tool(tool: dict, args: dict) -> dict:
     # v2 executes only typed, declared executors. Arbitrary Python is intentionally unsupported.
     executor_type = tool.get("execution", {}).get("type")
+    if tool.get("id") == "system.port-control" or executor_type == "port_control":
+        return {"ok": False, "error": "Port replacement requires reviewed journal admission."}
     if tool.get("id") == "system.files-list" and tool.get("execution") != {"type": "filesystem_inventory"}:
         return {"ok": False, "error": "The reserved directory listing definition is invalid.",
                 "error_code": "invalid_files_definition"}
@@ -1829,6 +1906,45 @@ def agent_tool_info(tool_id: str, agent: dict = Depends(require_agent)):
     if not tool or tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):
         raise HTTPException(404, "tool not found or not permitted")
     return tool
+
+
+def _port_review_authority(agent):
+    tool = control_plane.get("tool", "system.port-control")
+    if (not control_plane.is_scoped(agent, "system.port-control") or not tool
+            or tool.get("status") != "active" or tool.get("authorization") != "owner_confirmation"
+            or tool.get("execution") != {"type": "port_control"}):
+        deny("POLICY_DENIED", "Active port replacement scope is required", 403)
+    with control_plane._conn() as conn:
+        require_current_dispatch_authority(conn, agent["id"], "system.port-control")
+    return tool
+
+
+@app.post("/v2/agent/system/port-reviews")
+def create_port_review(payload: PortReviewRequest, agent: dict = Depends(require_agent)):
+    tool = _port_review_authority(agent)
+    enforce_usage_limits("tool", tool, "port_review_created")
+    try:
+        replacement = port_control.inspect_review(
+            payload.container_id, payload.operation,
+            mapping=payload.mapping.model_dump() if payload.mapping else None,
+            original=payload.original.model_dump() if payload.original else None,
+        )
+        _port_review_authority(agent)
+        result = port_reviews.create(agent["id"], replacement)
+    except (container_control.ControlError, PlanError, port_reviews.ReviewError) as exc:
+        deny("REVIEW_UNAVAILABLE", str(exc), 422)
+    control_plane.event("port_review_created", "info", "tool", "system.port-control", agent["name"])
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v2/agent/system/port-reviews/{review_id}")
+def get_port_review(review_id: str, agent: dict = Depends(require_agent)):
+    _port_review_authority(agent)
+    try:
+        result = port_reviews.get(review_id, agent["id"])
+    except port_reviews.ReviewError:
+        deny("REVIEW_UNAVAILABLE", "Port review is unavailable", 404)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/v2/agent/system/targets")

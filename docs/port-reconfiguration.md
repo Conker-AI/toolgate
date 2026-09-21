@@ -152,3 +152,27 @@ encryption. These internal helpers are not yet connected to scoped HTTP routes
 or the callable tool; ordinary approval integration is still required. Expired
 encrypted reviews are retained by this initial journal schema; lifecycle/retention
 policy must be reconciled with the broader recovery work before completion.
+
+## ToolGate API integration
+
+The previous internal-only limitation is superseded: scoped
+`POST /v2/agent/system/port-reviews` now inspects and stores an exact review;
+`GET /v2/agent/system/port-reviews/{id}` returns its originating actor's public
+preview with no-store headers. Both require active `system.port-control` scope and
+policy. This permission does not provision a Docker target or alter existing scopes.
+
+Invoke the reserved `system.port-control` tool with `container_id`, `review_id`
+and a stable action ID. Existing owner confirmation displays the actual mapping
+preview. Approval consumption, review consumption and private action payload
+attachment share the journal transaction. The executor rechecks live authority and
+published-definition availability per step. Reserved definition/dispatch guards
+prevent removing confirmation or substituting another executor. Inherited workflow
+approval is intentionally insufficient: this path requires direct exact approval.
+Receipt replay uses the existing journal and never repeats a replacement.
+
+67 boundary/executor/review/journal/publication/container-boundary checks passed;
+the seven new boundary checks were rerun after the final preview-state correction.
+All transport is simulated; real vault encryption uses synthetic keys/temporary
+storage. Existing deprecation warnings remain. No frontend wiring or deployment.
+Pi transport, retained-container recovery, replacement-target lineage and the
+real-Docker verification/retention work remain incomplete.
