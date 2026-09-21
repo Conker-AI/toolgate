@@ -66,19 +66,24 @@ def save(action_id, replacement):
     with cp._conn() as conn:
         _initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
-        parent = _parent(conn, action_id, active=True)
-        if conn.execute("SELECT 1 FROM v2_port_replacements WHERE action_id=?", (action_id,)).fetchone():
-            raise ReplacementError()
-        args = json.loads(parent["args"])
-        if args.get("container_id") != replacement.preview["containerId"]:
-            raise ReplacementError()
-        payload = json.dumps({"action_id": action_id, "fingerprint": parent["fingerprint"],
-                              "preview": replacement.preview, "body": replacement._body,
-                              "source": replacement._source, "name": replacement.name}, allow_nan=False)
-        if len(payload.encode()) > 2 * 1024 * 1024:
-            raise ReplacementError()
-        sealed = vault._encrypt(payload)
-        conn.execute("INSERT INTO v2_port_replacements VALUES (?,?)", (action_id, sealed))
+        save_in_transaction(conn, action_id, replacement)
+
+
+def save_in_transaction(conn, action_id, replacement):
+    """Attach payload atomically with parent admission/review consumption."""
+    parent = _parent(conn, action_id, active=True)
+    if conn.execute("SELECT 1 FROM v2_port_replacements WHERE action_id=?", (action_id,)).fetchone():
+        raise ReplacementError()
+    args = json.loads(parent["args"])
+    if args.get("container_id") != replacement.preview["containerId"]:
+        raise ReplacementError()
+    payload = json.dumps({"action_id": action_id, "fingerprint": parent["fingerprint"],
+                          "preview": replacement.preview, "body": replacement._body,
+                          "source": replacement._source, "name": replacement.name}, allow_nan=False)
+    if len(payload.encode()) > 2 * 1024 * 1024:
+        raise ReplacementError()
+    sealed = vault._encrypt(payload)
+    conn.execute("INSERT INTO v2_port_replacements VALUES (?,?)", (action_id, sealed))
 
 
 def load_private(action_id):

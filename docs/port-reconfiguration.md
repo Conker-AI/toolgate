@@ -131,3 +131,24 @@ with real temporary SQLite/encryption. Coverage includes create/edit/remove,
 running/stopped preservation, every mutation reply lost, revocation between steps,
 stale source and wrong port/network observations. Scoped lint passes. No actual
 Docker daemon was contacted; Linux deployment fidelity remains unverified.
+
+## Exact review admission
+
+`core.port_reviews` stores a five-minute, actor-bound snapshot of the exact prepared
+change. A random review ID references an encrypted private payload and a separate
+public mapping preview. Preview creation does not approve or run the change.
+Review identity/expiry/content are immutable. Cross-actor lookup fails; expiry,
+wrong keys, reused reviews and target mismatches prevent admission.
+
+`consume_in_transaction` is intended for the existing execution journal's reserve
+callback, after normal owner verification and parent insertion. It atomically
+claims the review and attaches the private replacement payload to that action.
+Failure rolls back both claims; concurrent action IDs cannot consume one review.
+The executor still reinspects source configuration before effects. A consumed
+review is never reused to recover an uncertain operation.
+
+18 focused review/private-record tests passed using temporary SQLite and real
+encryption. These internal helpers are not yet connected to scoped HTTP routes
+or the callable tool; ordinary approval integration is still required. Expired
+encrypted reviews are retained by this initial journal schema; lifecycle/retention
+policy must be reconciled with the broader recovery work before completion.
