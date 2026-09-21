@@ -687,6 +687,7 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
                 raise ValueError("Publication identity changed")
             binding["publication_digest"] = publication_digest
             binding["child_tools"] = child_bindings(publication["tools"])
+            binding["child_automations"] = publications.automation_bindings(publication)
         elif subject_type == "automation":
             binding["child_tools"] = child_bindings(automation_tool_snapshot(conn, subject_id, version))
         record = _insert_request(conn, {
@@ -750,6 +751,8 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
             return False, str(exc)
         if publication["digest"] != publication_digest or binding.get("child_tools") != child_bindings(publication["tools"]):
             return False, "Publication identity changed; request fresh confirmation"
+        if binding.get("child_automations", {}) != publications.automation_bindings(publication):
+            return False, "Nested publication identities changed; request fresh confirmation"
     elif subject_type == "automation":
         try:
             current = child_bindings(automation_tool_snapshot(conn, subject_id, version))

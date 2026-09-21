@@ -980,7 +980,7 @@ def _shape_tool_result(tool: dict, result: dict) -> dict:
     return result
 
 
-def require_current_dispatch_authority(conn, actor_id: str | None, capability: str | None) -> None:
+def require_current_dispatch_authority(conn, actor_id: str | None, capability: str | tuple[str, ...] | None) -> None:
     """Called inside the journal writer transaction, before consuming or dispatching."""
     settings = conn.execute("SELECT * FROM v2_objects WHERE kind='settings' AND id='control-plane'").fetchone()
     if settings and control_plane._row(settings).get("lockdown"):
@@ -989,7 +989,8 @@ def require_current_dispatch_authority(conn, actor_id: str | None, capability: s
         row = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (actor_id,)).fetchone()
         if not row or row["status"] != "active":
             deny("AGENT_REVOKED", "The originating agent key is no longer active", 403)
-        if not control_plane.is_scoped(control_plane.public_agent_key(row), capability):
+        required = (capability,) if isinstance(capability, str) else capability
+        if not all(control_plane.is_scoped(control_plane.public_agent_key(row), scope) for scope in required):
             deny("POLICY_DENIED", "The originating agent no longer has the required scope", 403)
 
 
@@ -997,7 +998,7 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
                 approval_granted: bool = False, actor_id: str | None = None,
                 action_id: str | None = None, job_id: str | None = None,
                 parent_action_id: str | None = None, publication: dict | None = None,
-                authority_scope: str | None = None) -> dict:
+                authority_scope: str | tuple[str, ...] | None = None) -> dict:
     identity = actor_id or actor
     publication_digest = publication["digest"] if publication else None
     if action_id:
@@ -1128,7 +1129,7 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
 
 
 SUPPORTED_WORKFLOW_BLOCKS = {
-    "tool_call", "condition", "switch", "loop", "calculation", "set",
+    "tool_call", "automation_call", "condition", "switch", "loop", "calculation", "set",
     "delay", "retry", "notification", "return",
 }
 
@@ -1145,6 +1146,16 @@ def workflow_definition_errors(workflow: list, depth: int = 0) -> list[str]:
             errors.append(f"{prefix} has an unsupported block type")
             continue
         kind = step["type"]
+        if kind == "automation_call":
+            try:
+                publications.nested_key(step)
+            except publications.PublicationInvalid as exc:
+                errors.append(f"{prefix}: {exc}")
+            if not isinstance(step.get("args", {}), dict):
+                errors.append(f"{prefix} args must be an object")
+            if "publication_digest" in step and (not isinstance(step["publication_digest"], str)
+                    or not re.fullmatch(r"[a-f0-9]{64}", step["publication_digest"])):
+                errors.append(f"{prefix} publication_digest must be a SHA-256 digest")
         if kind == "tool_call":
             if not step.get("tool_id"):
                 errors.append(f"{prefix} needs tool_id")
@@ -1202,23 +1213,24 @@ def workflow_definition_errors(workflow: list, depth: int = 0) -> list[str]:
     return errors
 
 
-def workflow_tool_ids(workflow: list) -> list[str]:
+def workflow_tool_ids(workflow: list, block_type: str = "tool_call") -> list[str]:
     ids = []
     if not isinstance(workflow, list):
         return ids
     for step in workflow:
         if not isinstance(step, dict):
             continue
-        if step.get("type") == "tool_call" and isinstance(step.get("tool_id"), str):
-            ids.append(step["tool_id"])
+        field = "tool_id" if block_type == "tool_call" else "automation_id"
+        if step.get("type") == block_type and isinstance(step.get(field), str):
+            ids.append(step[field])
         for key in ("steps", "then", "else", "default"):
-            ids.extend(workflow_tool_ids(step.get(key, [])))
+            ids.extend(workflow_tool_ids(step.get(key, []), block_type))
         if isinstance(step.get("step"), dict):
-            ids.extend(workflow_tool_ids([step["step"]]))
+            ids.extend(workflow_tool_ids([step["step"]], block_type))
         cases = step.get("cases", {})
         if isinstance(cases, dict):
             for branch in cases.values():
-                ids.extend(workflow_tool_ids(branch))
+                ids.extend(workflow_tool_ids(branch, block_type))
     return ids
 
 
@@ -1285,11 +1297,12 @@ def _workflow_compare(actual, operator: str, expected) -> bool:
 
 def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: bool):
     for step in steps:
-        state["count"] += 1
-        if state["count"] > state["max_steps"]:
-            deny("POLICY_DENIED", "Automation exceeded its total step ceiling")
-        if time.monotonic() - state["started_at"] > state["runtime_ceiling"]:
-            deny("POLICY_DENIED", "Automation exceeded its runtime ceiling")
+        for frame in (state, *state.get("ancestors", ())):
+            frame["count"] += 1
+            if frame["count"] > frame["max_steps"]:
+                deny("POLICY_DENIED", "Automation exceeded its shared ancestor step ceiling")
+            if time.monotonic() - frame["started_at"] > frame["runtime_ceiling"]:
+                deny("POLICY_DENIED", "Automation exceeded its shared ancestor runtime ceiling")
         kind = step["type"]
         result = None
         if kind == "tool_call":
@@ -1308,9 +1321,12 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             result = invoke_tool(tool, call_args, actor, approval_granted=approval_granted,
                                  actor_id=state.get("actor_id"), action_id=child_id,
                                  job_id=state.get("job_id"), parent_action_id=parent_id,
-                                 publication=state.get("publication"), authority_scope=state.get("authority_scope"))
+                                 publication=state.get("root_publication", state.get("publication")),
+                                 authority_scope=state.get("authority_scope"))
             if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:
                 deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)
+        elif kind == "automation_call":
+            result = _invoke_nested_automation(step, state, actor, approval_granted)
         elif kind == "set":
             state["vars"][step.get("name", "value")] = _workflow_value(step.get("value"), state)
             result = {"code": "VALUE_SET", "name": step.get("name", "value")}
@@ -1397,6 +1413,56 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
         state["last"] = result
         state["results"].append({"type": kind, "result": result})
     return None
+
+
+def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_granted: bool) -> dict:
+    publication = (state.get("publication") or {}).get("automations", {}).get(publications.nested_key(step))
+    if not publication:
+        deny("PUBLICATION_REQUIRED", "Nested calls require a pinned publication", 422)
+    definition = publication["definition"]
+    if definition.get("authorization", "auto") != "auto" and not approval_granted:
+        deny("POLICY_DENIED", "Nested automation requires root owner confirmation", 403)
+    args = _workflow_value(step.get("args", {}), state)
+    errors = control_plane.validate_inputs(definition.get("inputs", []), args)
+    if errors:
+        deny("VALIDATION_ERROR", "; ".join(errors), 422)
+    action_id = "child_" + hashlib.sha256(f"{state['action_id']}:{state['count']}".encode()).hexdigest()
+    enforce_usage_limits("automation", definition, "automation_executed")
+    root_publication = state.get("root_publication", state["publication"])
+    def authorize(conn):
+        require_current_dispatch_authority(conn, state["actor_id"], state["authority_scope"])
+        publications.for_execution(conn, root_publication["kind"], root_publication["id"], root_publication["version"])
+    record, dispatch = journal.begin(action_id, "automation", definition["id"], args, state["actor_id"],
+                                    definition["version"], job_id=state.get("job_id"),
+                                    parent_action_id=state["action_id"], authorize=authorize,
+                                    publication_digest=publication["digest"])
+    if not dispatch:
+        result = journal.response(record)
+        if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:
+            deny("OUTCOME_UNKNOWN", "Nested dispatch is uncertain; this workflow is held", 409)
+        return result
+    limits = definition.get("policy", {}).get("usage_limits", {})
+    nested = {"automation_id": definition["id"], "tool_snapshot": publication["tools"],
+              "publication": publication, "root_publication": root_publication,
+              "authority_scope": state["authority_scope"], "action_id": action_id,
+              "job_id": state.get("job_id"), "actor_id": state["actor_id"], "args": args,
+              "vars": {}, "last": None, "results": [], "count": 0,
+              "ancestors": (state, *state.get("ancestors", ())),
+              "max_steps": int(limits.get("max_steps", 100)), "started_at": time.monotonic(),
+              "runtime_ceiling": min(int(limits.get("max_runtime_seconds", 30) or 30), 120)}
+    try:
+        final = _run_workflow_steps(definition.get("workflow", []), nested, actor, approval_granted)
+    except Exception:  # noqa: BLE001 - hold any incomplete nested dispatch; never retry it.
+        journal.unknown(action_id)
+        deny("OUTCOME_UNKNOWN", "Nested workflow is incomplete; reconcile its receipt", 409)
+    envelope = {"code": "OK", "message": "Nested automation completed", "result": final,
+                "steps": nested["results"], "variables": nested["vars"],
+                "publication": {"kind": "automation", "id": definition["id"],
+                                "version": publication["version"], "digest": publication["digest"]}}
+    record = journal.finish(action_id, envelope)
+    control_plane.event("automation_executed", "info", "automation", definition["id"], actor,
+                        {"steps": nested["count"], "version": definition["version"]})
+    return journal.response(record)
 
 
 @app.get("/v2/status")
@@ -1790,6 +1856,12 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         deny("TOOL_UNAVAILABLE", "Automation is not active", 404)
     if not control_plane.is_scoped(agent, f"automation:{automation_id}"):
         deny("POLICY_DENIED", "Your agent key is not allowed to run this automation")
+    if not publication and workflow_tool_ids(automation.get("workflow", []), "automation_call"):
+        deny("PUBLICATION_REQUIRED", "Nested automation calls require an explicit published root version", 422)
+    authority_scope = (tuple(dict.fromkeys(f"automation:{member['id']}" for member in publications.members(publication)))
+                       if publication else (f"automation:{automation_id}",))
+    if not all(control_plane.is_scoped(agent, scope) for scope in authority_scope):
+        deny("POLICY_DENIED", "The agent needs every pinned nested automation scope", 403)
     if not payload.action_id:
         deny("ACTION_ID_REQUIRED", "Supply a stable action_id for this workflow run", 422)
     try:
@@ -1825,7 +1897,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
     limits = automation.get("policy", {}).get("usage_limits", {})
     def authorize(conn):
         nonlocal approval_granted, tool_snapshot
-        require_current_dispatch_authority(conn, agent["id"], f"automation:{automation_id}")
+        require_current_dispatch_authority(conn, agent["id"], authority_scope)
         if publication:
             tool_snapshot = publications.for_execution(conn, "automation", automation_id, publication["version"])["tools"]
         else:
@@ -1846,7 +1918,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         return journal.response(record)
     state = {"automation_id": automation_id, "tool_snapshot": tool_snapshot, "action_id": payload.action_id,
              "publication": publication,
-             "authority_scope": f"automation:{automation_id}",
+             "authority_scope": authority_scope,
              "job_id": payload.job_id, "actor_id": agent["id"], "args": payload.args, "vars": {}, "last": None,
              "results": [], "count": 0, "max_steps": int(limits.get("max_steps", 100)),
              "started_at": time.monotonic(),

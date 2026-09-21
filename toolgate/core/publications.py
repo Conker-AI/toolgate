@@ -63,8 +63,11 @@ def for_execution(conn, kind: str, obj_id: str, version: int) -> dict:
     if not row:
         raise PublicationInvalid("The exact published version was not found")
     publication = json.loads(row["body"])
-    subjects = [(kind, publication["definition"])]
-    subjects.extend(("tool", tool) for tool in publication["tools"].values())
+    graph_limits(publication)
+    subjects = []
+    for member in members(publication):
+        subjects.append((member["kind"], member["definition"]))
+        subjects.extend(("tool", tool) for tool in member["tools"].values())
     for subject_kind, saved in subjects:
         current_row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?",
                                    (subject_kind, saved["id"])).fetchone()
@@ -78,9 +81,61 @@ def for_execution(conn, kind: str, obj_id: str, version: int) -> dict:
     return publication
 
 
-def dependencies(conn, definition: dict) -> dict:
+def nested_key(step: dict) -> str:
+    identity, version = step.get("automation_id"), step.get("published_version")
+    if not isinstance(identity, str) or not identity or type(version) is not int or version < 1:
+        raise PublicationInvalid("automation_call requires a literal automation_id and positive published_version")
+    return f"{identity}@{version}"
+
+
+def members(publication: dict):
+    yield publication
+    for child in publication.get("automations", {}).values():
+        yield from members(child)
+
+
+def automation_bindings(publication: dict) -> dict:
+    return {f"{child['id']}@{child['version']}": {"version": child["version"], "digest": child["digest"]}
+            for child in list(members(publication))[1:]}
+
+
+def graph_limits(publication: dict) -> None:
+    """Bound the expanded source graph, counting repeated calls and all branches."""
+    count = 0
+    def visit(current, steps, depth, ancestors):
+        nonlocal count
+        if not isinstance(steps, list) or depth > 4:
+            raise PublicationInvalid("Expanded workflow nesting cannot exceed four levels")
+        for step in steps:
+            count += 1
+            if count > 500 or not isinstance(step, dict):
+                raise PublicationInvalid("Expanded workflow cannot exceed 500 typed blocks")
+            kind = step.get("type")
+            if kind == "automation_call":
+                child = current.get("automations", {}).get(nested_key(step))
+                if not child or step.get("publication_digest", child["digest"]) != child["digest"]:
+                    raise PublicationInvalid("Nested publication is unavailable or its digest does not match")
+                if child["id"] in ancestors:
+                    raise PublicationInvalid("Automation dependency cycles are not supported, including across revisions")
+                visit(child, child["definition"].get("workflow", []), depth + 1, (*ancestors, child["id"]))
+            elif kind == "condition":
+                visit(current, step.get("then", []), depth + 1, ancestors)
+                visit(current, step.get("else", []), depth + 1, ancestors)
+            elif kind == "switch":
+                for branch in step.get("cases", {}).values():
+                    visit(current, branch, depth + 1, ancestors)
+                visit(current, step.get("default", []), depth + 1, ancestors)
+            elif kind == "loop":
+                visit(current, step.get("steps", []), depth + 1, ancestors)
+            elif kind == "retry":
+                visit(current, [step.get("step")], depth + 1, ancestors)
+    visit(publication, publication["definition"].get("workflow", []), 0, (publication["id"],))
+
+
+def dependencies(conn, definition: dict) -> tuple[dict, dict]:
     """Visit every possible branch, bounded independently of runtime control flow."""
     tools = {}
+    automations = {}
     count = 0
 
     def visit(steps, depth=0):
@@ -106,6 +161,14 @@ def dependencies(conn, definition: dict) -> dict:
                 if definition.get("authorization", "auto") == "auto" and tool.get("authorization", "auto") != "auto":
                     raise PublicationInvalid(f"Dependency '{tool_id}' requires owner confirmation")
                 tools[tool_id] = tool
+            elif kind == "automation_call":
+                key = nested_key(step)
+                child = for_execution(conn, "automation", step["automation_id"], step["published_version"])
+                if step.get("publication_digest", child["digest"]) != child["digest"]:
+                    raise PublicationInvalid("Nested publication digest does not match")
+                if definition.get("authorization", "auto") == "auto" and child["definition"].get("authorization", "auto") != "auto":
+                    raise PublicationInvalid("Nested publication requires owner confirmation on the root")
+                automations[key] = child
             elif kind == "condition":
                 visit(step.get("then", []), depth + 1)
                 visit(step.get("else", []), depth + 1)
@@ -121,10 +184,10 @@ def dependencies(conn, definition: dict) -> dict:
             elif kind == "retry":
                 visit([step.get("step")], depth + 1)
             elif kind not in {"set", "calculation", "delay", "notification", "return"}:
-                raise PublicationInvalid("Unsupported block; nested automation calls are not supported")
+                raise PublicationInvalid("Unsupported workflow block")
 
     visit(definition.get("workflow", []))
-    return tools
+    return tools, automations
 
 
 def publish(kind: str, obj_id: str, expected_version: int, *, validate=None, validate_tool=None) -> dict | None:
@@ -145,14 +208,17 @@ def publish(kind: str, obj_id: str, expected_version: int, *, validate=None, val
             return json.loads(old["body"])
         if definition.get("status") != "active" or definition.get("authorization") == "blocked":
             raise PublicationInvalid("Only active, unblocked definitions can be published")
-        if validate:
-            validate(definition)
-        tools = dependencies(conn, definition) if kind == "automation" else {}
+        tools, automations = dependencies(conn, definition) if kind == "automation" else ({}, {})
         if validate_tool:
             for tool in tools.values():
                 validate_tool(tool)
         snapshot = {"kind": kind, "id": obj_id, "version": expected_version,
                     "definition": definition, "tools": tools}
+        if automations:
+            snapshot["automations"] = automations
+        graph_limits(snapshot)
+        if validate:
+            validate(definition)
         result = {**snapshot, "digest": digest(snapshot), "published_at": cp._now()}
         cp.retain_definition(conn, kind, definition)
         conn.execute("INSERT INTO v2_publications VALUES(?,?,?,?)",

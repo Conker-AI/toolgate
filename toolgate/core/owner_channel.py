@@ -129,13 +129,15 @@ def project(db, record):
     publication_view = None
     if origin_valid and isinstance(binding.get("publication_digest"), str) and re.fullmatch(r"[a-f0-9]{64}", binding["publication_digest"]):
         publication_view = {"version": version, "digest": binding["publication_digest"],
-                            "dependencies": binding.get("child_tools", {})}
+                            "dependencies": binding.get("child_tools", {}),
+                            "automations": binding.get("child_automations", {})}
     if reason is None and binding.get("publication_digest") is not None:
         from toolgate.core import publications
         try:
             publication = publications.for_execution(db, subject_type, subject_id, version)
             if (binding["publication_digest"] != publication["digest"]
-                    or binding.get("child_tools") != cp.child_bindings(publication["tools"])):
+                    or binding.get("child_tools") != cp.child_bindings(publication["tools"])
+                    or binding.get("child_automations", {}) != publications.automation_bindings(publication)):
                 reason = "invalid_publication"
         except ValueError:
             reason = "publication_unavailable"

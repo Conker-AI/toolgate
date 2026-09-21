@@ -162,8 +162,8 @@ same writer transaction, including tools in inactive branches. Missing, inactive
 blocked, or incompatible dependencies fail publication. An optional `tool_version`
 on a `tool_call` must match that tool's current version at publication; otherwise the
 resolved current version is pinned in the envelope. Later tool changes never rewrite
-the snapshot. Workflows are limited to 500 blocks and four nested levels. Nested
-automation calls, including cycles, are unsupported and rejected. Vault references
+the snapshot. Expanded workflows are limited to 500 blocks and four nested levels,
+including nested automation calls and control-flow branches. Vault references
 remain references; publication never resolves or copies vault credentials. Definition
 fields still permit owner-authored literal configuration, so publications are not a
 general secret scrubber: do not embed credentials in URLs, headers, arguments, or
@@ -210,9 +210,33 @@ Identical retries return the existing receipt; an unknown outcome never authoriz
 redispatch. Existing journal records are upgraded additively and preserve their
 original legacy invocation identity.
 
+### Bounded nested published automations
+
+`automation_call` requires literal `automation_id` and `published_version`, with an
+optional exact `publication_digest` and an `args` object whose values can use the
+existing expression references. Publication captures the referenced immutable
+publication and its descendants, separately from other children: two nested calls
+may intentionally pin different tool revisions without merging their tool maps.
+Every branch resolves before publication. Missing publications, digest mismatches,
+incompatible confirmation policy, repeated automation IDs along a dependency path
+(including different revisions), and expanded depth/node overflows are rejected.
+
+Nested calls run only through an explicitly published root. They receive isolated
+variables, explicit validated arguments, and their own parent-linked journal receipt.
+They share the root spending job and every ancestor's step/runtime ceilings; entering
+a nested workflow never resets those ceilings. Current scopes must permit the root
+and every captured nested automation, including inactive branches, and this
+intersection is rechecked before each dispatch. Root confirmation binds all descendant
+publication digests; an auto root cannot include a confirmation-required descendant.
+
+Action identities derive deterministically from the parent action and bounded step
+occurrence, so repeated loop calls have distinct paths. Uncertain nested outcomes hold
+all ancestors and cannot be redispatched by a retry block. No new scheduler, background
+worker, resumable continuation, or arbitrary-code executor is introduced.
+
 Automations use a typed JSON workflow as their source of truth. The dashboard presents the same definition as a roadmap, layer map, draggable block editor, and editable code view.
 
-Supported blocks are `tool_call`, `set`, `calculation`, `condition`, `switch`, bounded `loop`, bounded `retry`, `delay`, `notification`, and `return`. Expressions may reference `$args.<name>`, `$vars.<name>`, and `$last.<path>`. A tool's declared output is available as `$last.result.<output-name>` and its raw value remains available as `$last.result.result`. Nested depth, total steps, runtime, loop iterations, retry attempts, and delay duration are all capped.
+Supported blocks are `tool_call`, `automation_call` (published roots only), `set`, `calculation`, `condition`, `switch`, bounded `loop`, bounded `retry`, `delay`, `notification`, and `return`. Expressions may reference `$args.<name>`, `$vars.<name>`, and `$last.<path>`. A tool's declared output is available as `$last.result.<output-name>` and its raw value remains available as `$last.result.result`. Nested depth, total steps, runtime, loop iterations, retry attempts, and delay duration are all capped.
 
 ## Agent CLI
 
