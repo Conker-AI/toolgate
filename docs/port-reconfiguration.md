@@ -236,3 +236,14 @@ partial-observation labeling was tightened. Tests use simulated Docker and tempo
 storage and prove GET-only behavior, unchanged journal state, actor isolation,
 no-store API responses and no guessing after a lost create reply. Existing warnings
 remain. No actual Docker operation occurred during verification.
+# Lost final receipt recovery primitive
+
+`core/port_finalization.py` restores only an unknown parent whose complete step
+journal ends in observed verification and whose source/replacement lineage was
+durably recorded by the executor. It issues no Docker requests. Actor identity,
+current configured source/socket, and transactional authorization are required;
+partial operations stay unknown. Authorization and receipt update commit together.
+This is an internal primitive, not yet exposed through a recovery approval API
+or Pi transport. It does not provide rollback, cleanup, or partial-step recovery.
+Four synthetic tests cover successful recovery, no repeated effects, denied
+authorization rollback, actor/configuration rejection, and incomplete execution.
