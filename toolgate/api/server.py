@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
@@ -1532,6 +1533,8 @@ def _workflow_compare(actual, operator: str, expected) -> bool:
         return actual != expected
     if operator == "contains":
         return expected in actual
+    if operator == "in":
+        return actual in expected
     if operator in {"gte", "lte", "gt", "lt"}:
         left, right = float(actual), float(expected)
         return {"gte": left >= right, "lte": left <= right, "gt": left > right, "lt": left < right}[operator]
@@ -1576,7 +1579,8 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
         elif kind == "calculation":
             values = [_workflow_value(value, state) for value in step.get("values", [])]
             operation = step.get("operation", "add")
-            if not values or any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in values):
+            if not values or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                                 or (isinstance(value, float) and not math.isfinite(value)) for value in values):
                 deny("VALIDATION_ERROR", "Calculation values must resolve to numbers", 422)
             calculated = {
                 "add": lambda: sum(values), "subtract": lambda: values[0] - sum(values[1:]),
@@ -1590,6 +1594,10 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
                 value = calculated()
             except ZeroDivisionError:
                 deny("VALIDATION_ERROR", "Calculation divided by zero", 422)
+            except OverflowError:
+                deny("VALIDATION_ERROR", "Calculation exceeded the numeric range", 422)
+            if isinstance(value, float) and not math.isfinite(value):
+                deny("VALIDATION_ERROR", "Calculation result must be finite", 422)
             state["vars"][step.get("save_as", "calculation")] = value
             result = {"code": "CALCULATED", "result": value}
         elif kind == "condition":
@@ -1619,14 +1627,20 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
                 deny("VALIDATION_ERROR", "Loop items must resolve to an array", 422)
             if len(items) > step["max_iterations"]:
                 deny("POLICY_DENIED", "Loop input exceeds its deterministic iteration ceiling")
-            previous = state["vars"].get(step.get("item_name", "item"))
-            for item in items:
-                state["vars"][step.get("item_name", "item")] = item
-                final = _run_workflow_steps(step.get("steps", []), state, actor, approval_granted)
-                if final is not None:
-                    return final
-            if previous is not None:
-                state["vars"][step.get("item_name", "item")] = previous
+            item_name = step.get("item_name", "item")
+            had_previous = item_name in state["vars"]
+            previous = state["vars"].get(item_name)
+            try:
+                for item in items:
+                    state["vars"][item_name] = item
+                    final = _run_workflow_steps(step.get("steps", []), state, actor, approval_granted)
+                    if final is not None:
+                        return final
+            finally:
+                if had_previous:
+                    state["vars"][item_name] = previous
+                else:
+                    state["vars"].pop(item_name, None)
             result = {"code": "LOOP_COMPLETE", "iterations": len(items)}
         elif kind == "retry":
             last_error = None
