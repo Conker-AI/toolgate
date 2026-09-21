@@ -1995,7 +1995,7 @@ def finalize_port_recovery(payload: PortFinalizationRequest, agent: Annotated[di
             request = control_plane.create_verification_request(
                 "Recover verified port replacement receipt",
                 "Restore the recorded successful result and release its reservation. "
-                "No Docker operation will run. " + json.dumps(receipt),
+                "No container changes will run. Recovery may recheck Docker inspection. " + json.dumps(receipt),
                 agent["name"], "tool", "system.port-control", args,
                 tool.get("version"), 60, agent["id"])
             control_plane.event("port_finalization_requested", "info", "tool", "system.port-control", agent["name"])

@@ -1,6 +1,7 @@
 """Private replacement payloads and once-only steps under the execution journal."""
 
 import json
+import hashlib
 import re
 import time
 
@@ -20,6 +21,16 @@ CREATE TABLE IF NOT EXISTS v2_port_steps (
  reference TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL,
  PRIMARY KEY(action_id,ordinal)
 );
+CREATE TABLE IF NOT EXISTS v2_port_verification_basis (
+ action_id TEXT PRIMARY KEY REFERENCES v2_port_replacements(action_id), sealed TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS port_basis_no_update BEFORE UPDATE ON v2_port_verification_basis
+BEGIN SELECT RAISE(ABORT,'verification basis is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS port_basis_no_delete BEFORE DELETE ON v2_port_verification_basis
+BEGIN SELECT RAISE(ABORT,'verification basis is permanent'); END;
+CREATE TRIGGER IF NOT EXISTS port_basis_no_replace BEFORE INSERT ON v2_port_verification_basis
+WHEN EXISTS(SELECT 1 FROM v2_port_verification_basis WHERE action_id=NEW.action_id)
+BEGIN SELECT RAISE(ABORT,'verification basis already exists'); END;
 CREATE TRIGGER IF NOT EXISTS port_payload_no_update BEFORE UPDATE ON v2_port_replacements
 BEGIN SELECT RAISE(ABORT,'replacement identity is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS port_payload_no_delete BEFORE DELETE ON v2_port_replacements
@@ -106,6 +117,39 @@ def load_private(action_id):
             if payload["action_id"] != action_id or payload["fingerprint"] != parent["fingerprint"]:
                 raise ReplacementError()
             return Replacement(payload["preview"], payload["body"], payload["source"], payload["name"])
+        except (vault.VaultError, KeyError, TypeError, ValueError):
+            raise ReplacementError() from None
+
+
+def save_verification_basis(action_id, inspection, socket):
+    """Retain private pre-effect evidence for read-only final verification recovery."""
+    with cp._conn() as conn:
+        _initialize(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        parent = _parent(conn, action_id, active=True)
+        if (inspection.get("Id") != json.loads(parent["args"]).get("container_id")
+                or conn.execute("SELECT 1 FROM v2_port_steps WHERE action_id=?", (action_id,)).fetchone()):
+            raise ReplacementError()
+        payload = json.dumps({"fingerprint": parent["fingerprint"], "inspection": inspection,
+                              "socket": hashlib.sha256(socket.encode()).hexdigest()}, allow_nan=False)
+        if len(payload.encode()) > 2 * 1024 * 1024:
+            raise ReplacementError()
+        conn.execute("INSERT INTO v2_port_verification_basis VALUES (?,?)", (action_id, vault._encrypt(payload)))
+
+
+def load_verification_basis(action_id, socket):
+    with cp._conn() as conn:
+        _initialize(conn)
+        parent = _parent(conn, action_id)
+        row = conn.execute("SELECT sealed FROM v2_port_verification_basis WHERE action_id=?", (action_id,)).fetchone()
+        if not row or not row["sealed"].startswith(vault.ENCRYPTED_PREFIX):
+            raise ReplacementError()
+        try:
+            value = json.loads(vault._decrypt("verification basis", row["sealed"]))
+            if (value["fingerprint"] != parent["fingerprint"]
+                    or value["socket"] != hashlib.sha256(socket.encode()).hexdigest()):
+                raise ReplacementError()
+            return value["inspection"]
         except (vault.VaultError, KeyError, TypeError, ValueError):
             raise ReplacementError() from None
 

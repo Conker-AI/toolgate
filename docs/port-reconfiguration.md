@@ -238,6 +238,33 @@ no-store API responses and no guessing after a lost create reply. Existing warni
 remain. No actual Docker operation occurred during verification.
 # Lost final receipt recovery primitive
 
+## September 21 update: recover a failed final inspection
+
+The existing finalization route now also accepts a replacement whose only
+unobserved step is the final `verify` read. Every preceding mutation must have an
+observed receipt, including the exact replacement and snapshot IDs. Before any
+mutation, new executions retain encrypted source inspection evidence bound to
+the action fingerprint and Docker socket. Legacy executions without that evidence
+cannot use this additional recovery path.
+
+Preview re-inspects both exact container IDs without changing containers. Approval
+execution rechecks them again. The original must remain stopped, and the replacement
+must match the intended state, image, ports, name, config, host settings, mounts and
+network identities/settings. Changed settings after review fail without consuming
+the approval. Final verification, lineage and the completed receipt commit together
+with consumption of the fresh, operation-bound approval. Receipt replay performs no
+Docker reads or writes. Configuration evidence remains encrypted, never in receipts.
+
+The initial executor now uses the same verifier and atomically commits verification
+with lineage. This closes the crash gap between those two records. Uncertain stop,
+snapshot, rename, disconnect, create or start operations still cannot be replayed;
+earlier-stage rollback/cleanup remains unfinished. External edits can still occur
+after inspection; this is a point-in-time observation, not a daemon lock.
+
+Verification: 63 focused finalization/executor/boundary/lineage/payload/recovery
+tests pass with synthetic Docker transport. Real Docker behavior is not proven by
+these tests. The earlier primitive description below records its original scope.
+
 `core/port_finalization.py` restores only an unknown parent whose complete step
 journal ends in observed verification and whose source/replacement lineage was
 durably recorded by the executor. It issues no Docker requests. Actor identity,

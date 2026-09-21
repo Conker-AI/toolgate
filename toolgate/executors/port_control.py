@@ -61,6 +61,34 @@ def _mount_identity(mounts):
                    item["Destination"], item.get("RW")) for item in mounts)
 
 
+def verify_replacement(before, after, replacement, snapshot):
+    """Shared initial/recovery verification; does not dispatch or persist effects."""
+    running = before["State"]["Running"]
+    expected_body = replacement.create_body(snapshot)
+    config_match = all(after["Config"].get(key) == value for key, value in expected_body.items()
+                       if key not in ("HostConfig", "NetworkingConfig"))
+    host_match = all(after["HostConfig"].get(key) == value
+                     for key, value in expected_body["HostConfig"].items())
+    bindings = after["NetworkSettings"]["Ports"] if running else after["HostConfig"]["PortBindings"]
+    normalized = sorted((_mapping(item) for item in _bindings(bindings)), key=_identity)
+    expected_networks = before["NetworkSettings"]["Networks"]
+    actual_networks = after["NetworkSettings"]["Networks"]
+    networks_match = set(expected_networks) == set(actual_networks) and all(
+        actual_networks[name].get("NetworkID") == endpoint.get("NetworkID")
+        and set(endpoint.get("Aliases") or []).issubset(set(actual_networks[name].get("Aliases") or []))
+        and all(actual_networks[name].get(key) == endpoint.get(key)
+                for key in ("IPAMConfig", "Links", "MacAddress", "DriverOpts") if endpoint.get(key))
+        for name, endpoint in expected_networks.items()
+    )
+    if (after["State"]["Running"] is not running or after.get("Image") != snapshot
+            or any(after["State"].get(key) is not False for key in ("Paused", "Restarting", "Dead"))
+            or after.get("Name") != "/" + replacement.name or not config_match or not host_match
+            or normalized != replacement.preview["after"] or not networks_match
+            or _mount_identity(after["Mounts"]) != _mount_identity(before["Mounts"])):
+        raise ReplacementUnknown()
+    return normalized
+
+
 def execute(action_id, *, authorize, transport=None):
     """Run a previously saved specification once. Caller finishes parent receipt."""
     replacement = records.load_private(action_id)
@@ -102,6 +130,8 @@ def execute(action_id, *, authorize, transport=None):
                 if not isinstance(network_id, str) or not re.fullmatch(r"[a-f0-9]{64}", network_id):
                     raise docker.ControlError("invalid_response")
                 network_ids.append(network_id)
+
+            records.save_verification_basis(action_id, before, configuration[0])
 
             def step(name, path, *, params=None, body=None, expected=(204,), reference_kind=None):
                 nonlocal ordinal, claimed, any_effect
@@ -155,20 +185,7 @@ def execute(action_id, *, authorize, transport=None):
                 raise ReplacementUnknown()
             claimed = True
             after = _inspect(client, new_id, deadline)
-            bindings = after["NetworkSettings"]["Ports"] if running else after["HostConfig"]["PortBindings"]
-            normalized = sorted((_mapping(item) for item in _bindings(bindings)), key=_identity)
-            expected_networks = before["NetworkSettings"]["Networks"]
-            actual_networks = after["NetworkSettings"]["Networks"]
-            networks_match = set(expected_networks) == set(actual_networks) and all(
-                actual_networks[name].get("NetworkID") == endpoint.get("NetworkID")
-                and set(endpoint.get("Aliases") or []).issubset(set(actual_networks[name].get("Aliases") or []))
-                for name, endpoint in expected_networks.items()
-            )
-            if (after["State"]["Running"] is not running or after.get("Image") != snapshot
-                    or normalized != replacement.preview["after"]
-                    or not networks_match
-                    or _mount_identity(after["Mounts"]) != _mount_identity(before["Mounts"])):
-                raise ReplacementUnknown()
+            normalized = verify_replacement(before, after, replacement, snapshot)
             if docker._configuration(cid) != configuration:
                 raise docker.ControlError("configuration_changed")
             container_lineage.record(action_id, cid, new_id, configuration[0],

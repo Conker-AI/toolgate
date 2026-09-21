@@ -73,6 +73,8 @@ class Daemon:
             assert body["Env"] == ["SECRET=private-value"]
             self.replacement = source()
             self.replacement.update(Id=NEW, Image=IMAGE, HostConfig=body["HostConfig"])
+            self.replacement["Config"] = {key: value for key, value in body.items()
+                                          if key not in ("HostConfig", "NetworkingConfig")}
             self.replacement["State"].update(Running=False, Status="created")
             self.replacement["NetworkSettings"]["Ports"] = body["HostConfig"]["PortBindings"]
             status, response = 201, {"Id": NEW}
