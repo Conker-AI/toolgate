@@ -101,7 +101,7 @@ def load_private(action_id):
 def begin_step(action_id, ordinal, name, *, authorize):
     """Commit before dispatch; a duplicate claim never permits a second effect."""
     if (type(ordinal) is not int or not 0 <= ordinal < 150
-            or name not in ("stop", "snapshot", "rename", "disconnect", "create", "connect", "start", "verify")
+            or name not in ("stop", "snapshot", "retire", "rename", "disconnect", "create", "connect", "start", "verify")
             or not callable(authorize)):
         raise ReplacementError()
     with cp._conn() as conn:

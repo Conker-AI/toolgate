@@ -103,3 +103,31 @@ vault cipher with synthetic keys. Existing FastAPI/Starlette deprecation warning
 remain. The actual executor must enforce its planned step sequence, perform scope
 checks, and use claims correctly; storage tests do not prove that integration.
 No automatic rollback/retry or Docker effect is implemented by these records.
+
+## Internal replacement executor
+
+`executors.port_control.execute` now consumes a saved private specification and
+uses the configured Unix-socket Docker adapter. Before effects it reinspects source
+configuration and running state. It journals stop, writable-layer commit, retirement
+of the original restart policy, rename, network disconnect, replacement create,
+optional start and verification. The original container and snapshot image remain
+for recovery. The replacement keeps the original restart policy. Full reviewed
+network IDs address disconnect calls. Verification checks image, running state,
+port bindings, mount identities and network IDs/aliases. Stopped sources produce
+stopped replacements. It never deletes either container or shared volume data.
+
+An authorization callback and configured-target recheck run before each claim.
+Unknown replies halt the sequence; no automatic retry/rollback follows. A repeated
+executor call with existing steps cannot dispatch. This adapter is not registered
+as a callable tool yet: exact review admission, retained-container recovery and
+managed-target lineage still require integration. Verification is an observation,
+not an application health check or a complete equivalence proof for every Docker
+option. Named network creation can race with operator changes; mismatched network
+identity fails verification and requires review. Snapshot storage and retained
+resources need owner-directed cleanup after recovery decisions.
+
+52 executor/private-journal/lifecycle tests passed using a simulated Docker daemon
+with real temporary SQLite/encryption. Coverage includes create/edit/remove,
+running/stopped preservation, every mutation reply lost, revocation between steps,
+stale source and wrong port/network observations. Scoped lint passes. No actual
+Docker daemon was contacted; Linux deployment fidelity remains unverified.

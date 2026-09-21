@@ -87,10 +87,11 @@ def _pairs(pairs):
     return result
 
 
-def _read(client, method, path, deadline, *, params=None):
+def _read(client, method, path, deadline, *, params=None, json_body=None):
     if time.monotonic() > deadline:
         raise ControlError("deadline")
-    with client.stream(method, path, params=params) as response:
+    options = {"json": json_body} if json_body is not None else {}
+    with client.stream(method, path, params=params, **options) as response:
         body = bytearray()
         for chunk in response.iter_raw():
             if time.monotonic() > deadline:
