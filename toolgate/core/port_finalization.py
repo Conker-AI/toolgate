@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-from toolgate.core import container_lineage
+from toolgate.core import container_lineage, recovery_journal
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import port_replacements as records
@@ -19,7 +19,7 @@ def preview(action_id, actor_id, *, transport=None):
 
 
 def finalize(action_id, actor_id, *, authorize, transport=None):
-    """Internal owner-authorized primitive; uncertain mutations remain unknown.
+    """Internal owner-authorized primitive; only verified final state can settle.
 
     authorize(conn) must check/consume the exact recovery approval in this
     transaction. The caller must not expose this as an unverified read endpoint.
@@ -30,9 +30,10 @@ def finalize(action_id, actor_id, *, authorize, transport=None):
 
 
 def _reverify(action_id, replacement, configuration, steps, transport):
-    """Only the final GET may be repeated; every preceding effect must be observed."""
-    if (not steps or steps[-1]["name"] != "verify"
-            or steps[-1]["status"] != "outcome_unknown"
+    """Observe a finished replacement; never resend a lost mutating request."""
+    if (not steps or steps[-1]["name"] not in ("verify", "start", "create")
+            or (steps[-1]["name"] == "verify" and steps[-1]["status"] != "outcome_unknown")
+            or (steps[-1]["name"] == "create" and steps[-1]["status"] != "observed")
             or any(step["status"] != "observed" for step in steps[:-1])):
         return False
     created = [step["reference"] for step in steps if step["name"] == "create"]
@@ -41,6 +42,11 @@ def _reverify(action_id, replacement, configuration, steps, transport):
         raise records.ReplacementError()
     cid = replacement.preview["containerId"]
     before = records.load_verification_basis(action_id, configuration[0])
+    # A running source requires a recorded start attempt. A stopped source is
+    # complete after creation; uncertain creation has no trustworthy identity.
+    if (steps[-1]["name"] == "create" and before["State"]["Running"] is not False
+            or steps[-1]["name"] == "start" and before["State"]["Running"] is not True):
+        raise records.ReplacementError()
     try:
         deadline = time.monotonic() + docker.DEADLINE_SECONDS
         with httpx.Client(base_url="http://docker", trust_env=False, follow_redirects=False,
@@ -74,6 +80,7 @@ def _recover(action_id, actor_id, *, authorize, transport):
         records._initialize(conn)
         conn.executescript(container_lineage.SCHEMA)
         conn.execute("BEGIN IMMEDIATE")
+        recovery_journal.assert_not_held(conn)
         parent = records._parent(conn, action_id)
         if parent["actor_id"] != actor_id or parent["status"] != "outcome_unknown":
             raise records.ReplacementError()
@@ -86,7 +93,7 @@ def _recover(action_id, actor_id, *, authorize, transport):
         if (current_steps != original_steps or not steps
                 or any(step["status"] != "observed" for step in (steps[:-1] if reverified else steps))
                 or [step["ordinal"] for step in steps] != list(range(len(steps)))
-                or steps[-1]["name"] != "verify"):
+                or (not reverified and steps[-1]["name"] != "verify")):
             raise records.ReplacementError()
         created = [step["reference"] for step in steps if step["name"] == "create"]
         snapshots = [step["reference"] for step in steps if step["name"] == "snapshot"]
@@ -112,9 +119,18 @@ def _recover(action_id, actor_id, *, authorize, transport):
             return result
         authorize(conn)
         if reverified:
-            conn.execute("UPDATE v2_port_steps SET status='observed',reference=?,updated_at=?"
-                         " WHERE action_id=? AND ordinal=?",
-                         (created[0], time.time(), action_id, steps[-1]["ordinal"]))
+            now = time.time()
+            if steps[-1]["name"] == "verify":
+                conn.execute("UPDATE v2_port_steps SET status='observed',reference=?,updated_at=?"
+                             " WHERE action_id=? AND ordinal=?",
+                             (created[0], now, action_id, steps[-1]["ordinal"]))
+            else:
+                if steps[-1]["status"] != "observed":
+                    conn.execute("UPDATE v2_port_steps SET status='observed',updated_at=?"
+                                 " WHERE action_id=? AND ordinal=?",
+                                 (now, action_id, steps[-1]["ordinal"]))
+                conn.execute("INSERT INTO v2_port_steps VALUES (?,?,?,'observed',?,?,?)",
+                             (action_id, len(steps), "verify", created[0], now, now))
             if not lineage:
                 conn.execute("INSERT INTO v2_container_lineage VALUES (?,?,?,?)",
                              (action_id, cid, created[0], container_lineage._digest(configuration[0])))

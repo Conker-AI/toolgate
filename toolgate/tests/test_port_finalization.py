@@ -269,3 +269,64 @@ def test_legacy_missing_basis_and_foreign_actor_cannot_reverify(request, monkeyp
         with pytest.raises(port_replacements.ReplacementError):
             port_finalization.preview(payload.action_id, actor, transport=httpx.MockTransport(daemon.handle))
     assert len(daemon.requests) == count
+
+
+@pytest.mark.parametrize("crash", ["acknowledgement", "before_verify"])
+def test_started_container_recovers_without_repeating_start(request, monkeypatch, crash):
+    daemon, agent, _, payload = request.getfixturevalue("pending")
+    original = daemon.handle
+    if crash == "acknowledgement":
+        def handle(message):
+            response = original(message)
+            if message.method == "POST" and message.url.path.endswith("/start"):
+                raise httpx.ReadTimeout("lost start acknowledgement")
+            return response
+        monkeypatch.setattr(daemon, "handle", handle)
+    else:
+        original_begin = port_replacements.begin_step
+        def begin(identity, ordinal, name, **kwargs):
+            if name == "verify":
+                raise RuntimeError("crashed before verification claim")
+            return original_begin(identity, ordinal, name, **kwargs)
+        monkeypatch.setattr(port_replacements, "begin_step", begin)
+    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert port_replacements.steps(payload.action_id)[-1]["name"] == "start"
+    monkeypatch.setattr(daemon, "handle", original)
+    count = len(daemon.requests)
+    original_steps = port_replacements.steps(payload.action_id)
+    def deny(conn):
+        raise PermissionError()
+    with pytest.raises(PermissionError):
+        port_finalization.finalize(payload.action_id, agent["id"],
+            transport=httpx.MockTransport(daemon.handle), authorize=deny)
+    assert port_replacements.steps(payload.action_id) == original_steps
+    assert journal.get(payload.action_id)["status"] == "outcome_unknown"
+    approved = []
+    recovered = port_finalization.finalize(payload.action_id, agent["id"],
+        transport=httpx.MockTransport(daemon.handle),
+        authorize=lambda conn: approved.append(conn.in_transaction))
+    assert recovered["status"] == "completed" and approved == [True]
+    steps = port_replacements.steps(payload.action_id)
+    assert steps[-1]["name"] == "verify"
+    assert all(step["status"] == "observed" for step in steps)
+    assert all(message.method == "GET" for message in daemon.requests[count:])
+
+
+def test_stopped_source_recovers_after_create_before_verification(request, monkeypatch):
+    daemon, _, _ = request.getfixturevalue("boundary_setup")
+    daemon.original["State"].update(Running=False, Status="exited")
+    _, agent, _, payload = request.getfixturevalue("pending")
+    original_begin = port_replacements.begin_step
+    def begin(identity, ordinal, name, **kwargs):
+        if name == "verify":
+            raise RuntimeError("crashed before verification")
+        return original_begin(identity, ordinal, name, **kwargs)
+    monkeypatch.setattr(port_replacements, "begin_step", begin)
+    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert port_replacements.steps(payload.action_id)[-1]["name"] == "create"
+    count = len(daemon.requests)
+    assert port_finalization.finalize(payload.action_id, agent["id"],
+        transport=httpx.MockTransport(daemon.handle),
+        authorize=lambda conn: None)["status"] == "completed"
+    assert daemon.replacement["State"]["Running"] is False
+    assert all(message.method == "GET" for message in daemon.requests[count:])

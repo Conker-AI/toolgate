@@ -261,6 +261,16 @@ snapshot, rename, disconnect, create or start operations still cannot be replaye
 earlier-stage rollback/cleanup remains unfinished. External edits can still occur
 after inspection; this is a point-in-time observation, not a daemon lock.
 
+Recovery also covers a lost start acknowledgement or a crash before claiming final
+verification. It performs the same full read-only verification and consumes fresh
+approval before atomically recording the observed start, verification, lineage and
+receipt. A stopped source can settle after observed creation without a start step.
+An unconfirmed create identity, a replacement that did not start as expected, or
+configuration drift remains unresolved. No mutating Docker request is repeated.
+Held backup-recovery databases cannot be finalized through this primitive.
+Verification: 42 executor/recovery/finalization tests plus the additional stopped-
+source crash test pass with synthetic Docker transport; live Docker remains unproven.
+
 Verification: 63 focused finalization/executor/boundary/lineage/payload/recovery
 tests pass with synthetic Docker transport. Real Docker behavior is not proven by
 these tests. The earlier primitive description below records its original scope.
