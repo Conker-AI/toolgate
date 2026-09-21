@@ -174,6 +174,10 @@ other literal fields. Use supported vault-reference fields instead.
 The existing agent routes `POST /v2/tools/{id}/invoke` and
 `POST /v2/automations/{id}/run` accept `published_version`, a positive integer.
 Include a stable `action_id`, exact `args`, and optional `job_id`. The requested
+publication can also be guarded by `expected_publication_digest` (lowercase SHA-256).
+It requires `published_version` and mismatches return `PUBLICATION_MISMATCH` before
+approval creation/consumption or dispatch. Schedulers should persist and send both pins.
+The requested
 publication must exist: unavailable/revoked versions fail with
 `PUBLICATION_UNAVAILABLE`, without falling back to a current draft. Omitting the
 field deliberately retains legacy live-definition execution. A job integration must

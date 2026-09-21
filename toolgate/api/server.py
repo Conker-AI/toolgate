@@ -490,6 +490,7 @@ class V2Invoke(BaseModel):
     action_id: str | None = None
     job_id: str | None = None
     published_version: StrictInt | None = Field(default=None, ge=1)
+    expected_publication_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class V2Publish(BaseModel):
@@ -1724,11 +1725,17 @@ def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agen
 
 def _requested_publication(kind: str, obj_id: str, payload: V2Invoke) -> dict | None:
     if payload.published_version is None:
+        if payload.expected_publication_digest is not None:
+            deny("PUBLICATION_REQUIRED", "A publication digest requires published_version", 422)
         return None
     if not payload.action_id:
         deny("ACTION_ID_REQUIRED", "Published runs require a stable action_id", 422)
     with control_plane._conn() as conn:
-        return publications.for_execution(conn, kind, obj_id, payload.published_version)
+        publication = publications.for_execution(conn, kind, obj_id, payload.published_version)
+        if (payload.expected_publication_digest is not None
+                and not secrets.compare_digest(payload.expected_publication_digest, publication["digest"])):
+            deny("PUBLICATION_MISMATCH", "The selected publication does not match the expected digest", 409)
+        return publication
 
 
 def _publish_definition(kind: str, obj_id: str, payload: V2Publish):
