@@ -40,6 +40,7 @@ from toolgate.core.public_https import (
 )
 from toolgate.executors import container_control, filesystem_inventory, port_control, process_control, research, system_inventory
 from toolgate.executors.port_plan import PlanError
+from toolgate.executors import port_recovery
 
 SERVICE_VERSION = "0.3.0"
 
@@ -1947,6 +1948,17 @@ def get_port_review(review_id: str, agent: dict = Depends(require_agent)):
         result = port_reviews.get(review_id, agent["id"])
     except port_reviews.ReviewError:
         deny("REVIEW_UNAVAILABLE", "Port review is unavailable", 404)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v2/agent/system/port-recovery/{action_id:path}")
+def inspect_port_recovery(action_id: str, agent: dict = Depends(require_agent)):
+    _port_review_authority(agent)
+    try:
+        result = port_recovery.inspect(action_id, agent["id"])
+        _port_review_authority(agent)
+    except (port_recovery.RecoveryError, ValueError):
+        deny("RECOVERY_UNAVAILABLE", "Replacement recovery evidence is unavailable", 409)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 

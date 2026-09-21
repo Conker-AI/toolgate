@@ -1,4 +1,4 @@
-"""Journaled Docker replacement. Internal executor, not an exposed capability yet."""
+"""Journaled Docker replacement behind ToolGate's scoped review/approval boundary."""
 
 import hashlib
 import json

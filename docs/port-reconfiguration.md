@@ -216,3 +216,23 @@ first and replacement-first contention, unknown ownership and completion. Scoped
 lint/shared undefined-name/diff checks pass. Existing warnings remain. This
 coordinates ToolGate actions, not independent operator Docker clients. Recovery
 of uncertain reservations remains part of the unfinished recovery interface.
+
+## Read-only recovery evidence
+
+`GET /v2/agent/system/port-recovery/{action_id}` requires the originating actor's
+active port scope. It exposes recorded steps and, for unknown actions, bounded GET
+observations of the source and a replacement whose create ID was confirmed. Lost
+create identities are explicitly unconfirmed; no name-based guess is promoted to
+an authorized target. Missing containers, unavailable reads and partial evidence
+are distinct. Environment/configuration/error bodies are not returned.
+
+This endpoint neither reruns steps nor releases reservations. Equal bindings are
+only evidence, not proof of complete replacement fidelity or absence of in-flight
+effects. Live executors are not inspected mid-step. Owner-reviewed corrective
+execution/finalization and Pi recovery transport remain unfinished.
+
+16 recovery/admission/boundary tests passed; five recovery checks were rerun after
+partial-observation labeling was tightened. Tests use simulated Docker and temporary
+storage and prove GET-only behavior, unchanged journal state, actor isolation,
+no-store API responses and no guessing after a lost create reply. Existing warnings
+remain. No actual Docker operation occurred during verification.
