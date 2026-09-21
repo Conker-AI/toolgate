@@ -39,3 +39,21 @@ operator authority: the enclosing ToolGate service must isolate and protect it.
 This adapter alone does not provide owner authentication or approval policy.
 
 Protocol reference: [Docker Engine API v1.45](https://docs.docker.com/reference/api/engine/version/v1.45/).
+# ToolGate integration
+
+`system.container-control` is registered only when absent, preserving existing
+owner settings. Its fixed `container_control` executor accepts `container_id` and
+`action`, requires `owner_confirmation`, and is available only to scoped execution
+keys. Registration does not issue a key or configure a Docker socket. Definition
+validation and dispatch reject attempts to replace this reserved executor or
+remove its approval policy. A published workflow can include the operation under
+the existing bound workflow approval rules.
+
+The standard action journal is committed before the adapter starts. Known
+pre-dispatch failures produce failed receipts; post-dispatch uncertainty produces
+`OUTCOME_UNKNOWN`. Reusing an action ID inspects the original receipt and never
+repeats the Docker mutation. Inspecting later running state alone does not prove
+that a particular restart occurred, so unknown receipts are not automatically
+promoted to success. Existing scope, lockdown, publication and revocation checks
+remain in force. The owner-facing Pi API and final frontend integration are
+separate work.

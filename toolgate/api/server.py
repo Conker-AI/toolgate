@@ -36,7 +36,7 @@ from toolgate.core.public_https import (
     public_url,
     resolve_public,
 )
-from toolgate.executors import research, system_inventory
+from toolgate.executors import container_control, research, system_inventory
 
 SERVICE_VERSION = "0.3.0"
 
@@ -131,7 +131,7 @@ def startup():
 
 
 def ensure_builtin_system_capabilities() -> None:
-    """Register a fixed read operation without changing owner policy or key scopes."""
+    """Register fixed operations without changing existing owner policy or key scopes."""
     if not control_plane.get("tool", "system.inventory"):
         control_plane.create_tool({
             "id": "system.inventory", "name": "System inventory",
@@ -143,6 +143,19 @@ def ensure_builtin_system_capabilities() -> None:
             "execution": {"type": "system_inventory"},
             "policy": {"usage_limits": {"max_per_minute": 12, "cooldown_seconds": 0,
                         "max_per_hour": 120, "max_runtime_seconds": 15}},
+        })
+    if not control_plane.get("tool", "system.container-control"):
+        control_plane.create_tool({
+            "id": "system.container-control", "name": "Managed container control",
+            "description": "Start, stop or restart one explicitly managed container by its full ID. Requires exact owner approval; no shell or container creation.",
+            "category": "system", "authorization": "owner_confirmation", "status": "active",
+            "inputs": [{"name": "container_id", "type": "string", "required": True},
+                       {"name": "action", "type": "string", "required": True,
+                        "enum": ["start", "stop", "restart"]}],
+            "outputs": [{"name": "observation", "type": "object"}],
+            "execution": {"type": "container_control"},
+            "policy": {"usage_limits": {"max_per_minute": 6, "cooldown_seconds": 0,
+                        "max_per_hour": 30, "max_runtime_seconds": 45}},
         })
 
 
@@ -541,6 +554,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "echo", "local_echo", "http_json", "memorygate", "ollama_generate", "gemini_generate",
     "research_search", "research_bundle", "research_fetch", "research_fetch_batch",
     "system_inventory",
+    "container_control",
 }
 AUTHORIZATION_MODES = {"auto", "ai_review", "owner_confirmation", "blocked"}
 CAPABILITY_STATUSES = {"draft", "active", "disabled"}
@@ -628,10 +642,21 @@ def tool_definition_errors(tool: dict) -> list[str]:
     execution = tool.get("execution")
     if tool.get("id") == "system.inventory" and execution != {"type": "system_inventory"}:
         errors.append("system.inventory is reserved for the fixed read-only inventory executor")
+    if tool.get("id") == "system.container-control" and execution != {"type": "container_control"}:
+        errors.append("system.container-control is reserved for managed container lifecycle")
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}")
         return errors
-    if execution["type"] == "system_inventory":
+    if execution["type"] == "container_control":
+        if execution != {"type": "container_control"}:
+            errors.append("container_control uses only operator-configured managed targets")
+        if tool.get("authorization") != "owner_confirmation":
+            errors.append("container_control requires owner_confirmation")
+        if input_names != {"container_id", "action"} or any(
+                field.get("type") != "string" or field.get("required") is not True
+                for field in inputs if isinstance(field, dict)):
+            errors.append("container_control requires string container_id and action inputs")
+    elif execution["type"] == "system_inventory":
         if execution != {"type": "system_inventory"}:
             errors.append("system_inventory uses only the operator-configured fixed endpoint")
         if input_names - {"limit"}:
@@ -1133,6 +1158,11 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
     if tool.get("id") == "system.inventory" and tool.get("execution") != {"type": "system_inventory"}:
         return {"ok": False, "error": "The reserved system inventory definition is invalid.",
                 "error_code": "invalid_inventory_definition"}
+    if (tool.get("id") == "system.container-control" or executor_type == "container_control") and (
+            tool.get("execution") != {"type": "container_control"}
+            or tool.get("authorization") != "owner_confirmation"):
+        return {"ok": False, "error": "Managed container control requires its fixed executor and owner confirmation.",
+                "error_code": "invalid_container_definition"}
     if executor_type == "echo":
         result = {"ok": True, "result": args}
     elif executor_type == "local_echo":
@@ -1153,6 +1183,16 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         result = _execute_research_fetch(args)
     elif executor_type == "research_fetch_batch":
         result = _execute_research_fetch_batch(args)
+    elif executor_type == "container_control":
+        if set(args) != {"container_id", "action"}:
+            return {"ok": False, "error": "Provide only container_id and action.",
+                    "error_code": "invalid_arguments"}
+        try:
+            result = {"ok": True, "result": container_control.control(args["container_id"], args["action"])}
+        except container_control.ControlError as exc:
+            result = {"ok": False, "error": str(exc), "error_code": exc.code}
+        # OutcomeUnknown deliberately reaches the execution journal's uncertainty
+        # handler. Reusing that action ID can never dispatch the mutation again.
     elif executor_type == "system_inventory":
         if tool["execution"] != {"type": "system_inventory"} or set(args) - {"limit"}:
             deny("VALIDATION_ERROR", "System inventory accepts only a bounded limit.", 422)
