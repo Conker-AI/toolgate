@@ -10,6 +10,11 @@ from toolgate.core import port_replacements as records
 from toolgate.executors import container_control as docker
 
 
+def preview(action_id, actor_id):
+    """Return the receipt eligible for recovery; do not release the reservation."""
+    return _recover(action_id, actor_id, authorize=None)
+
+
 def finalize(action_id, actor_id, *, authorize):
     """Internal owner-authorized primitive; partial executions remain unknown.
 
@@ -18,6 +23,10 @@ def finalize(action_id, actor_id, *, authorize):
     """
     if not callable(authorize):
         raise records.ReplacementError()
+    return _recover(action_id, actor_id, authorize=authorize)
+
+
+def _recover(action_id, actor_id, *, authorize):
     initial = journal.get(action_id)
     if not initial or initial["actor_id"] != actor_id or initial["status"] != "outcome_unknown":
         raise records.ReplacementError()
@@ -55,6 +64,8 @@ def finalize(action_id, actor_id, *, authorize):
                     "result": {"ok": True, "result": result}}
         if docker._configuration(cid) != configuration:
             raise records.ReplacementError()
+        if authorize is None:
+            return result
         authorize(conn)
         conn.execute("UPDATE v2_actions SET status='completed',response=?,updated_at=? WHERE action_id=?",
                      (json.dumps(envelope, allow_nan=False), time.time(), action_id))

@@ -243,7 +243,11 @@ journal ends in observed verification and whose source/replacement lineage was
 durably recorded by the executor. It issues no Docker requests. Actor identity,
 current configured source/socket, and transactional authorization are required;
 partial operations stay unknown. Authorization and receipt update commit together.
-This is an internal primitive, not yet exposed through a recovery approval API
-or Pi transport. It does not provide rollback, cleanup, or partial-step recovery.
+`POST /v2/agent/system/port-finalizations` accepts an original action ID and optional
+approval request ID. It creates an exact owner-Inbox-compatible recovery approval,
+checks current scope/policy, and consumes approval atomically with finalization.
+Completed retries return the same immutable receipt. Original execution approvals
+cannot authorize recovery. The route is authenticated and no-store. Pi transport
+is not yet integrated. It does not provide rollback, cleanup, or partial-step recovery.
 Four synthetic tests cover successful recovery, no repeated effects, denied
 authorization rollback, actor/configuration rejection, and incomplete execution.

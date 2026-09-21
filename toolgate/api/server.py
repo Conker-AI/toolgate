@@ -10,7 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -26,6 +26,7 @@ from toolgate.core import (
     control_plane,
     legacy_archive,
     owner_channel,
+    port_finalization,
     port_reviews,
     publications,
     spending,
@@ -38,9 +39,16 @@ from toolgate.core.public_https import (
     public_url,
     resolve_public,
 )
-from toolgate.executors import container_control, filesystem_inventory, port_control, process_control, research, system_inventory
+from toolgate.executors import (
+    container_control,
+    filesystem_inventory,
+    port_control,
+    port_recovery,
+    process_control,
+    research,
+    system_inventory,
+)
 from toolgate.executors.port_plan import PlanError
-from toolgate.executors import port_recovery
 
 SERVICE_VERSION = "0.3.0"
 
@@ -1960,6 +1968,59 @@ def inspect_port_recovery(action_id: str, agent: dict = Depends(require_agent)):
     except (port_recovery.RecoveryError, ValueError):
         deny("RECOVERY_UNAVAILABLE", "Replacement recovery evidence is unavailable", 409)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+class PortFinalizationRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    action_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:/-]+$")
+    approval_request_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+@app.post("/v2/agent/system/port-finalizations")
+def finalize_port_recovery(payload: PortFinalizationRequest, agent: Annotated[dict, Depends(require_agent)]):
+    tool = _port_review_authority(agent)
+    parent = journal.get(payload.action_id)
+    if (not parent or parent["actor_id"] != agent["id"] or parent["subject_type"] != "tool"
+            or parent["subject_id"] != "system.port-control"):
+        deny("RECOVERY_UNAVAILABLE", "Replacement recovery is unavailable", 409)
+    # Lost recovery acknowledgements read the immutable receipt without another effect.
+    if parent["status"] == "completed":
+        return JSONResponse(journal.response(parent), headers={"Cache-Control": "no-store"})
+    args = {"operation": "recover_verified_receipt", "action_id": payload.action_id,
+            "fingerprint": parent["fingerprint"]}
+    try:
+        receipt = port_finalization.preview(payload.action_id, agent["id"])
+        if not payload.approval_request_id:
+            enforce_usage_limits("tool", tool, "port_finalization_requested")
+            request = control_plane.create_verification_request(
+                "Recover verified port replacement receipt",
+                "Restore the recorded successful result and release its reservation. "
+                "No Docker operation will run. " + json.dumps(receipt),
+                agent["name"], "tool", "system.port-control", args,
+                tool.get("version"), 60, agent["id"])
+            control_plane.event("port_finalization_requested", "info", "tool", "system.port-control", agent["name"])
+            return JSONResponse({"code": "CONFIRMATION_REQUIRED", "request_id": request["id"],
+                                 "expires_at": request["payload"]["binding"]["expires_at"]},
+                                headers={"Cache-Control": "no-store"})
+
+        def authorize(conn):
+            require_current_dispatch_authority(conn, agent["id"], "system.port-control")
+            row = conn.execute("SELECT * FROM v2_objects WHERE kind='tool' AND id='system.port-control'").fetchone()
+            current = control_plane._row(row) if row else {}
+            if (current.get("version") != tool.get("version") or current.get("status") != "active"
+                    or current.get("authorization") != "owner_confirmation"
+                    or current.get("execution") != {"type": "port_control"}):
+                deny("POLICY_DENIED", "Port replacement policy changed", 403)
+            approved, reason = control_plane.consume_verification_in_transaction(
+                conn, payload.approval_request_id, "tool", "system.port-control",
+                args, tool.get("version"), agent["name"], agent["id"])
+            if not approved:
+                deny("APPROVAL_INVALID", reason, 409)
+
+        record = port_finalization.finalize(payload.action_id, agent["id"], authorize=authorize)
+    except (ValueError, container_control.ControlError):
+        deny("RECOVERY_UNAVAILABLE", "Replacement recovery is unavailable", 409)
+    return JSONResponse(journal.response(record), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/v2/agent/system/targets")

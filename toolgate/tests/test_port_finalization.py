@@ -1,11 +1,12 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 from toolgate.api import server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import port_finalization, port_replacements
+from toolgate.core import owner_channel, port_finalization, port_replacements
 from toolgate.executors import container_control
 from toolgate.tests.test_port_control_boundary import (
     setup as boundary_setup,  # noqa: F401
@@ -73,3 +74,46 @@ def test_partial_execution_cannot_finalize(request):
     assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     with pytest.raises(port_replacements.ReplacementError):
         port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail())
+
+
+def test_http_recovery_requires_own_exact_approval_and_replays_receipt(request, monkeypatch):
+    daemon, _agent, payload = lost_receipt(request, monkeypatch)
+    _, _, key, _ = request.getfixturevalue("pending")
+    client = TestClient(server.app)
+    url = "/v2/agent/system/port-finalizations"
+    body = {"action_id": payload.action_id}
+    headers = {"X-ToolGate-Execution-Key": key}
+    count = len(daemon.requests)
+    assert client.post(url, json=body).status_code == 401
+    _other, other_key = cp.issue_agent_key("Other", ["tool:system.port-control"])
+    assert client.post(url, json=body, headers={"X-ToolGate-Execution-Key": other_key}).status_code == 409
+    response = client.post(url, json=body, headers=headers)
+    assert response.status_code == 200 and response.json()["code"] == "CONFIRMATION_REQUIRED"
+    rid = response.json()["request_id"]
+    assert "private-value" not in json.dumps(cp.get("request", rid))
+    with cp._conn() as conn:
+        assert owner_channel.project(conn, cp.get("request", rid))["reviewable"]
+    # Original execution approval must not authorize recovery.
+    assert client.post(url, json={**body, "approval_request_id": payload.approval_request_id},
+                       headers=headers).status_code == 409
+    approved_body = {**body, "approval_request_id": rid}
+    assert client.post(url, json=approved_body, headers=headers).status_code == 409
+    cp.decide_request(rid, "approved", "owner")
+    done = client.post(url, json=approved_body, headers=headers)
+    assert done.status_code == 200 and done.json()["code"] == "OK", done.text
+    assert done.headers["cache-control"] == "no-store"
+    assert cp.get("request", rid)["payload"]["binding"]["consumed_at"]
+    assert client.post(url, json=approved_body, headers=headers).json() == done.json()
+    assert len(daemon.requests) == count
+
+
+def test_http_partial_recovery_does_not_create_approval(request):
+    daemon, agent, _, payload = request.getfixturevalue("pending")
+    daemon.fail = "/start"
+    server.run_tool("system.port-control", payload, agent)
+    before = len(cp.list_objects("request"))
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as error:
+        server.finalize_port_recovery(server.PortFinalizationRequest(action_id=payload.action_id), agent)
+    assert error.value.status_code == 409
+    assert len(cp.list_objects("request")) == before
