@@ -55,3 +55,28 @@ document is returned. The response still explicitly says execution is unimplemen
 70 focused preview/planner/lifecycle tests passed with synthetic HTTP, including
 configuration revocation, duplicate JSON keys, oversized replies and no retries.
 This does not verify Docker replacement, retention or real daemon behavior.
+
+## Private replacement specification
+
+`port_spec.prepare` constructs an internal create payload from the private inspect
+document and exact mapping delta. ContainerConfig fields, resource/restart settings,
+bind declarations, volume options and configured network aliases/IPAM are retained.
+Anonymous volumes are resolved to their existing names rather than recreated empty.
+Observed and declared volume identities must agree. External container namespace
+dependencies, VolumesFrom and external container-ID files require a separate path.
+Unsupported configurations fail before effects; they are not silently simplified.
+
+The internal object hides its payload in repr and returns a separate public preview.
+Its configuration fingerprint stays private and detects reviewed-config changes;
+it does not bind writable file contents or authorize execution. The future executor
+must recheck scope and source state, stop the source, commit its writable layer,
+and pass the resulting immutable image ID to `create_body`. The original image tag
+is deliberately insufficient. [Docker commit](https://docs.docker.com/reference/cli/docker/container/commit/)
+does not include mounted volumes; those are reused separately. Tmpfs reset is
+explicit in the preview. Volumes remain live shared storage, not snapshot backups.
+
+67 specification/preview/planner tests pass on synthetic documents and HTTP.
+Payload construction alone does not prove replacement fidelity on a real daemon.
+Durable private storage, step journaling, network detach/reattach, rollback/unknown
+reconciliation and managed replacement identity remain executor work. No raw
+configuration should be included in public receipts, logs or API responses.
