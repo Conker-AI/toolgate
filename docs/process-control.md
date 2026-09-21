@@ -48,3 +48,21 @@ replay. Raw stderr, exception messages, service environment and command lines ar
 Focused tests use injected subprocess runners and explicitly forbid the real runner.
 They do not manage host services. Linux/systemd deployment verification remains separate.
 Command semantics: [official systemctl documentation](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html).
+
+## ToolGate execution boundary
+
+The reserved `system.process-control` tool registers only when absent and requires
+owner confirmation. Its arguments are `service_id` (including manager scope) and
+`action`. Definition validation and dispatch prevent replacing the executor or
+silently dropping confirmation. Current scoped-key, lockdown and publication
+checks reuse ToolGate's existing authority boundary. The execution journal is
+committed before calling the adapter; unknown outcomes are never reexecuted when
+the same action ID is used. Published workflows retain their bound approval rules.
+
+`GET /v2/agent/system/services` requires this tool's scope and returns configured
+service IDs without calling systemctl. Disabled, locked-down or unconfigured
+states do not expose usable actions; `observed=false` and `Cache-Control: no-store`
+are explicit. Pi's owner API and dashboard wiring remain separate work. Unit-file
+changes and systemd dependency effects are not frozen by a service-name approval;
+the operator must protect the installed service definitions. This is not a general
+process killer or a way to reconstruct an arbitrary process's startup command.

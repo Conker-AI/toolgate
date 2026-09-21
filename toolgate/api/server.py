@@ -36,7 +36,7 @@ from toolgate.core.public_https import (
     public_url,
     resolve_public,
 )
-from toolgate.executors import container_control, research, system_inventory
+from toolgate.executors import container_control, process_control, research, system_inventory
 
 SERVICE_VERSION = "0.3.0"
 
@@ -156,6 +156,19 @@ def ensure_builtin_system_capabilities() -> None:
             "execution": {"type": "container_control"},
             "policy": {"usage_limits": {"max_per_minute": 6, "cooldown_seconds": 0,
                         "max_per_hour": 30, "max_runtime_seconds": 45}},
+        })
+    if not control_plane.get("tool", "system.process-control"):
+        control_plane.create_tool({
+            "id": "system.process-control", "name": "Managed service control",
+            "description": "Start, stop or restart one operator-managed systemd service. Requires exact owner approval; no arbitrary PID or shell command.",
+            "category": "system", "authorization": "owner_confirmation", "status": "active",
+            "inputs": [{"name": "service_id", "type": "string", "required": True},
+                       {"name": "action", "type": "string", "required": True,
+                        "enum": ["start", "stop", "restart"]}],
+            "outputs": [{"name": "observation", "type": "object"}],
+            "execution": {"type": "process_control"},
+            "policy": {"usage_limits": {"max_per_minute": 6, "cooldown_seconds": 0,
+                        "max_per_hour": 30, "max_runtime_seconds": 60}},
         })
 
 
@@ -555,6 +568,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "research_search", "research_bundle", "research_fetch", "research_fetch_batch",
     "system_inventory",
     "container_control",
+    "process_control",
 }
 AUTHORIZATION_MODES = {"auto", "ai_review", "owner_confirmation", "blocked"}
 CAPABILITY_STATUSES = {"draft", "active", "disabled"}
@@ -644,18 +658,22 @@ def tool_definition_errors(tool: dict) -> list[str]:
         errors.append("system.inventory is reserved for the fixed read-only inventory executor")
     if tool.get("id") == "system.container-control" and execution != {"type": "container_control"}:
         errors.append("system.container-control is reserved for managed container lifecycle")
+    if tool.get("id") == "system.process-control" and execution != {"type": "process_control"}:
+        errors.append("system.process-control is reserved for managed service lifecycle")
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}")
         return errors
-    if execution["type"] == "container_control":
-        if execution != {"type": "container_control"}:
-            errors.append("container_control uses only operator-configured managed targets")
+    if execution["type"] in {"container_control", "process_control"}:
+        kind = execution["type"]
+        target = "container_id" if kind == "container_control" else "service_id"
+        if execution != {"type": kind}:
+            errors.append(f"{kind} uses only operator-configured managed targets")
         if tool.get("authorization") != "owner_confirmation":
-            errors.append("container_control requires owner_confirmation")
-        if input_names != {"container_id", "action"} or any(
+            errors.append(f"{kind} requires owner_confirmation")
+        if input_names != {target, "action"} or any(
                 field.get("type") != "string" or field.get("required") is not True
                 for field in inputs if isinstance(field, dict)):
-            errors.append("container_control requires string container_id and action inputs")
+            errors.append(f"{kind} requires string {target} and action inputs")
     elif execution["type"] == "system_inventory":
         if execution != {"type": "system_inventory"}:
             errors.append("system_inventory uses only the operator-configured fixed endpoint")
@@ -1163,6 +1181,11 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
             or tool.get("authorization") != "owner_confirmation"):
         return {"ok": False, "error": "Managed container control requires its fixed executor and owner confirmation.",
                 "error_code": "invalid_container_definition"}
+    if (tool.get("id") == "system.process-control" or executor_type == "process_control") and (
+            tool.get("execution") != {"type": "process_control"}
+            or tool.get("authorization") != "owner_confirmation"):
+        return {"ok": False, "error": "Managed service control requires its fixed executor and owner confirmation.",
+                "error_code": "invalid_process_definition"}
     if executor_type == "echo":
         result = {"ok": True, "result": args}
     elif executor_type == "local_echo":
@@ -1183,6 +1206,14 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         result = _execute_research_fetch(args)
     elif executor_type == "research_fetch_batch":
         result = _execute_research_fetch_batch(args)
+    elif executor_type == "process_control":
+        if set(args) != {"service_id", "action"}:
+            return {"ok": False, "error": "Provide only service_id and action.",
+                    "error_code": "invalid_arguments"}
+        try:
+            result = {"ok": True, "result": process_control.control(args["service_id"], args["action"])}
+        except process_control.ControlError as exc:
+            result = {"ok": False, "error": str(exc), "error_code": exc.code}
     elif executor_type == "container_control":
         if set(args) != {"container_id", "action"}:
             return {"ok": False, "error": "Provide only container_id and action.",
@@ -1782,6 +1813,30 @@ def agent_system_targets(agent: dict = Depends(require_agent)):
             result["containers"] = container_control.targets()
             result["actions"] = ["start", "stop", "restart"]
         except container_control.ControlError as exc:
+            result["status"] = exc.code
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v2/agent/system/services")
+def agent_system_services(agent: dict = Depends(require_agent)):
+    tool_id = "system.process-control"
+    if not control_plane.is_scoped(agent, tool_id):
+        deny("POLICY_DENIED", "Managed service scope is required", 403)
+    result = {"kind": "configured-targets", "status": "configured", "services": [],
+              "actions": [], "requiresApproval": True, "observed": False,
+              "source": "toolgate/process-control"}
+    tool = control_plane.get("tool", tool_id)
+    if control_plane.settings().get("lockdown"):
+        result["status"] = "locked_down"
+    elif (not tool or tool.get("status") != "active"
+          or tool.get("authorization") != "owner_confirmation"
+          or tool.get("execution") != {"type": "process_control"}):
+        result["status"] = "disabled"
+    else:
+        try:
+            result["services"] = process_control.targets()
+            result["actions"] = ["start", "stop", "restart"]
+        except process_control.ControlError as exc:
             result["status"] = exc.code
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
