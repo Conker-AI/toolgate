@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, StrictBool, StrictInt
 from toolgate.core import (
     container_admission,
     control_plane,
+    editor_drafts,
     legacy_archive,
     owner_channel,
     port_finalization,
@@ -2402,6 +2403,22 @@ def owner_requests(limit: int = Query(default=50, ge=1, le=200),
                    cursor: str | None = Query(default=None, min_length=1, max_length=128,
                                              pattern=r"^[A-Za-z0-9_-]+$")):
     return owner_channel.list_requests(limit, cursor)
+
+
+@app.get("/v2/owner/editor-drafts", dependencies=[Depends(require_owner)])
+def owner_editor_drafts(limit: int = Query(default=50, ge=1, le=100),
+                        after: str | None = Query(default=None, max_length=64)):
+    return editor_drafts.list_drafts(limit, after)
+
+
+@app.get("/v2/owner/editor-drafts/{draft_id}", dependencies=[Depends(require_owner)])
+def owner_editor_draft(draft_id: str):
+    return editor_drafts.get(draft_id)
+
+
+@app.post("/v2/owner/editor-drafts/{draft_id}", dependencies=[Depends(require_owner)])
+def save_owner_editor_draft(draft_id: str, payload: editor_drafts.SaveDraft):
+    return editor_drafts.save(draft_id, payload)
 
 
 @app.get("/v2/owner/requests/{request_id}", dependencies=[Depends(require_owner)])
