@@ -30,6 +30,7 @@ from toolgate.core import (
     editor_execution,
     editor_publication,
     editor_catalogue,
+    editor_runs,
     legacy_archive,
     owner_channel,
     port_finalization,
@@ -1749,6 +1750,18 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
     return None
 
 
+def _automation_input_errors(definition, args):
+    workflow = definition.get("workflow", [])
+    if len(workflow) == 1 and workflow[0].get("type") == "editor_graph":
+        try:
+            document = editor_publication.document_from_block(workflow[0])
+            editor_execution.inputs(document.inputs, args)
+            return []
+        except ValueError as exc:
+            return [str(exc)]
+    return control_plane.validate_inputs(definition.get("inputs", []), args)
+
+
 def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_granted: bool, *, resolved_args=None) -> dict:
     publication = (state.get("publication") or {}).get("automations", {}).get(publications.nested_key(step))
     if not publication:
@@ -1757,7 +1770,7 @@ def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_gran
     if definition.get("authorization", "auto") != "auto" and not approval_granted:
         deny("POLICY_DENIED", "Nested automation requires root owner confirmation", 403)
     args = resolved_args if resolved_args is not None else _workflow_value(step.get("args", {}), state)
-    errors = control_plane.validate_inputs(definition.get("inputs", []), args)
+    errors = _automation_input_errors(definition, args)
     if errors:
         deny("VALIDATION_ERROR", "; ".join(errors), 422)
     action_id = "child_" + hashlib.sha256(f"{state['action_id']}:{state['count']}".encode()).hexdigest()
@@ -2395,7 +2408,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         return journal.response(previous)
     if control_plane.settings().get("lockdown"):
         deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423)
-    errors = control_plane.validate_inputs(automation.get("inputs", []), payload.args)
+    errors = _automation_input_errors(automation, payload.args)
     if errors:
         deny("VALIDATION_ERROR", "; ".join(errors), 422)
     authorization = automation.get("authorization", "auto")
@@ -2510,6 +2523,44 @@ def save_owner_editor_draft(draft_id: str, payload: editor_drafts.SaveDraft):
 @app.get("/v2/owner/editor-drafts/{draft_id}/publications", dependencies=[Depends(require_owner)])
 def owner_editor_publications(draft_id: str):
     return {"items": editor_publication.history(draft_id)}
+
+
+@app.get("/v2/owner/editor-drafts/{draft_id}/access", dependencies=[Depends(require_owner)])
+def editor_access(draft_id: str, version: int = Query(ge=1), digest: str = Query(pattern=r"^[a-f0-9]{64}$"),
+                  agent: dict = Depends(require_agent)):
+    return editor_runs.access(draft_id, editor_runs.Target(version=version, digest=digest), agent)
+
+
+@app.post("/v2/owner/editor-drafts/{draft_id}/access", dependencies=[Depends(require_owner)])
+def change_editor_access(draft_id: str, payload: editor_runs.Access, agent: dict = Depends(require_agent)):
+    return editor_runs.access(draft_id, payload, agent, enabled=payload.enabled)
+
+
+@app.get("/v2/owner/editor-drafts/{draft_id}/runs", dependencies=[Depends(require_owner)])
+def owner_editor_runs(draft_id: str, agent: dict = Depends(require_agent)):
+    return editor_runs.history(draft_id, agent)
+
+
+@app.post("/v2/owner/editor-drafts/{draft_id}/runs", dependencies=[Depends(require_owner)])
+def run_owner_editor_draft(draft_id: str, payload: editor_runs.Run, agent: dict = Depends(require_agent)):
+    publication, previous, dispatch = editor_runs.begin(draft_id, payload, agent)
+    if not dispatch:
+        return editor_runs._response(previous)
+    try:
+        result = run_automation(publication["id"], V2Invoke(args=payload.args, action_id=payload.action_id,
+            approval_request_id=payload.approval_request_id, published_version=payload.version,
+            expected_publication_digest=payload.digest), agent)
+    except HTTPException as exc:
+        # A policy rejection is a known response. Any uncertain child dispatch is
+        # already held by run_automation's journal; never try an alternate path.
+        result = {"code": exc.detail.get("code", "REQUEST_REJECTED") if isinstance(exc.detail, dict) else "REQUEST_REJECTED",
+                  "message": "Run was rejected. Check publication availability, access and approval before creating another run."}
+        request = control_plane.get("request", payload.approval_request_id) if payload.approval_request_id else None
+        if result["code"] == "APPROVAL_INVALID" and request and request.get("status") == "pending":
+            result = {"code": "CONFIRMATION_REQUIRED", "request_id": payload.approval_request_id,
+                      "message": "Approval is still pending in Inbox. Resume this same run after approval."}
+    result = {**result, "action_id": payload.action_id}
+    return editor_runs.finish(payload.action_id, result)
 
 
 @app.post("/v2/owner/editor-drafts/{draft_id}/publish", dependencies=[Depends(require_owner)])
