@@ -6,6 +6,7 @@ import json
 import uuid
 
 from toolgate.core import control_plane as cp
+from toolgate.core.editor_publication import dependency_steps
 
 
 class PublicationInvalid(ValueError):
@@ -111,7 +112,12 @@ def graph_limits(publication: dict) -> None:
             if count > 500 or not isinstance(step, dict):
                 raise PublicationInvalid("Expanded workflow cannot exceed 500 typed blocks")
             kind = step.get("type")
-            if kind == "automation_call":
+            if kind == "editor_graph":
+                try:
+                    visit(current, dependency_steps(step), depth, ancestors)
+                except ValueError as exc:
+                    raise PublicationInvalid(str(exc)) from exc
+            elif kind == "automation_call":
                 child = current.get("automations", {}).get(nested_key(step))
                 if not child or step.get("publication_digest", child["digest"]) != child["digest"]:
                     raise PublicationInvalid("Nested publication is unavailable or its digest does not match")
@@ -147,7 +153,12 @@ def dependencies(conn, definition: dict) -> tuple[dict, dict]:
             if count > 500 or not isinstance(step, dict):
                 raise PublicationInvalid("Workflow must contain at most 500 typed blocks")
             kind = step.get("type")
-            if kind == "tool_call":
+            if kind == "editor_graph":
+                try:
+                    visit(dependency_steps(step), depth)
+                except ValueError as exc:
+                    raise PublicationInvalid(str(exc)) from exc
+            elif kind == "tool_call":
                 tool_id = step.get("tool_id")
                 if not isinstance(tool_id, str):
                     raise PublicationInvalid("Tool calls require a literal tool_id")

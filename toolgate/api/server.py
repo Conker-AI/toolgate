@@ -27,6 +27,8 @@ from toolgate.core import (
     control_plane,
     editor_drafts,
     editor_graph,
+    editor_execution,
+    editor_publication,
     legacy_archive,
     owner_channel,
     port_finalization,
@@ -1389,7 +1391,7 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
 
 SUPPORTED_WORKFLOW_BLOCKS = {
     "tool_call", "automation_call", "condition", "switch", "loop", "calculation", "set",
-    "delay", "retry", "notification", "return",
+    "delay", "retry", "notification", "return", "editor_graph",
 }
 
 
@@ -1405,6 +1407,14 @@ def workflow_definition_errors(workflow: list, depth: int = 0) -> list[str]:
             errors.append(f"{prefix} has an unsupported block type")
             continue
         kind = step["type"]
+        if kind == "editor_graph":
+            if depth != 0 or len(workflow) != 1:
+                errors.append("An editor graph must be the entire workflow definition")
+            try:
+                editor_publication.document_from_block(step)
+            except ValueError as exc:
+                errors.append(f"{prefix}: {exc}")
+            continue
         if kind == "automation_call":
             try:
                 publications.nested_key(step)
@@ -1480,6 +1490,8 @@ def workflow_tool_ids(workflow: list, block_type: str = "tool_call") -> list[str
         if not isinstance(step, dict):
             continue
         field = "tool_id" if block_type == "tool_call" else "automation_id"
+        if step.get("type") == "editor_graph":
+            ids.extend(workflow_tool_ids(editor_publication.dependency_steps(step), block_type))
         if step.get("type") == block_type and isinstance(step.get(field), str):
             ids.append(step[field])
         for key in ("steps", "then", "else", "default"):
@@ -1495,7 +1507,10 @@ def workflow_tool_ids(workflow: list, block_type: str = "tool_call") -> list[str
 
 def automation_definition_errors(automation: dict) -> list[str]:
     errors = capability_metadata_errors(automation)
-    errors.extend(workflow_definition_errors(automation.get("workflow", [])))
+    workflow_errors = workflow_definition_errors(automation.get("workflow", []))
+    errors.extend(workflow_errors)
+    if workflow_errors:
+        return errors
     for tool_id in dict.fromkeys(workflow_tool_ids(automation.get("workflow", []))):
         tool = control_plane.get("tool", tool_id)
         if not tool or tool.get("status") != "active":
@@ -1556,14 +1571,60 @@ def _workflow_compare(actual, operator: str, expected) -> bool:
     raise ValueError(f"unsupported operator {operator}")
 
 
+def _charge_workflow(state):
+    for frame in (state, *state.get("ancestors", ())):
+        frame["count"] += 1
+        if frame["count"] > frame["max_steps"]:
+            deny("POLICY_DENIED", "Automation exceeded its shared ancestor step ceiling")
+        if time.monotonic() - frame["started_at"] > frame["runtime_ceiling"]:
+            deny("POLICY_DENIED", "Automation exceeded its shared ancestor runtime ceiling")
+
+
+def _run_editor_graph(step, state, actor, approval_granted):
+    if not state.get("publication"):
+        deny("PUBLICATION_REQUIRED", "Editor graphs require an immutable published version", 422)
+    document = editor_publication.document_from_block(step)
+    budget = state.setdefault("graph_budget", editor_execution.Budget())
+
+    def dispatch(node, args, _budget):
+        if node.type == "workflow_call":
+            result = _invoke_nested_automation(
+                {"automation_id": node.config["toolId"], "published_version": node.config["version"]},
+                state, actor, approval_granted, resolved_args=args)
+        else:
+            tool = state["tool_snapshot"].get(node.config["tool"])
+            if not tool:
+                deny("PUBLICATION_REQUIRED", "Graph capability is not pinned in its publication", 422)
+            child_id = "child_" + hashlib.sha256(f"{state['action_id']}:{state['count']}".encode()).hexdigest()
+            result = invoke_tool(tool, args, actor, approval_granted=approval_granted,
+                actor_id=state["actor_id"], action_id=child_id, job_id=state.get("job_id"),
+                parent_action_id=state["action_id"], authority_scope=state["authority_scope"],
+                publication=state.get("root_publication", state["publication"]))
+        if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:
+            deny("OUTCOME_UNKNOWN", "A graph child dispatch is uncertain; reconcile its receipt", 409)
+        if result.get("code") != "OK":
+            raise editor_execution.GraphValueError("A graph capability did not complete successfully; inspect its receipt.")
+        # Expose the executor output, not credentials or the journal envelope.
+        payload = result.get("result", {})
+        return payload.get("result") if isinstance(payload, dict) else payload
+
+    try:
+        result = editor_execution.execute(document, state["args"], dispatch=dispatch,
+            budget=budget, on_step=lambda: _charge_workflow(state))
+    except editor_execution.GraphExecutionError as exc:
+        state["results"] = exc.receipts
+        return {"code": "WORKFLOW_FAILED", "message": str(exc), "node_id": exc.node_id}
+    state["results"] = result["steps"]
+    return {"code": "OK", "result": result["output"]}
+
+
 def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: bool):
+    if len(steps) == 1 and steps[0].get("type") == "editor_graph":
+        return _run_editor_graph(steps[0], state, actor, approval_granted)
     for step in steps:
-        for frame in (state, *state.get("ancestors", ())):
-            frame["count"] += 1
-            if frame["count"] > frame["max_steps"]:
-                deny("POLICY_DENIED", "Automation exceeded its shared ancestor step ceiling")
-            if time.monotonic() - frame["started_at"] > frame["runtime_ceiling"]:
-                deny("POLICY_DENIED", "Automation exceeded its shared ancestor runtime ceiling")
+        _charge_workflow(state)
+        if state.get("graph_budget"):
+            state["graph_budget"].charge()
         kind = step["type"]
         result = None
         if kind == "tool_call":
@@ -1687,14 +1748,14 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
     return None
 
 
-def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_granted: bool) -> dict:
+def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_granted: bool, *, resolved_args=None) -> dict:
     publication = (state.get("publication") or {}).get("automations", {}).get(publications.nested_key(step))
     if not publication:
         deny("PUBLICATION_REQUIRED", "Nested calls require a pinned publication", 422)
     definition = publication["definition"]
     if definition.get("authorization", "auto") != "auto" and not approval_granted:
         deny("POLICY_DENIED", "Nested automation requires root owner confirmation", 403)
-    args = _workflow_value(step.get("args", {}), state)
+    args = resolved_args if resolved_args is not None else _workflow_value(step.get("args", {}), state)
     errors = control_plane.validate_inputs(definition.get("inputs", []), args)
     if errors:
         deny("VALIDATION_ERROR", "; ".join(errors), 422)
@@ -1722,12 +1783,15 @@ def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_gran
               "ancestors": (state, *state.get("ancestors", ())),
               "max_steps": int(limits.get("max_steps", 100)), "started_at": time.monotonic(),
               "runtime_ceiling": min(int(limits.get("max_runtime_seconds", 30) or 30), 120)}
+    if state.get("graph_budget"):
+        nested["graph_budget"] = state["graph_budget"]
     try:
         final = _run_workflow_steps(definition.get("workflow", []), nested, actor, approval_granted)
     except Exception:  # noqa: BLE001 - hold any incomplete nested dispatch; never retry it.
         journal.unknown(action_id)
         deny("OUTCOME_UNKNOWN", "Nested workflow is incomplete; reconcile its receipt", 409)
-    envelope = {"code": "OK", "message": "Nested automation completed", "result": final,
+    failed = isinstance(final, dict) and final.get("code") == "WORKFLOW_FAILED"
+    envelope = {"code": "WORKFLOW_FAILED" if failed else "OK", "message": "Nested workflow failed" if failed else "Nested automation completed", "result": final,
                 "steps": nested["results"], "variables": nested["vars"],
                 "publication": {"kind": "automation", "id": definition["id"],
                                 "version": publication["version"], "digest": publication["digest"]}}
@@ -2311,6 +2375,8 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         deny("TOOL_UNAVAILABLE", "Automation is not active", 404)
     if not control_plane.is_scoped(agent, f"automation:{automation_id}"):
         deny("POLICY_DENIED", "Your agent key is not allowed to run this automation")
+    if not publication and any(step.get("type") == "editor_graph" for step in automation.get("workflow", [])):
+        deny("PUBLICATION_REQUIRED", "Editor graphs require an immutable published version", 422)
     if not publication and workflow_tool_ids(automation.get("workflow", []), "automation_call"):
         deny("PUBLICATION_REQUIRED", "Nested automation calls require an explicit published root version", 422)
     authority_scope = (tuple(dict.fromkeys(f"automation:{member['id']}" for member in publications.members(publication)))
@@ -2383,7 +2449,8 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
     except Exception:
         journal.unknown(payload.action_id)
         return journal.response(journal.get(payload.action_id))
-    envelope = {"code": "OK", "message": "Automation completed", "result": final,
+    failed = isinstance(final, dict) and final.get("code") == "WORKFLOW_FAILED"
+    envelope = {"code": "WORKFLOW_FAILED" if failed else "OK", "message": "Workflow failed" if failed else "Automation completed", "result": final,
                 "steps": state["results"], "variables": state["vars"]}
     if publication:
         envelope["publication"] = {"kind": "automation", "id": automation_id,
