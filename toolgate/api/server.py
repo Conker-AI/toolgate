@@ -26,6 +26,7 @@ from toolgate.core import (
     container_admission,
     control_plane,
     editor_drafts,
+    editor_graph,
     legacy_archive,
     owner_channel,
     port_finalization,
@@ -2414,6 +2415,15 @@ def owner_editor_drafts(limit: int = Query(default=50, ge=1, le=100),
 @app.get("/v2/owner/editor-drafts/{draft_id}", dependencies=[Depends(require_owner)])
 def owner_editor_draft(draft_id: str):
     return editor_drafts.get(draft_id)
+
+
+@app.get("/v2/owner/editor-drafts/{draft_id}/validation", dependencies=[Depends(require_owner)])
+def validate_owner_editor_draft(draft_id: str):
+    record = editor_drafts.get(draft_id)
+    document = editor_drafts.EditorDocument.model_validate(record["document"])
+    issues = editor_graph.validate_graph(document)
+    return {"id": draft_id, "revision": record["revision"], "graph_valid": not issues,
+            "issues": issues, "execution_ready": False}
 
 
 @app.post("/v2/owner/editor-drafts/{draft_id}", dependencies=[Depends(require_owner)])

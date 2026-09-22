@@ -79,3 +79,20 @@ def test_keyset_pagination_has_no_full_documents(gate):
     page = client.get("/v2/owner/editor-drafts?limit=2&after=b", headers=HEADERS).json()
     assert [item["id"] for item in page["items"]] == ["c"]
     assert page["next_after"] is None
+
+
+def test_saved_graph_validation_is_revision_bound_and_does_not_publish(gate):
+    client = gate[0]
+    assert save(client).status_code == 200
+    path = "/v2/owner/editor-drafts/example/validation"
+    assert client.get(path).status_code == 401
+    result = client.get(path, headers=HEADERS).json()
+    assert result["revision"] == 1 and result["graph_valid"] is False
+    assert result["issues"] and result["execution_ready"] is False
+    connected = document()
+    connected["edges"] = [{"id": "next", "source": "input", "target": "result"}]
+    assert save(client, revision=1, value=connected).status_code == 200
+    result = client.get(path, headers=HEADERS).json()
+    assert result["revision"] == 2 and result["graph_valid"] is True
+    assert result["issues"] == [] and result["execution_ready"] is False
+    assert cp.get("automation", "example") is None
