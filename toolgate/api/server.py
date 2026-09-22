@@ -2498,6 +2498,20 @@ def save_owner_editor_draft(draft_id: str, payload: editor_drafts.SaveDraft):
     return editor_drafts.save(draft_id, payload)
 
 
+@app.get("/v2/owner/editor-drafts/{draft_id}/publications", dependencies=[Depends(require_owner)])
+def owner_editor_publications(draft_id: str):
+    return {"items": editor_publication.history(draft_id)}
+
+
+@app.post("/v2/owner/editor-drafts/{draft_id}/publish", dependencies=[Depends(require_owner)])
+def publish_owner_editor_draft(draft_id: str, payload: editor_publication.PublishDraft):
+    publication = editor_publication.publish_draft(draft_id, payload,
+        validate=require_valid_automation_definition, validate_tool=require_valid_tool_definition)
+    return {"draft_id": draft_id, "revision": payload.expected_revision,
+            "automation_id": publication["id"], "version": publication["version"],
+            "digest": publication["digest"], "published_at": publication["published_at"]}
+
+
 @app.get("/v2/owner/requests/{request_id}", dependencies=[Depends(require_owner)])
 def owner_request(request_id: str):
     return owner_channel.get(request_id)

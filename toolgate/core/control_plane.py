@@ -12,7 +12,7 @@ import re
 import secrets
 import sqlite3
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 
 from toolgate.core.paths import DB_PATH
@@ -107,12 +107,12 @@ class DefinitionConflict(ValueError):
 
 
 def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
-         require_existing: bool = False) -> dict | None:
+         require_existing: bool = False, connection=None) -> dict | None:
     now = _now()
     body = {**body, "id": obj_id}
-    with _conn() as conn:
+    with (nullcontext(connection) if connection is not None else _conn()) as conn:
         definition = kind in {"tool", "automation"}
-        if kind == "request" or definition:
+        if connection is None and (kind == "request" or definition):
             conn.execute("BEGIN IMMEDIATE")
         existing = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
         if require_existing and not existing:

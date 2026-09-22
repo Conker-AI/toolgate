@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from contextlib import nullcontext
 
 from toolgate.core import control_plane as cp
 from toolgate.core.editor_publication import dependency_steps
@@ -201,12 +202,13 @@ def dependencies(conn, definition: dict) -> tuple[dict, dict]:
     return tools, automations
 
 
-def publish(kind: str, obj_id: str, expected_version: int, *, validate=None, validate_tool=None) -> dict | None:
+def publish(kind: str, obj_id: str, expected_version: int, *, validate=None, validate_tool=None, connection=None) -> dict | None:
     _kind(kind)
     if type(expected_version) is not int or expected_version < 1:
         raise ValueError("expected_version must be a positive integer")
-    with cp._conn() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+    with (nullcontext(connection) if connection is not None else cp._conn()) as conn:
+        if connection is None:
+            conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
         if not row:
             return None
