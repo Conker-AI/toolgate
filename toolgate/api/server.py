@@ -2344,6 +2344,11 @@ def agent_automations(agent: dict = Depends(require_agent)):
     return [item for item in control_plane.list_objects("automation") if item.get("status") == "active" and control_plane.is_scoped(agent, f"automation:{item['id']}")]
 
 
+@app.get("/v2/agent/published-workflows")
+def agent_published_workflows(agent: dict = Depends(require_agent)):
+    return editor_catalogue.agent_workflows(agent)
+
+
 @app.get("/v2/agent/automations/{automation_id}")
 def agent_automation_info(automation_id: str, agent: dict = Depends(require_agent)):
     item = control_plane.get("automation", automation_id)

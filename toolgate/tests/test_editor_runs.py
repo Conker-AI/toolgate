@@ -105,3 +105,33 @@ def test_graph_input_defaults_work_without_changing_reviewed_arguments(gate):
     result = client.post(base + '/runs', headers=headers, json={**target, 'action_id': 'editor_' + uuid.uuid4().hex, 'args': {}}).json()
     assert result['code'] == 'OK' and result['result']['result'] == 4
     assert journal.get(result['action_id'])['args'] == {}
+
+
+def test_agent_discovers_only_scoped_immutable_workflow_metadata(gate):
+    client, _, headers, target = setup(gate)
+    execution = {'X-ToolGate-Execution-Key': gate[2]}
+    path = '/v2/agent/published-workflows'
+    assert client.get(path, headers=execution).json() == []
+    client.post('/v2/owner/editor-drafts/example/access', headers=headers,
+                json={**target, 'enabled': True}).raise_for_status()
+    rows = client.get(path, headers=execution).json()
+    assert len(rows) == 1
+    assert rows[0]['id'].endswith(':1:' + target['digest'])
+    assert set(rows[0]) == {'id', 'name', 'description', 'inputs'}
+    client.post('/v2/owner/editor-drafts/example/access', headers=headers,
+                json={**target, 'enabled': False}).raise_for_status()
+    assert client.get(path, headers=execution).json() == []
+
+
+def test_hidden_editor_workflow_stays_out_of_agent_catalogue(gate):
+    from toolgate.tests.test_editor_execution import linear
+    client, _, key = gate
+    document = linear(('result', 'return', {'value': 7}))
+    document['agentVisible'] = False
+    assert save(client, document).status_code == 200
+    published = publish(client, authorization='auto').json()
+    headers = {**HEADERS, 'X-ToolGate-Execution-Key': key}
+    target = {'version': 1, 'digest': published['digest']}
+    client.post('/v2/owner/editor-drafts/example/access', headers=headers,
+                json={**target, 'enabled': True}).raise_for_status()
+    assert client.get('/v2/agent/published-workflows', headers=headers).json() == []
