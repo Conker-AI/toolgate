@@ -29,6 +29,7 @@ from toolgate.core import (
     editor_graph,
     editor_execution,
     editor_publication,
+    editor_catalogue,
     legacy_archive,
     owner_channel,
     port_finalization,
@@ -2471,6 +2472,14 @@ def owner_requests(limit: int = Query(default=50, ge=1, le=200),
                    cursor: str | None = Query(default=None, min_length=1, max_length=128,
                                              pattern=r"^[A-Za-z0-9_-]+$")):
     return owner_channel.list_requests(limit, cursor)
+
+
+@app.get("/v2/owner/editor-capabilities", dependencies=[Depends(require_owner)])
+def owner_editor_capabilities(kind: Literal["tool", "workflow"] = "tool",
+                              q: str = Query(default="", max_length=100),
+                              after: str | None = Query(default=None, max_length=80, pattern=r"^[a-z0-9][a-z0-9.-]{1,79}$"),
+                              limit: int = Query(default=50, ge=1, le=100)):
+    return editor_catalogue.list_capabilities(kind, q, after, limit)
 
 
 @app.get("/v2/owner/editor-drafts", dependencies=[Depends(require_owner)])
