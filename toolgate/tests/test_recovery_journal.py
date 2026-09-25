@@ -3,7 +3,8 @@ import sqlite3
 import pytest
 
 from toolgate.api import server
-from toolgate.core import control_plane, execution_journal as journal, recovery_journal
+from toolgate.core import control_plane, recovery_journal
+from toolgate.core import execution_journal as journal
 
 
 @pytest.fixture

@@ -2,9 +2,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
-from toolgate.core import control_plane as cp, spending
+from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.tests.test_spending import paid as paid, setup_budget, invoke
+from toolgate.core import spending
+from toolgate.tests.test_spending import invoke, setup_budget
+from toolgate.tests.test_spending import paid as paid
 
 
 def held(paid, monkeypatch):

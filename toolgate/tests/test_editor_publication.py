@@ -2,7 +2,9 @@ import pytest
 from fastapi import HTTPException
 
 from toolgate.api import server
-from toolgate.core import control_plane as cp, publications as pub, execution_journal as journal
+from toolgate.core import control_plane as cp
+from toolgate.core import execution_journal as journal
+from toolgate.core import publications as pub
 from toolgate.tests.test_editor_execution import linear
 
 

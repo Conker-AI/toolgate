@@ -1,8 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 
 from toolgate.core import control_plane as cp
-from toolgate.tests.test_owner_channel import gate, HEADERS, ADMIN  # noqa: F401
 from toolgate.tests.test_editor_execution import linear
+from toolgate.tests.test_owner_channel import ADMIN, HEADERS, gate  # noqa: F401
 
 
 def save(client, value=None, revision=0):
@@ -17,7 +17,7 @@ def publish(client, revision=1, previous=0, **fields):
 
 
 def test_owner_publication_is_atomic_versioned_and_does_not_grant_execution(gate):
-    client, agent, execution = gate
+    client, _agent, execution = gate
     assert save(client).status_code == 200
     first = publish(client)
     assert first.status_code == 200, first.text

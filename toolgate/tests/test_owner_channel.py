@@ -2,7 +2,7 @@
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -120,7 +120,7 @@ def test_expired_pending_remains_pending_but_can_only_be_rejected_or_dismissed(g
     class Past(datetime):
         @classmethod
         def now(cls, tz=None):
-            return datetime.now(timezone.utc) - timedelta(hours=1)
+            return datetime.now(UTC) - timedelta(hours=1)
     with monkeypatch.context() as context:
         context.setattr(cp, "datetime", Past)
         request = mint(gate)

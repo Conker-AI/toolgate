@@ -1,6 +1,6 @@
 import socket
 import ssl
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpcore
 import httpx
@@ -81,7 +81,7 @@ OK = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\np
 
 def handle(monkeypatch, url="https://example.com/page"):
     monkeypatch.setattr(research.control_plane, "get_research_result", lambda _: {
-        "url": url, "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "url": url, "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
     })
 
 

@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -118,9 +118,9 @@ def test_execution_key_cannot_forge_approval_text_or_binding(gate):
     assert record["payload"]["binding"]["nonce"] != "attacker-nonce"
     expiry = datetime.fromisoformat(record["payload"]["binding"]["expires_at"])
     assert (
-        datetime.now(timezone.utc)
+        datetime.now(UTC)
         < expiry
-        <= datetime.now(timezone.utc) + timedelta(seconds=900)
+        <= datetime.now(UTC) + timedelta(seconds=900)
     )
     cp.decide_request(request_id, "approved", "admin")
     assert invoke(gate, request_id).json()["code"] == "OK"
@@ -351,7 +351,7 @@ def test_competing_signed_callbacks_return_conflict_without_rewriting(
 
 def test_expired_requests_cannot_be_reported_as_approved(gate, monkeypatch):
     request_id = mint(gate)
-    future = datetime.now(timezone.utc) + timedelta(seconds=901)
+    future = datetime.now(UTC) + timedelta(seconds=901)
 
     class Later(datetime):
         @classmethod

@@ -5,9 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
+from toolgate.core import container_lineage, owner_channel, port_finalization, port_replacements
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import container_lineage, owner_channel, port_finalization, port_replacements
 from toolgate.executors import container_control
 from toolgate.tests.test_port_control_boundary import (
     setup as boundary_setup,  # noqa: F401
@@ -155,7 +155,7 @@ def test_crash_after_atomic_verification_can_recover_without_docker_replay(reque
 
 
 def test_failed_lineage_write_cannot_leave_successful_verification(request):
-    daemon, agent, _, payload = request.getfixturevalue("pending")
+    _daemon, agent, _, payload = request.getfixturevalue("pending")
     with cp._conn() as conn:
         conn.executescript(container_lineage.SCHEMA)
         conn.executescript("""CREATE TRIGGER synthetic_disk_failure BEFORE INSERT ON v2_container_lineage

@@ -6,12 +6,13 @@ handles rather than arbitrary URLs.
 """
 from __future__ import annotations
 
+import contextlib
 import html
 import re
 import time
 import unicodedata
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
@@ -150,9 +151,9 @@ class _TextExtractor(HTMLParser):
 
 
 class _PublishedAtExtractor(HTMLParser):
-    ACCEPTED_META_KEYS = {
+    ACCEPTED_META_KEYS = frozenset({
         "article:published_time", "datepublished", "date-published", "publishdate", "pubdate",
-    }
+    })
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -209,7 +210,7 @@ def extract_published_metadata(value: object) -> tuple[str | None, dict | None]:
     candidates = list(parser.candidates)
     if json_ld:
         candidates.append(("jsonld:datePublished", json_ld.group(1)))
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for field, candidate in candidates:
         normalized = clean_text(candidate, 80)
         try:
@@ -217,9 +218,9 @@ def extract_published_metadata(value: object) -> tuple[str | None, dict | None]:
         except (TypeError, ValueError):
             continue
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        parsed = parsed.astimezone(timezone.utc)
-        if datetime(1990, 1, 1, tzinfo=timezone.utc) <= parsed <= now + timedelta(days=1):
+            parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.astimezone(UTC)
+        if datetime(1990, 1, 1, tzinfo=UTC) <= parsed <= now + timedelta(days=1):
             return parsed.isoformat(), {"provider": "page_metadata", "field": field}
     return None, None
 
@@ -247,7 +248,7 @@ def _normalize(title: object, url: object, snippet: object, source: str, publish
     normalized_published_at = None
     if isinstance(published_at, (int, float)) and not isinstance(published_at, bool):
         try:
-            normalized_published_at = datetime.fromtimestamp(float(published_at), timezone.utc).isoformat()
+            normalized_published_at = datetime.fromtimestamp(float(published_at), UTC).isoformat()
         except (OSError, OverflowError, ValueError):
             normalized_published_at = None
     else:
@@ -257,7 +258,7 @@ def _normalize(title: object, url: object, snippet: object, source: str, publish
                 epoch = float(raw_published_at)
                 if epoch > 10_000_000_000:
                     epoch /= 1000
-                normalized_published_at = datetime.fromtimestamp(epoch, timezone.utc).isoformat()
+                normalized_published_at = datetime.fromtimestamp(epoch, UTC).isoformat()
             except (OSError, OverflowError, ValueError):
                 normalized_published_at = None
         else:
@@ -315,10 +316,8 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
             if not match:
                 return item
             params = {"site": "stackoverflow", "filter": "withbody"}
-            try:
+            with contextlib.suppress(KeyError):
                 params["key"] = vault.get_key("STACKEXCHANGE_KEY")
-            except KeyError:
-                pass
             response = httpx.get(f"https://api.stackexchange.com/2.3/questions/{match.group(1)}", params=params, timeout=timeout)
             response.raise_for_status()
             rows = response.json().get("items", [])
@@ -387,7 +386,7 @@ def _tavily_unmetered(query: str, source: str, limit: int, recency_days: int, ti
     deadline = time.monotonic() + max(1.0, timeout)
     _require_provider_ready("tavily")
     token = vault.get_key("TAVILY_API_KEY")
-    start_date = (datetime.now(timezone.utc) - timedelta(days=recency_days)).date().isoformat()
+    start_date = (datetime.now(UTC) - timedelta(days=recency_days)).date().isoformat()
     domain = SOURCE_DOMAINS[source] or _requested_site_domain(query)
     provider_options = (
         {"include_domains": [domain]}
@@ -474,7 +473,7 @@ def _reddit_rss_published_at(url: str, timeout: float) -> str | None:
         updated = first_entry.findtext("{http://www.w3.org/2005/Atom}updated")
         if not updated:
             return None
-        return datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
+        return datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(UTC).isoformat()
     except (httpx.HTTPError, ET.ParseError, UnicodeError, ValueError, TypeError):
         return None
 
@@ -483,7 +482,7 @@ def _hackernews(query: str, _source: str, limit: int, recency_days: int, timeout
     response = httpx.get(
         "https://hn.algolia.com/api/v1/search",
         params={"query": query, "tags": "comment", "hitsPerPage": min(limit * 4, 40),
-                "numericFilters": f"created_at_i>{int((datetime.now(timezone.utc) - timedelta(days=recency_days)).timestamp())}"},
+                "numericFilters": f"created_at_i>{int((datetime.now(UTC) - timedelta(days=recency_days)).timestamp())}"},
         timeout=timeout,
     )
     response.raise_for_status()
@@ -560,17 +559,17 @@ def _reddit_rss_search(query: str, _source: str, limit: int, recency_days: int, 
     except ET.ParseError as exc:
         raise ResearchError("Reddit Atom response was malformed") from exc
     atom = "{http://www.w3.org/2005/Atom}"
-    cutoff = datetime.now(timezone.utc) - timedelta(days=recency_days)
+    cutoff = datetime.now(UTC) - timedelta(days=recency_days)
     results = []
     for entry in root.findall(f"{atom}entry"):
         if len(results) >= limit:
             break
         updated = clean_text(entry.findtext(f"{atom}updated"), 80)
         try:
-            published = datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(timezone.utc)
+            published = datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(UTC)
         except (TypeError, ValueError):
             continue
-        if published < cutoff or published > datetime.now(timezone.utc) + timedelta(days=1):
+        if published < cutoff or published > datetime.now(UTC) + timedelta(days=1):
             continue
         target = next(
             (
@@ -625,17 +624,17 @@ def _reddit_subreddit_feed(query: str, _source: str, limit: int, recency_days: i
     except ET.ParseError as exc:
         raise ResearchError("Reddit Atom response was malformed") from exc
     atom = "{http://www.w3.org/2005/Atom}"
-    cutoff = datetime.now(timezone.utc) - timedelta(days=recency_days)
+    cutoff = datetime.now(UTC) - timedelta(days=recency_days)
     results = []
     for entry in root.findall(f"{atom}entry"):
         if len(results) >= limit:
             break
         updated = clean_text(entry.findtext(f"{atom}updated"), 80)
         try:
-            published = datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(timezone.utc)
+            published = datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(UTC)
         except (TypeError, ValueError):
             continue
-        if published < cutoff or published > datetime.now(timezone.utc) + timedelta(days=1):
+        if published < cutoff or published > datetime.now(UTC) + timedelta(days=1):
             continue
         target = next((
             clean_text(link.get("href"), 1000)
@@ -688,12 +687,10 @@ def _reddit_subreddit_tavily(query: str, source: str, limit: int, recency_days: 
 
 
 def _github(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
-    created_after = (datetime.now(timezone.utc) - timedelta(days=recency_days)).date().isoformat()
+    created_after = (datetime.now(UTC) - timedelta(days=recency_days)).date().isoformat()
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "ToolGateResearch/2.0"}
-    try:
+    with contextlib.suppress(KeyError):
         headers["Authorization"] = f"Bearer {vault.get_key('GITHUB_TOKEN')}"
-    except KeyError:
-        pass
     request_args = {
         "params": {"q": f"{query} is:issue created:>={created_after}", "per_page": limit},
         "timeout": timeout,
@@ -715,12 +712,10 @@ def _github(query: str, _source: str, limit: int, recency_days: int, timeout: fl
 
 def _github_repositories(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
     """Search active public repositories as product landscape, never pain evidence."""
-    pushed_after = (datetime.now(timezone.utc) - timedelta(days=recency_days)).date().isoformat()
+    pushed_after = (datetime.now(UTC) - timedelta(days=recency_days)).date().isoformat()
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "ToolGateResearch/2.0"}
-    try:
+    with contextlib.suppress(KeyError):
         headers["Authorization"] = f"Bearer {vault.get_key('GITHUB_TOKEN')}"
-    except KeyError:
-        pass
     terms = [
         term for term in dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower()))
         if len(term) >= 3 and term not in QUERY_STOP_WORDS
@@ -765,12 +760,10 @@ def _github_repositories(query: str, _source: str, limit: int, recency_days: int
 
 def _stackoverflow(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
     params = {"q": query, "site": "stackoverflow", "sort": "relevance", "order": "desc", "pagesize": limit,
-              "fromdate": int((datetime.now(timezone.utc) - timedelta(days=recency_days)).timestamp()),
+              "fromdate": int((datetime.now(UTC) - timedelta(days=recency_days)).timestamp()),
               "filter": "withbody"}
-    try:
+    with contextlib.suppress(KeyError):
         params["key"] = vault.get_key("STACKEXCHANGE_KEY")
-    except KeyError:
-        pass
     response = httpx.get(
         "https://api.stackexchange.com/2.3/search/advanced",
         params=params,
@@ -814,13 +807,11 @@ def _stackexchange(query: str, _source: str, limit: int, recency_days: int, time
     base_params = {
         "q": focused_query, "sort": "relevance", "order": "desc",
         "pagesize": min(8, max(2, limit)),
-        "fromdate": int((datetime.now(timezone.utc) - timedelta(days=recency_days)).timestamp()),
+        "fromdate": int((datetime.now(UTC) - timedelta(days=recency_days)).timestamp()),
         "filter": "withbody",
     }
-    try:
+    with contextlib.suppress(KeyError):
         base_params["key"] = vault.get_key("STACKEXCHANGE_KEY")
-    except KeyError:
-        pass
     buckets: list[list[dict]] = []
     last_error: Exception | None = None
     for site in _stackexchange_sites(query):
@@ -875,7 +866,7 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
         raise ResearchError("App Store review response was malformed") from exc
     if isinstance(entries, dict):
         entries = [entries]
-    cutoff = datetime.now(timezone.utc) - timedelta(days=recency_days)
+    cutoff = datetime.now(UTC) - timedelta(days=recency_days)
     results = []
     for entry in entries if isinstance(entries, list) else []:
         if len(results) >= limit or not isinstance(entry, dict):
@@ -888,10 +879,10 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
         if not rating or not rating.isdigit() or int(rating) > 3 or not content or not updated:
             continue
         try:
-            published = datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(timezone.utc)
+            published = datetime.fromisoformat(updated.replace("Z", "+00:00")).astimezone(UTC)
         except ValueError:
             continue
-        if published < cutoff or published > datetime.now(timezone.utc) + timedelta(days=1):
+        if published < cutoff or published > datetime.now(UTC) + timedelta(days=1):
             continue
         url = f"https://apps.apple.com/us/app/id{app_id}?see-all=reviews"
         if review_id:
@@ -984,7 +975,7 @@ def _discourse(query: str, _source: str, limit: int, recency_days: int, timeout:
     ][:4]
     if not terms:
         return []
-    after = (datetime.now(timezone.utc) - timedelta(days=recency_days)).date().isoformat()
+    after = (datetime.now(UTC) - timedelta(days=recency_days)).date().isoformat()
     discourse_query = f"{' '.join(terms)} after:{after} order:latest"
     buckets: list[list[dict]] = []
     last_error: Exception | None = None
@@ -1082,7 +1073,7 @@ def _discourse(query: str, _source: str, limit: int, recency_days: int, timeout:
 
 def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
     api_key = vault.get_key("GOOGLE_API_KEY")
-    published_after = (datetime.now(timezone.utc) - timedelta(days=recency_days)).isoformat().replace("+00:00", "Z")
+    published_after = (datetime.now(UTC) - timedelta(days=recency_days)).isoformat().replace("+00:00", "Z")
     query_terms = [
         term for term in re.findall(r"[a-z0-9]+", query.lower())
         if len(term) >= 3 and term not in QUERY_STOP_WORDS and term not in {"comments", "frustrating"}
@@ -1183,7 +1174,7 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
         return []
 
     product_variables = {
-        "after": (datetime.now(timezone.utc) - timedelta(days=recency_days)).isoformat(),
+        "after": (datetime.now(UTC) - timedelta(days=recency_days)).isoformat(),
         **{f"topic{index}": topic["slug"] for index, topic in enumerate(topics)},
     }
     product_declarations = ", ".join(
@@ -1292,7 +1283,7 @@ def search(query: str, source: str, limit: int, recency_days: int) -> dict:
             "notice": "Search completed safely but found no matching results.",
         }
     control_plane.purge_expired_research_results()
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
+    expires_at = datetime.now(UTC) + timedelta(hours=24)
     output = []
     for row in rows:
         record = control_plane.cache_research_result(row, expires_at.isoformat())
@@ -1352,7 +1343,7 @@ def fetch(result_id: str, max_chars: int = 12000) -> dict:
     if not record:
         raise ResearchError("research result handle was not found")
     try:
-        if datetime.fromisoformat(record["expires_at"]) <= datetime.now(timezone.utc):
+        if datetime.fromisoformat(record["expires_at"]) <= datetime.now(UTC):
             raise ResearchError("research result handle has expired")
     except (KeyError, ValueError, TypeError) as exc:
         raise ResearchError("research result handle is invalid") from exc

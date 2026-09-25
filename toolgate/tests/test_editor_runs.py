@@ -1,8 +1,11 @@
+import contextlib
 import uuid
 
-from toolgate.core import control_plane as cp, owner_channel, execution_journal as journal
-from toolgate.tests.test_owner_channel import gate, HEADERS  # noqa: F401
-from toolgate.tests.test_editor_owner_publication import save, publish
+from toolgate.core import control_plane as cp
+from toolgate.core import execution_journal as journal
+from toolgate.core import owner_channel
+from toolgate.tests.test_editor_owner_publication import publish, save
+from toolgate.tests.test_owner_channel import HEADERS, gate  # noqa: F401
 
 
 def setup(gate, authorization='auto'):
@@ -15,7 +18,7 @@ def setup(gate, authorization='auto'):
 
 
 def test_access_requires_both_channels_and_changes_only_reviewed_workflow(gate):
-    client, agent, headers, target = setup(gate)
+    client, _agent, headers, target = setup(gate)
     path = '/v2/owner/editor-drafts/example/access'
     for credentials in (HEADERS, {'X-ToolGate-Execution-Key': gate[2]}, {}):
         assert client.post(path, headers=credentials, json={**target, 'enabled': True}).status_code == 401
@@ -28,7 +31,7 @@ def test_access_requires_both_channels_and_changes_only_reviewed_workflow(gate):
 
 
 def test_real_run_replay_conflict_and_persisted_history(gate):
-    client, agent, headers, target = setup(gate)
+    client, _agent, headers, target = setup(gate)
     base = '/v2/owner/editor-drafts/example'
     client.post(base + '/access', headers=headers, json={**target, 'enabled': True}).raise_for_status()
     body = {**target, 'action_id': 'editor_' + uuid.uuid4().hex, 'args': {}}
@@ -44,7 +47,7 @@ def test_real_run_replay_conflict_and_persisted_history(gate):
 
 
 def test_approval_resumes_same_action_and_never_duplicates_dispatch(gate):
-    client, agent, headers, target = setup(gate, 'owner_confirmation')
+    client, _agent, headers, target = setup(gate, 'owner_confirmation')
     base = '/v2/owner/editor-drafts/example'
     client.post(base + '/access', headers=headers, json={**target, 'enabled': True}).raise_for_status()
     body = {**target, 'action_id': 'editor_' + uuid.uuid4().hex, 'args': {}}
@@ -74,7 +77,7 @@ def test_no_scope_does_not_dispatch_and_wildcard_cannot_fake_revocation(gate):
 
 def test_lost_response_holds_request_without_second_dispatch(gate, monkeypatch):
     from toolgate.api import server
-    client, agent, headers, target = setup(gate)
+    client, _agent, headers, target = setup(gate)
     base = '/v2/owner/editor-drafts/example'
     client.post(base + '/access', headers=headers, json={**target, 'enabled': True}).raise_for_status()
     body = {**target, 'action_id': 'editor_' + uuid.uuid4().hex, 'args': {}}
@@ -83,10 +86,8 @@ def test_lost_response_holds_request_without_second_dispatch(gate, monkeypatch):
         calls.append(1)
         raise RuntimeError('transport lost')
     monkeypatch.setattr(server, 'run_automation', lost)
-    try:
+    with contextlib.suppress(RuntimeError):
         client.post(base + '/runs', headers=headers, json=body)
-    except RuntimeError:
-        pass
     assert client.post(base + '/runs', headers=headers, json=body).json()['code'] == 'OUTCOME_UNKNOWN'
     assert calls == [1]
 

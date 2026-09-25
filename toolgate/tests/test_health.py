@@ -5,8 +5,8 @@ so nothing here is mocked: the "up" case answers from a real HTTP server on a
 real socket, and the "down" cases point at a port nothing is listening on and
 at a database that genuinely cannot be opened.
 """
-import os
 import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -22,7 +22,7 @@ from toolgate.core import control_plane, vault
 
 
 class _AlwaysOk(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler's naming
+    def do_GET(self):  # BaseHTTPRequestHandler's naming
         body = getattr(self.server, "health_body", {"service": "memorygate", "status": "ok"})
         encoded = json.dumps(body).encode()
         self.send_response(getattr(self.server, "response_status", 200))

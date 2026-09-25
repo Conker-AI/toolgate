@@ -1,7 +1,8 @@
 """Owner editor metadata: registered capabilities, never executor or vault data."""
 import json
 
-from . import control_plane as cp, publications
+from . import control_plane as cp
+from . import publications
 
 
 def agent_workflows(agent):

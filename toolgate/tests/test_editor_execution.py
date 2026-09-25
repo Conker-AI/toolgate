@@ -15,7 +15,7 @@ def linear(*steps):
         {**deepcopy(template), "id": identity, "type": kind, "config": config}
         for identity, kind, config in steps]]
     value["edges"] = [{"id": f"edge_{i}", "source": left["id"], "target": right["id"]}
-                      for i, (left, right) in enumerate(zip(value["nodes"], value["nodes"][1:]))]
+                      for i, (left, right) in enumerate(zip(value["nodes"], value["nodes"][1:], strict=False))]
     return value
 
 

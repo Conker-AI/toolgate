@@ -7,7 +7,7 @@ import math
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from . import control_plane as cp
 from . import vault
@@ -122,7 +122,7 @@ def project(db, record):
         reason = "unsupported_subject"
     elif binding.get("consumed_at"):
         reason = "consumed"
-    elif datetime.fromisoformat(expires) <= datetime.now(timezone.utc):
+    elif datetime.fromisoformat(expires) <= datetime.now(UTC):
         reason = "expired"
     elif record.get("status") != "pending":
         reason = "already_decided"

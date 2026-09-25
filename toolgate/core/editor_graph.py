@@ -93,9 +93,9 @@ def validate_graph(document: EditorDocument) -> list[dict]:
                 issue("Choose a supported condition operator.", node.id)
             if config["operator"] != "exists" and "right" not in config:
                 issue("Comparison needs a right value.", node.id)
-        if node.type == "loop":
-            if (type(config["limit"]) is not int or not 1 <= config["limit"] <= document.budgets.maxLoopItems
-                    or config["operation"] not in ("identity", "trim", "uppercase")):
+        if node.type == "loop" and (
+                type(config["limit"]) is not int or not 1 <= config["limit"] <= document.budgets.maxLoopItems
+                or config["operation"] not in ("identity", "trim", "uppercase")):
                 issue("Use a supported loop operation within the item budget.", node.id)
         if node.type in ("tool_call", "workflow_call"):
             target = config["tool"] if node.type == "tool_call" else config["toolId"]
