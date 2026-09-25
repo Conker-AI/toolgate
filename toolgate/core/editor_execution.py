@@ -1,8 +1,8 @@
 """Bounded graph evaluator. Capability dispatch is supplied by ToolGate's boundary."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import time
+from dataclasses import dataclass, field
 
 from .editor_drafts import EditorDocument
 from .editor_graph import validate_graph
@@ -68,7 +68,8 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
             charge()
             config = current.config
             branch = None
-            value = lambda item, missing=False: resolve(item, normalized, outputs, last, allow_missing=missing)
+            def value(item, missing=False):
+                return resolve(item, normalized, outputs, last, allow_missing=missing)
             if current.type == "input":
                 output = normalized
             elif current.type in {"set", "return"}:

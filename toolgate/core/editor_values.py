@@ -95,7 +95,7 @@ def equal(left, right):
     if isinstance(left, dict):
         return left.keys() == right.keys() and all(equal(left[key], right[key]) for key in left)
     if isinstance(left, list):
-        return len(left) == len(right) and all(equal(a, b) for a, b in zip(left, right))
+        return len(left) == len(right) and all(equal(a, b) for a, b in zip(left, right, strict=True))
     return left == right
 
 

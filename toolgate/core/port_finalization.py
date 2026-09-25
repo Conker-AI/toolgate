@@ -44,8 +44,8 @@ def _reverify(action_id, replacement, configuration, steps, transport):
     before = records.load_verification_basis(action_id, configuration[0])
     # A running source requires a recorded start attempt. A stopped source is
     # complete after creation; uncertain creation has no trustworthy identity.
-    if (steps[-1]["name"] == "create" and before["State"]["Running"] is not False
-            or steps[-1]["name"] == "start" and before["State"]["Running"] is not True):
+    if ((steps[-1]["name"] == "create" and before["State"]["Running"] is not False)
+            or (steps[-1]["name"] == "start" and before["State"]["Running"] is not True)):
         raise records.ReplacementError()
     try:
         deadline = time.monotonic() + docker.DEADLINE_SECONDS

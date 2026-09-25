@@ -13,13 +13,13 @@ import secrets
 import sqlite3
 import uuid
 from contextlib import contextmanager, nullcontext
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from toolgate.core.paths import DB_PATH
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @contextmanager
@@ -197,7 +197,7 @@ def get_research_result(result_id: str) -> dict | None:
 
 
 def purge_expired_research_results(now: datetime | None = None) -> int:
-    cutoff = now or datetime.now(timezone.utc)
+    cutoff = now or datetime.now(UTC)
     removed = 0
     for record in list_objects("research_result"):
         try:
@@ -235,7 +235,7 @@ def events(limit: int = 100, event_type: str | None = None) -> list[dict]:
 
 
 def event_count_since(event_type: str, subject_type: str, subject_id: str, seconds: int) -> int:
-    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(seconds, 0))).isoformat()
+    cutoff = (datetime.now(UTC) - timedelta(seconds=max(seconds, 0))).isoformat()
     with _conn() as conn:
         row = conn.execute(
             "SELECT COUNT(*) AS count FROM v2_events "
@@ -668,7 +668,7 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
                                 subject_id: str, args: dict, version: int | None,
                                 expiry_seconds: int = 60, actor_id: str | None = None, *,
                                 publication_digest: str | None = None) -> dict:
-    expiry = datetime.now(timezone.utc) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
+    expiry = datetime.now(UTC) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
     binding = {
         "subject_type": subject_type,
         "subject_id": subject_id,
@@ -715,7 +715,7 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
                                         args: dict, version: int | None, actor: str,
                                         actor_id: str | None = None, *,
                                         publication_digest: str | None = None) -> tuple[bool, str]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     row = conn.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
     if not row:
         return False, "Approval request was not found"
@@ -790,7 +790,7 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
                     expires_at = datetime.fromisoformat(record["payload"]["binding"]["expires_at"])
                 except (KeyError, TypeError, ValueError) as exc:
                     raise ValueError("Approval expiry is invalid; request fresh confirmation") from exc
-                if expires_at.tzinfo is None or expires_at <= datetime.now(timezone.utc):
+                if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
                     raise ValueError("Approval has expired; request fresh confirmation")
         record["status"] = status
         record["decision"] = {"actor": actor, "note": note, "at": _now()}

@@ -9,7 +9,8 @@ from typing import Annotated
 
 from pydantic import Field, JsonValue, model_validator
 
-from . import control_plane as cp, editor_publication, publications
+from . import control_plane as cp
+from . import editor_publication, publications
 from . import execution_journal as journal
 from .editor_drafts import StrictDocument, _identity
 from .editor_values import bounded
@@ -27,7 +28,7 @@ class Access(Target):
 
 class Run(Target):
     action_id: Annotated[str, Field(pattern=r"^editor_[a-f0-9]{32}$")]
-    args: dict[str, JsonValue] = {}
+    args: dict[str, JsonValue] = Field(default_factory=dict)
     approval_request_id: Annotated[str, Field(max_length=100)] | None = None
 
     @model_validator(mode="after")

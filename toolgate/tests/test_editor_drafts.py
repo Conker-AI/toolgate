@@ -2,7 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 
 from toolgate.core import control_plane as cp
-from toolgate.tests.test_owner_channel import gate, HEADERS, ADMIN  # noqa: F401
+from toolgate.tests.test_owner_channel import ADMIN, HEADERS, gate  # noqa: F401
 
 
 def document(identity="example"):

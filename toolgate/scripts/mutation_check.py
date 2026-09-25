@@ -106,11 +106,11 @@ MUTANTS = [
 
 MUTANTS.extend([('dispatch without a committed record',
   'toolgate/core/execution_journal.py',
-  '# The context manager commits before the caller can enter its executor.\n'
-  '        return _row(row), True',
-  '# The context manager commits before the caller can enter its executor.\n'
+  ('# The context manager commits before the caller can enter its executor.\n'
+  '        return _row(row), True'),
+  ('# The context manager commits before the caller can enter its executor.\n'
   '        conn.rollback()\n'
-  '        return _row(row), True',
+  '        return _row(row), True'),
   'toolgate/tests/test_execution_journal.py::test_dispatch_is_durable_before_external_effect_and_replay_is_cached'),
  ('arguments excluded from action identity',
   'toolgate/core/execution_journal.py',
@@ -165,10 +165,10 @@ MUTANTS.extend([('dispatch without a committed record',
  ('refund missing billing telemetry',
   'toolgate/core/spending.py',
   '# Missing billing telemetry is never interpreted as a free request.\n        return',
-  '# Missing billing telemetry is never interpreted as a free request.\n'
+  ('# Missing billing telemetry is never interpreted as a free request.\n'
   '        conn.execute("UPDATE v2_spend_reservations SET accounted=0 WHERE action_id=?", '
   '(action_id,))\n'
-  '        return',
+  '        return'),
   'toolgate/tests/test_spending.py::test_uncertain_billing_keeps_reservation_across_restart[missing_usage]'),
  ('known actual usage ignored',
   'toolgate/core/spending.py',
@@ -197,8 +197,8 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_spending.py::test_unaccounted_paid_routes_never_reach_network[memorygate]'),
  ('paid Tavily fallback reenabled',
   'toolgate/executors/research.py',
-  '    raise ResearchError("Tavily is disabled until it has a bounded spending adapter; use '
-  'SearXNG")',
+  ('    raise ResearchError("Tavily is disabled until it has a bounded spending adapter; use '
+  'SearXNG")'),
   '    return _tavily_unmetered(query, source, limit, recency_days, timeout)',
   'toolgate/tests/test_spending.py::test_unaccounted_paid_routes_never_reach_network[tavily]'),
  ('thinking enabled on bounded paid request',
@@ -233,10 +233,10 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_execution_journal.py::test_completed_receipt_cannot_be_replaced_or_deleted'),
  ('reservation deletion allowed',
   'toolgate/core/spending.py',
-  'CREATE TRIGGER IF NOT EXISTS v2_spend_reservations_no_delete BEFORE DELETE ON '
-  'v2_spend_reservations',
-  'CREATE TRIGGER IF NOT EXISTS v2_spend_reservations_no_delete BEFORE DELETE ON '
-  'v2_spend_reservations WHEN 0',
+  ('CREATE TRIGGER IF NOT EXISTS v2_spend_reservations_no_delete BEFORE DELETE ON '
+  'v2_spend_reservations'),
+  ('CREATE TRIGGER IF NOT EXISTS v2_spend_reservations_no_delete BEFORE DELETE ON '
+  'v2_spend_reservations WHEN 0'),
   'toolgate/tests/test_spending.py::test_reservations_and_job_identity_cannot_be_erased'),
  ('budget policy accessible to execution key',
   'toolgate/api/server.py',

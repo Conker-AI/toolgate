@@ -1,0 +1,47 @@
+# Lint settings for ToolGate; the same policy as Pi's, shared across Conker modules.
+#
+# Explicit rather than default, because the defaults move between ruff releases
+# and a lint set that changes under you produces diffs nobody asked for. Pinned
+# in requirements-dev.txt for the same reason.
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import order
+    "UP",        # modern syntax for the target version
+    "B",         # bugbear
+    "SIM",       # obvious simplifications
+    "ISC",       # implicit string concatenation, which hides missing commas
+    "RUF",
+]
+ignore = [
+    # Health checks and status endpoints catch broadly on purpose. This service
+    # reports `unavailable` with a reason when a dependency misbehaves; a check
+    # that raised instead would take down the very endpoint the owner uses to
+    # find out what is wrong. See the truthful-status rule in CLAUDE.md.
+    "BLE001",
+    # Line length is left to review until this module adopts `ruff format`.
+    "E501",
+]
+
+[lint.per-file-ignores]
+# Test doubles subclass stdlib handlers whose method names are fixed by the
+# stdlib, and hold shared state as class attributes on purpose.
+"tests/*" = ["N802", "RUF012", "F811"]  # F811: pytest fixtures are imported, then requested by name
+"toolgate/tests/*" = ["N802", "RUF012", "F811"]
+# Reviewed: every closure flagged here is called within the same loop iteration,
+# so it cannot observe a later value of the loop variable.
+"toolgate/api/server.py" = ["B023"]
+"toolgate/core/editor_execution.py" = ["B023"]
+"toolgate/core/editor_graph.py" = ["B023"]
+
+[lint.flake8-bugbear]
+# FastAPI declares dependencies and parameters as call defaults by design.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Path",
+    "fastapi.Body", "fastapi.File", "fastapi.Form", "fastapi.Cookie",
+]

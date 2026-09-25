@@ -6,8 +6,9 @@ from threading import Barrier
 
 import pytest
 
-from toolgate.core import control_plane, spending, spending_allowances as allowances
+from toolgate.core import control_plane, spending
 from toolgate.core import execution_journal as journal
+from toolgate.core import spending_allowances as allowances
 
 
 @pytest.fixture
@@ -64,6 +65,7 @@ def test_real_reservation_rechecks_allowance(target):
 
 def test_allowance_api_authority_and_actor_isolation(target):
     from fastapi.testclient import TestClient
+
     from toolgate.api import server
     app = server.app
     with TestClient(app) as client:
@@ -171,9 +173,8 @@ def test_grants_allocations_and_revocation_receipts_are_immutable(target, table)
     allowances.revoke(row["allowance_id"])
     for query in [f"DELETE FROM {table}", f"UPDATE {table} SET allowance_id='changed'",
                   f"INSERT OR REPLACE INTO {table} SELECT * FROM {table}"]:
-        with control_plane._conn() as conn:
-            with pytest.raises(sqlite3.IntegrityError):
-                conn.execute(query)
+        with control_plane._conn() as conn, pytest.raises(sqlite3.IntegrityError):
+            conn.execute(query)
 
 
 @pytest.mark.parametrize("overrides", [{"per_run_cap": True}, {"total_cap": 99}, {"max_runs": 0},

@@ -41,8 +41,8 @@ def test_fixed_argv_projection_and_no_inherited_environment(monkeypatch, action)
     result = adapter.control(ID, action, runner=runner(calls))
     assert len(calls) == 3
     prefix = ["/usr/bin/systemctl", "--system", "--no-pager", "--no-ask-password"]
-    assert calls[0][0] == prefix + ["show", f"--property={adapter.PROPERTIES}", "--", UNIT]
-    assert calls[1][0] == prefix + [action, "--", UNIT]
+    assert calls[0][0] == [*prefix, "show", f"--property={adapter.PROPERTIES}", "--", UNIT]
+    assert calls[1][0] == [*prefix, action, "--", UNIT]
     assert calls[2][0] == calls[0][0]
     for _, kw in calls:
         assert kw["stdin"] == kw["stderr"] == subprocess.DEVNULL

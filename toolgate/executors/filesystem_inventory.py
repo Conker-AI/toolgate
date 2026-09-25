@@ -7,7 +7,7 @@ import os
 import re
 import stat
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 MAX_SCAN = 2000
 CAPABILITIES = {"list": True, "read": False, "write": False}
@@ -149,7 +149,7 @@ def list_directory(root_id, path="", limit=200, *, backend=None):
         return {
             "mode": "observed", "rootId": root_id, "path": path,
             "entries": sorted(entries, key=lambda item: (item["kind"] != "directory", item["name"])),
-            "truncated": truncated, "sampledAt": datetime.now(timezone.utc).isoformat(),
+            "truncated": truncated, "sampledAt": datetime.now(UTC).isoformat(),
         }
     except OSError:
         raise FileError("unavailable") from None

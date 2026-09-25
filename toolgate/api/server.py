@@ -10,7 +10,7 @@ import sqlite3
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 from urllib.parse import quote, urlsplit
 
@@ -25,11 +25,11 @@ from pydantic import BaseModel, Field, StrictBool, StrictInt
 from toolgate.core import (
     container_admission,
     control_plane,
-    editor_drafts,
-    editor_graph,
-    editor_execution,
-    editor_publication,
     editor_catalogue,
+    editor_drafts,
+    editor_execution,
+    editor_graph,
+    editor_publication,
     editor_runs,
     legacy_archive,
     owner_channel,
@@ -436,7 +436,7 @@ def _run_dependency_checks() -> dict:
 
     failing = sorted(name for name, check in checks.items() if check["status"] not in _HEALTHY_STATUSES)
     return {"status": "degraded" if failing else "ok", "degraded": failing, "checks": checks,
-            "checked_at": datetime.now(timezone.utc).isoformat()}
+            "checked_at": datetime.now(UTC).isoformat()}
 
 
 @app.get("/health")
@@ -489,7 +489,7 @@ def create_secret(payload: SecretCreate, _tier: str = Depends(require_admin)):
     try:
         vault.set_secret(payload.name, payload.value, allow_existing=False)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from None
     control_plane.event("secret_created", "info", "secret", payload.name, "admin")
     return {"name": payload.name}
 
@@ -499,7 +499,7 @@ def update_secret(name: str, payload: SecretUpdate, _tier: str = Depends(require
     try:
         vault.set_secret(name, payload.value, allow_existing=True)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, str(exc)) from None
     control_plane.event("secret_updated", "warning", "secret", name, "admin")
     return {"name": name}
 
@@ -509,7 +509,7 @@ def delete_secret(name: str, _tier: str = Depends(require_admin)):
     try:
         vault.delete_secret(name)
     except KeyError:
-        raise HTTPException(404, "secret not found")
+        raise HTTPException(404, "secret not found") from None
     control_plane.event("secret_deleted", "warning", "secret", name, "admin")
     return {"name": name}
 
@@ -1131,7 +1131,7 @@ def enforce_usage_limits(subject_type: str, subject: dict, event_type: str):
     cooldown = limits.get("cooldown_seconds")
     if cooldown:
         latest = control_plane.latest_event_at(event_type, subject_type, subject["id"])
-        if latest and (datetime.now(timezone.utc) - latest).total_seconds() < int(cooldown):
+        if latest and (datetime.now(UTC) - latest).total_seconds() < int(cooldown):
             deny("RATE_LIMITED", f"{subject['name']} is in cooldown", 429, "Wait before retrying")
 
 
@@ -1207,18 +1207,18 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
     if authorization == "blocked":
         control_plane.event("execution_blocked", "warning", "tool", tool["id"], actor, {"code": "POLICY_DENIED"})
         deny("POLICY_DENIED", "This tool is permanently blocked by its owner policy")
-    if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
-        if not approval_request_id:
-            expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
-            request = control_plane.create_verification_request(
-                f"Run {tool['name']}",
-                ("Replace the container using this exact inspected port change: " + json.dumps(port_review["preview"]))
-                if is_port else "Owner confirmation is required for this exact immutable tool invocation.",
-                actor, "tool", tool["id"], args, tool.get("version"), expiry, actor_id,
-                publication_digest=publication_digest)
-            return {"code": "CONFIRMATION_REQUIRED", "message": "This exact action is queued for owner review.",
-                    "request_id": request["id"], "expires_at": request["payload"]["binding"]["expires_at"],
-                    "next_action": f"After approval, retry with --approval-request-id {request['id']}"}
+    needs_owner = authorization in {"owner_confirmation", "ai_review"} and not approval_granted
+    if needs_owner and not approval_request_id:
+        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
+        request = control_plane.create_verification_request(
+            f"Run {tool['name']}",
+            ("Replace the container using this exact inspected port change: " + json.dumps(port_review["preview"]))
+            if is_port else "Owner confirmation is required for this exact immutable tool invocation.",
+            actor, "tool", tool["id"], args, tool.get("version"), expiry, actor_id,
+            publication_digest=publication_digest)
+        return {"code": "CONFIRMATION_REQUIRED", "message": "This exact action is queued for owner review.",
+                "request_id": request["id"], "expires_at": request["payload"]["binding"]["expires_at"],
+                "next_action": f"After approval, retry with --approval-request-id {request['id']}"}
     enforce_usage_limits("tool", tool, "tool_executed")
     if not action_id:
         if tool.get("execution", {}).get("type") not in {"echo", "local_echo"}:
@@ -1801,7 +1801,7 @@ def _invoke_nested_automation(step: dict, state: dict, actor: str, approval_gran
         nested["graph_budget"] = state["graph_budget"]
     try:
         final = _run_workflow_steps(definition.get("workflow", []), nested, actor, approval_granted)
-    except Exception:  # noqa: BLE001 - hold any incomplete nested dispatch; never retry it.
+    except Exception:  # hold any incomplete nested dispatch; never retry it.
         journal.unknown(action_id)
         deny("OUTCOME_UNKNOWN", "Nested workflow is incomplete; reconcile its receipt", 409)
     failed = isinstance(final, dict) and final.get("code") == "WORKFLOW_FAILED"
@@ -1852,7 +1852,7 @@ def create_verification_method(payload: VerificationMethodCreate, _tier: str = D
     try:
         vault.get_key(payload.secret_ref)
     except KeyError:
-        raise HTTPException(422, "secret_ref is not configured in ToolGate")
+        raise HTTPException(422, "secret_ref is not configured in ToolGate") from None
     method = control_plane.create_verification_method(payload.model_dump())
     control_plane.event("verification_method_created", "info", "verification_method", method["id"], "admin")
     return method
@@ -1910,7 +1910,7 @@ def verification_callback(payload: VerificationCallback,
         deny("REQUEST_NOT_PENDING", str(exc), 409, "Refresh the request; do not retry a decided or expired approval")
     if not record:
         deny("REQUEST_NOT_PENDING", "Verification request no longer exists", 409, "Request fresh confirmation")
-    control_plane.update_verification_method(method["id"], {"last_seen_at": datetime.now(timezone.utc).isoformat()})
+    control_plane.update_verification_method(method["id"], {"last_seen_at": datetime.now(UTC).isoformat()})
     control_plane.event("verification_callback_accepted", "info", "verification_method",
                         method["id"], "callback", {"request_id": payload.request_id,
                                                     "decision": payload.decision})
@@ -1992,7 +1992,7 @@ def check_service(service_id: str, _tier: str = Depends(require_admin)):
         healthy = False
     updated = control_plane.update_service(service_id, {
         "health": "healthy" if healthy else "unhealthy",
-        "last_health_check_at": datetime.now(timezone.utc).isoformat(),
+        "last_health_check_at": datetime.now(UTC).isoformat(),
     })
     control_plane.event("service_health_checked", "info" if healthy else "warning",
                         "service", service_id, "admin", {"healthy": healthy})
@@ -2422,17 +2422,16 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         deny("POLICY_DENIED", "This automation is permanently blocked by its owner policy")
     approval_granted = False
     tool_snapshot = {}
-    if authorization != "auto":
-        if not payload.approval_request_id:
-            expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
-            request = control_plane.create_verification_request(
-                f"Run {automation['name']}",
-                "Owner confirmation is required for this exact immutable automation run.",
-                agent["name"], "automation", automation_id, payload.args,
-                automation.get("version"), expiry, agent["id"], publication_digest=publication_digest)
-            return {"code": "CONFIRMATION_REQUIRED", "message": "Automation queued for owner review",
-                    "request_id": request["id"], "expires_at": request["payload"]["binding"]["expires_at"],
-                    "next_action": f"After approval, retry with --approval-request-id {request['id']}"}
+    if authorization != "auto" and not payload.approval_request_id:
+        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
+        request = control_plane.create_verification_request(
+            f"Run {automation['name']}",
+            "Owner confirmation is required for this exact immutable automation run.",
+            agent["name"], "automation", automation_id, payload.args,
+            automation.get("version"), expiry, agent["id"], publication_digest=publication_digest)
+        return {"code": "CONFIRMATION_REQUIRED", "message": "Automation queued for owner review",
+                "request_id": request["id"], "expires_at": request["payload"]["binding"]["expires_at"],
+                "next_action": f"After approval, retry with --approval-request-id {request['id']}"}
     enforce_usage_limits("automation", automation, "automation_executed")
     limits = automation.get("policy", {}).get("usage_limits", {})
     def authorize(conn):
@@ -2631,7 +2630,7 @@ def decide_request(request_id: str, payload: V2RequestDecision, _tier: str = Dep
     try:
         record = control_plane.decide_request(request_id, payload.status, "admin", payload.note)
     except ValueError as exc:
-        raise HTTPException(409, str(exc))
+        raise HTTPException(409, str(exc)) from None
     if not record:
         raise HTTPException(404, "request not found")
     return record

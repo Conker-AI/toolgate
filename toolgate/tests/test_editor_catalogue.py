@@ -1,5 +1,6 @@
-from toolgate.core import control_plane as cp, publications
-from toolgate.tests.test_owner_channel import gate, HEADERS  # noqa: F401
+from toolgate.core import control_plane as cp
+from toolgate.core import publications
+from toolgate.tests.test_owner_channel import HEADERS, gate  # noqa: F401
 
 
 def test_catalogue_search_and_pagination_never_expose_executor_or_credentials(gate):

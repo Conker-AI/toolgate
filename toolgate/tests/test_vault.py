@@ -96,9 +96,8 @@ class VaultEncryptionTests(unittest.TestCase):
         # door; VaultError must keep taking that path rather than becoming a 500.
         vault.set_secret("GITHUB_TOKEN", "ghp_value")
 
-        with patch.dict(os.environ, {"TOOLGATE_VAULT_SECRET": "wrong"}):
-            with self.assertRaises(KeyError):
-                vault.get_key("GITHUB_TOKEN")
+        with patch.dict(os.environ, {"TOOLGATE_VAULT_SECRET": "wrong"}), self.assertRaises(KeyError):
+            vault.get_key("GITHUB_TOKEN")
 
     def test_a_secret_supplied_only_through_the_environment_still_resolves(self):
         with patch.dict(os.environ, {"STACKEXCHANGE_KEY": "supplied-by-docker-secret"}):
@@ -137,9 +136,11 @@ class VaultEncryptionTests(unittest.TestCase):
         blocked = self.root / "blocked"
         blocked.write_text("not a directory", encoding="utf-8")
 
-        with patch.dict(os.environ, {"TOOLGATE_VAULT_KEY_FILE": str(blocked / "vault.key")}):
-            with self.assertRaises(vault.VaultError):
-                vault.set_secret("GITHUB_TOKEN", "ghp_value")
+        with (
+            patch.dict(os.environ, {"TOOLGATE_VAULT_KEY_FILE": str(blocked / "vault.key")}),
+            self.assertRaises(vault.VaultError),
+        ):
+            vault.set_secret("GITHUB_TOKEN", "ghp_value")
 
         self.assertNotIn("ghp_value", self._file_text() if self.env_path.exists() else "")
 

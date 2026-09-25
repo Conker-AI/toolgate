@@ -161,7 +161,8 @@ def reserve(conn, action_id: str, job_id: str | None, actor_id: str,
     if not policy or not policy["enabled"] or price["valid_until"] <= time.time():
         raise BudgetDenied("Paid dispatch is disabled or its price expired before reservation")
     current_price = conn.execute("SELECT * FROM v2_spend_prices WHERE model=?", (price["model"],)).fetchone()
-    if not current_price or any(price[key] != current_price[key] for key in current_price.keys()):
+    # sqlite3.Row iterates values, not keys: .keys() is required here.
+    if not current_price or any(price[key] != current_price[key] for key in current_price.keys()):  # noqa: SIM118
         raise BudgetDenied("Pricing changed before reservation; request a fresh quote")
     if not job or job["actor_id"] != actor_id:
         raise BudgetDenied("Use the owner's job for this exact agent and root action")

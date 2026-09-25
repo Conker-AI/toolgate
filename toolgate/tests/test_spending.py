@@ -249,9 +249,8 @@ def test_reservations_and_job_identity_cannot_be_erased(paid, monkeypatch):
                 "INSERT OR REPLACE INTO v2_spend_reservations SELECT * FROM v2_spend_reservations",
                 "DELETE FROM v2_spend_jobs", "UPDATE v2_spend_jobs SET cap=999999999",
                 "INSERT OR REPLACE INTO v2_spend_jobs SELECT * FROM v2_spend_jobs"]:
-        with control_plane._conn() as db:
-            with pytest.raises(sqlite3.IntegrityError):
-                db.execute(sql)
+        with control_plane._conn() as db, pytest.raises(sqlite3.IntegrityError):
+            db.execute(sql)
 
 
 def test_budget_policy_changes_do_not_reset_cumulative_usage(paid, monkeypatch):

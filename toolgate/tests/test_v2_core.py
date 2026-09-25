@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -498,7 +498,7 @@ class ControlPlaneTests(unittest.TestCase):
         get.assert_not_called()
 
     def test_reddit_atom_search_returns_bounded_dated_snapshots(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         response = Mock()
         response.raise_for_status.return_value = None
         response.content = f'''<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
@@ -515,7 +515,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertNotIn("<p>", rows[0]["document"])
 
     def test_reddit_subreddit_feed_is_allowlisted_bounded_and_dated(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         response = Mock()
         response.raise_for_status.return_value = None
         response.content = f'''<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
@@ -537,7 +537,7 @@ class ControlPlaneTests(unittest.TestCase):
             research._reddit_subreddit_feed("subreddit:notapproved", "reddit", 5, 90, 5)
 
     def test_appstore_reviews_are_exact_bounded_and_dated(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         response = Mock()
         response.raise_for_status.return_value = None
         response.content = b"{}"
@@ -577,7 +577,7 @@ class ControlPlaneTests(unittest.TestCase):
             "description": "Scheduling and dispatch for field service technicians.",
             "averageUserRating": 2.5,
             "userRatingCount": 120,
-            "currentVersionReleaseDate": datetime.now(timezone.utc).isoformat(),
+            "currentVersionReleaseDate": datetime.now(UTC).isoformat(),
         }]}
         with patch.object(research.httpx, "get", return_value=response):
             rows = research._appstore_catalog("field service dispatch", "appstore_catalog", 5, 3650, 5)
@@ -593,7 +593,7 @@ class ControlPlaneTests(unittest.TestCase):
             "url": "https://www.reddit.com/r/accounting/comments/example/manual_receipts/",
             "snippet": "We manually enter every client receipt.",
             "source": "reddit",
-            "published_at": datetime.now(timezone.utc).isoformat(),
+            "published_at": datetime.now(UTC).isoformat(),
             "content_safety": {"risk": "low", "flags": []},
         }]
         with patch.object(research, "_reddit_subreddit_feed", side_effect=httpx.HTTPError("blocked")), \
@@ -612,11 +612,13 @@ class ControlPlaneTests(unittest.TestCase):
             timeouts.append(timeout)
             raise httpx.HTTPError("unavailable")
 
-        with patch.object(research, "_reddit_subreddit_feed", side_effect=unavailable), \
-             patch.object(research, "_reddit_subreddit_searx", side_effect=unavailable), \
-             patch.object(research, "_reddit_subreddit_tavily", side_effect=unavailable):
-            with self.assertRaises(research.ResearchError):
-                research.search("subreddit:accounting", "reddit", 5, 14)
+        with (
+            patch.object(research, "_reddit_subreddit_feed", side_effect=unavailable),
+            patch.object(research, "_reddit_subreddit_searx", side_effect=unavailable),
+            patch.object(research, "_reddit_subreddit_tavily", side_effect=unavailable),
+            self.assertRaises(research.ResearchError),
+        ):
+            research.search("subreddit:accounting", "reddit", 5, 14)
         self.assertEqual(3, len(timeouts))
         self.assertTrue(all(0 < timeout <= 8 for timeout in timeouts))
 
@@ -656,7 +658,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertTrue(all(0 < timeout <= 1.5 for timeout in timeouts))
 
     def test_reddit_atom_search_uses_conjunctive_query_and_filters_noise(self):
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         response = Mock()
         response.raise_for_status.return_value = None
         response.content = f'''<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
@@ -862,9 +864,11 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(1, post.call_count)
 
     def test_producthunt_provider_is_permission_gated_and_locally_filtered(self):
-        with patch.object(research.control_plane, "settings", return_value={}):
-            with self.assertRaises(research.ResearchError):
-                research._producthunt("invoice automation", "producthunt", 5, 365, 5)
+        with (
+            patch.object(research.control_plane, "settings", return_value={}),
+            self.assertRaises(research.ResearchError),
+        ):
+            research._producthunt("invoice automation", "producthunt", 5, 365, 5)
 
         topics = Mock()
         topics.raise_for_status.return_value = None

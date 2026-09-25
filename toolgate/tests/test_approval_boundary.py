@@ -9,7 +9,7 @@ import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -139,7 +139,7 @@ class ApprovalBoundaryTests(unittest.TestCase):
         request_id = self.mint()
         self.approve(request_id)
         # Advance time without rewriting an immutable approval or sleeping out its lifetime.
-        future = datetime.now(timezone.utc) + timedelta(seconds=901)
+        future = datetime.now(UTC) + timedelta(seconds=901)
         with patch("toolgate.core.control_plane.datetime") as clock:
             clock.now.return_value = future
             clock.fromisoformat.side_effect = datetime.fromisoformat

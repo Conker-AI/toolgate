@@ -129,9 +129,8 @@ def test_completed_receipt_cannot_be_replaced_or_deleted(tool, monkeypatch):
     first = invoke(tool)
     for sql in ["DELETE FROM v2_actions", "UPDATE v2_actions SET response='{}'",
                 "INSERT OR REPLACE INTO v2_actions SELECT * FROM v2_actions"]:
-        with control_plane._conn() as db:
-            with pytest.raises(sqlite3.IntegrityError):
-                db.execute(sql)
+        with control_plane._conn() as db, pytest.raises(sqlite3.IntegrityError):
+            db.execute(sql)
     assert invoke(tool) == first
 
 

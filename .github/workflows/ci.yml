@@ -26,6 +26,12 @@ jobs:
           pip install --quiet -r toolgate/requirements.txt
           pip install --quiet pytest httpx
 
+      - name: Lint
+        # Same pinned ruff and policy as Pi (ruff.toml).
+        run: |
+          pip install --quiet ruff==0.16.6
+          python -m ruff check .
+
       - name: The module contract requires these files to exist
         run: |
           missing=""
