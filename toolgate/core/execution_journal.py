@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import time
+from datetime import UTC, datetime
 
 from toolgate.core import container_admission, control_plane, recovery_journal, spending
 
@@ -25,6 +26,8 @@ CREATE TABLE IF NOT EXISTS v2_actions (
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+CREATE INDEX IF NOT EXISTS v2_actions_usage_window
+ON v2_actions(subject_type, subject_id, created_at);
 CREATE TRIGGER IF NOT EXISTS v2_action_identity_immutable BEFORE UPDATE ON v2_actions
 WHEN NEW.action_id IS NOT OLD.action_id OR NEW.fingerprint IS NOT OLD.fingerprint
   OR NEW.actor_id IS NOT OLD.actor_id OR NEW.subject_type IS NOT OLD.subject_type
@@ -47,8 +50,63 @@ class ExecutionConflict(ValueError):
     pass
 
 
+class UsageLimitExceeded(ValueError):
+    def __init__(self, limit: str):
+        super().__init__(limit)
+        self.limit = limit
+
+
+def enforce_usage_limits(conn, subject_type: str, subject_id: str, event_type: str,
+                         limits: dict, *, now: float | None = None) -> None:
+    """Reserve dispatch capacity while the journal writer lock is held.
+
+    A journal row is the durable reservation. Legacy events without a matching
+    recent row remain visible so an upgrade cannot temporarily reset a limit.
+    """
+    current = time.time() if now is None else now
+    windows = [
+        60 if limits.get("max_per_minute") is not None else 0,
+        3600 if limits.get("max_per_hour") is not None else 0,
+        int(limits.get("cooldown_seconds") or 0),
+    ]
+    oldest = current - max(windows)
+    oldest_event = datetime.fromtimestamp(oldest, UTC).isoformat()
+    observed: dict[str, float] = {}
+    for row in conn.execute(
+        "SELECT action_id,created_at FROM v2_actions "
+        "WHERE subject_type=? AND subject_id=? AND created_at>=?",
+        (subject_type, subject_id, oldest),
+    ):
+        observed[f"action:{row['action_id']}"] = float(row["created_at"])
+    for row in conn.execute(
+        "SELECT id,payload,created_at FROM v2_events "
+        "WHERE event_type=? AND subject_type=? AND subject_id=? AND created_at>=?",
+        (event_type, subject_type, subject_id, oldest_event),
+    ):
+        try:
+            payload = json.loads(row["payload"])
+            happened_at = datetime.fromisoformat(row["created_at"]).timestamp()
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        action_id = payload.get("action_id") if isinstance(payload, dict) else None
+        key = f"action:{action_id}" if action_id else f"event:{row['id']}"
+        observed[key] = max(observed.get(key, 0), happened_at)
+
+    per_minute = limits.get("max_per_minute")
+    if per_minute is not None and sum(at >= current - 60 for at in observed.values()) >= int(per_minute):
+        raise UsageLimitExceeded("minute")
+    per_hour = limits.get("max_per_hour")
+    if per_hour is not None and sum(at >= current - 3600 for at in observed.values()) >= int(per_hour):
+        raise UsageLimitExceeded("hour")
+    cooldown = limits.get("cooldown_seconds")
+    if cooldown and observed and current - max(observed.values()) < int(cooldown):
+        raise UsageLimitExceeded("cooldown")
+
+
 def initialize(conn) -> None:
     conn.executescript(SCHEMA)
+    conn.execute("CREATE INDEX IF NOT EXISTS v2_events_usage_window "
+                 "ON v2_events(event_type,subject_type,subject_id,created_at)")
     conn.executescript(recovery_journal.SCHEMA)
     conn.executescript(container_admission.SCHEMA)
     # Additive upgrade: legacy identities keep their exact original fingerprint.
