@@ -60,7 +60,7 @@ from toolgate.executors import (
 )
 from toolgate.executors.port_plan import PlanError
 
-SERVICE_VERSION = "0.3.0"
+SERVICE_VERSION = "0.4.0"
 
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
 

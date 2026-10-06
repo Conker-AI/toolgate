@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.0
+
+- Publish revision-safe workflow drafts, validation, immutable publications and
+  owner-reviewed access and execution through the existing durable action ledger.
+- Expose scoped workflow capabilities and bounded owner policy summaries without
+  leaking credentials or expanding the execution boundary.
+
 - Add a scoped, secret-free policy summary whose digest covers the full effective tool definitions,
   scope patterns and lockdown state. Setup review can now detect policy drift without exposing
   executor destinations, headers or credentials.
