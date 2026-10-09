@@ -32,6 +32,7 @@ from toolgate.core import (
     editor_publication,
     editor_runs,
     legacy_archive,
+    mcp_imports,
     owner_channel,
     port_finalization,
     port_reviews,
@@ -51,6 +52,7 @@ from toolgate.core.public_https import (
 from toolgate.executors import (
     container_control,
     filesystem_inventory,
+    mcp_http,
     port_control,
     port_recovery,
     process_control,
@@ -82,7 +84,13 @@ async def definition_conflict(_request: Request, exc: control_plane.DefinitionCo
 @app.exception_handler(owner_channel.OwnerError)
 async def owner_error(_request: Request, error: owner_channel.OwnerError):
     return JSONResponse({"detail": {"code": error.code, "message": str(error)}},
-                        status_code=error.status)
+                            status_code=error.status)
+
+
+@app.exception_handler(mcp_http.MCPError)
+async def mcp_error(_request: Request, error: mcp_http.MCPError):
+    return JSONResponse({"detail": {"code": error.code, "message": str(error)}},
+                        status_code=error.status, headers={"Cache-Control": "no-store"})
 
 
 @app.exception_handler(RequestValidationError)
@@ -649,6 +657,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "container_control",
     "process_control",
     "port_control",
+    "mcp_http",
 }
 AUTHORIZATION_MODES = {"auto", "ai_review", "owner_confirmation", "blocked"}
 CAPABILITY_STATUSES = {"draft", "active", "disabled"}
@@ -747,7 +756,17 @@ def tool_definition_errors(tool: dict) -> list[str]:
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}")
         return errors
-    if execution["type"] == "port_control":
+    if execution["type"] == "mcp_http":
+        try:
+            mcp_http.validate_execution(execution)
+        except mcp_http.MCPError as exc:
+            errors.append(str(exc))
+        if tool.get("authorization") != "owner_confirmation":
+            errors.append("External MCP tools require owner_confirmation")
+        if (input_names != {"arguments"} or len(inputs) != 1
+                or inputs[0].get("type") != "object" or inputs[0].get("required") is not True):
+            errors.append("External MCP tools require one object input named arguments")
+    elif execution["type"] == "port_control":
         if (execution != {"type": "port_control"} or tool.get("id") != "system.port-control"
                 or tool.get("authorization") != "owner_confirmation"):
             errors.append("Port replacement requires its reserved executor and owner confirmation")
@@ -1186,6 +1205,17 @@ def invoke_tool(tool: dict, args: dict, actor: str, *, approval_request_id: str 
         control_plane.event("execution_blocked", "critical", "tool", tool["id"], actor, {"code": "LOCKED_DOWN"})
         deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423, "Ask the owner to unlock ToolGate")
     errors = control_plane.validate_inputs(tool.get("inputs", []), args)
+    if tool.get("execution", {}).get("type") == "mcp_http":
+        # MCP schemas stay exact; the legacy flat input validator is insufficient.
+        try:
+            mcp_http.validate_execution(tool["execution"])
+            if set(args) != {"arguments"}:
+                raise mcp_http.MCPError("invalid_arguments", "Provide only the arguments object.")
+            mcp_http.validate_arguments(tool["execution"]["input_schema"], args["arguments"])
+        except mcp_http.MCPError as exc:
+            errors.append(str(exc))
+        if tool.get("authorization") != "owner_confirmation":
+            deny("POLICY_DENIED", "External MCP tools require owner confirmation", 403)
     if errors:
         control_plane.event("validation_failed", "warning", "tool", tool["id"], actor, {"errors": errors})
         deny("VALIDATION_ERROR", "; ".join(errors), 422, "Run `toolgate tool <name> info`")
@@ -1334,6 +1364,8 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         result = _execute_local_echo(args)
     elif executor_type == "http_json":
         result = _execute_http_json(tool["execution"], args)
+    elif executor_type == "mcp_http":
+        result = mcp_http.execute(tool["execution"], args)
     elif executor_type == "memorygate":
         result = _execute_memorygate(tool["execution"], args)
     elif executor_type == "ollama_generate":
@@ -2489,6 +2521,36 @@ def owner_requests(limit: int = Query(default=50, ge=1, le=200),
                    cursor: str | None = Query(default=None, min_length=1, max_length=128,
                                              pattern=r"^[A-Za-z0-9_-]+$")):
     return owner_channel.list_requests(limit, cursor)
+
+
+@app.post("/v2/owner/mcp/discover", dependencies=[Depends(require_owner)])
+def owner_mcp_discover(payload: mcp_imports.Discover):
+    return JSONResponse(mcp_http.discover(payload.url, payload.secret_ref), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/v2/owner/mcp/import", dependencies=[Depends(require_owner)])
+def owner_mcp_import(payload: mcp_imports.Import):
+    return JSONResponse(mcp_imports.import_tool(payload, require_valid_tool_definition), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v2/owner/mcp/tools", dependencies=[Depends(require_owner)])
+def owner_mcp_tools():
+    return JSONResponse(mcp_imports.list_tools(), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/v2/owner/mcp/tools/{tool_id}/state", dependencies=[Depends(require_owner)])
+def owner_mcp_state(tool_id: str, payload: mcp_imports.State):
+    return JSONResponse(mcp_imports.set_state(tool_id, payload, require_valid_tool_definition), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v2/owner/mcp/tools/{tool_id}/access", dependencies=[Depends(require_owner)])
+def owner_mcp_access(tool_id: str, agent: dict = Depends(require_agent)):
+    return JSONResponse(mcp_imports.access(tool_id, agent), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/v2/owner/mcp/tools/{tool_id}/access", dependencies=[Depends(require_owner)])
+def owner_mcp_set_access(tool_id: str, payload: mcp_imports.State, agent: dict = Depends(require_agent)):
+    return JSONResponse(mcp_imports.access(tool_id, agent, payload), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/v2/owner/editor-capabilities", dependencies=[Depends(require_owner)])
