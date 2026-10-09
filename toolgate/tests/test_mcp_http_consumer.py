@@ -235,7 +235,7 @@ def test_missing_secret_uses_fixed_error(peer, monkeypatch):
     "change",
     [
         lambda schema: schema.update({"$ref": "https://metadata.internal/schema"}),
-        lambda schema: schema.update({"anyOf": [{"type": "object"}]}),
+        lambda schema: schema.update({"allOf": [{"type": "object"}]}),
         lambda schema: schema["properties"]["text"].update({"pattern": "(a+)+$"}),
         lambda schema: schema.update({"additionalProperties": {"type": "string"}}),
     ],
@@ -720,3 +720,191 @@ def test_duplicate_json_keys_are_rejected(peer, monkeypatch):
     with pytest.raises(mcp.MCPError) as exc:
         mcp.discover(URL)
     assert exc.value.code == "invalid_response"
+
+
+def test_nullable_types_and_const_match_microsoft_catalogue_shape():
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {"type": ["string", "null"], "default": None},
+            "SessionId": {
+                "type": ["string", "null"],
+                "default": "opaque-session",
+                "const": "opaque-session",
+            },
+        },
+    }
+    mcp.validate_schema(schema)
+    mcp.validate_arguments(schema, {"query": None})
+    mcp.validate_arguments(schema, {"query": "Azure", "SessionId": "opaque-session"})
+    for value in (False, 4, {}):
+        with pytest.raises(mcp.MCPError):
+            mcp.validate_arguments(schema, {"query": value})
+    for value in (None, "other-session"):
+        with pytest.raises(mcp.MCPError):
+            mcp.validate_arguments(schema, {"SessionId": value})
+
+
+def test_type_unions_apply_only_constraints_for_the_actual_value_type():
+    schema = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": ["object", "array", "string", "number", "null"],
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+                "additionalProperties": False,
+                "items": {"type": "integer"},
+                "minLength": 2,
+                "minimum": 1,
+                "maxItems": 2,
+            }
+        },
+    }
+    for value in (None, "ab", 2, {"name": "A"}, [1, 2]):
+        mcp.validate_arguments(schema, {"value": value})
+    for value in (False, "a", 0, {}, [1, 2, 3], [None]):
+        with pytest.raises(mcp.MCPError):
+            mcp.validate_arguments(schema, {"value": value})
+
+
+@pytest.mark.parametrize("types", [[], ["string", "string"], ["string", {}], ["string", "unknown"]])
+def test_invalid_type_unions_are_rejected(types):
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.validate_schema({"type": "object", "properties": {"value": {"type": types}}})
+    assert exc.value.code == "unsupported_schema"
+
+
+def test_const_and_enum_distinguish_boolean_but_equate_json_numbers():
+    schema = {
+        "type": "object",
+        "properties": {"n": {"type": ["integer", "boolean"], "const": 1, "enum": [1.0]}},
+    }
+    mcp.validate_arguments(schema, {"n": 1.0})
+    with pytest.raises(mcp.MCPError):
+        mcp.validate_arguments(schema, {"n": True})
+    array = {
+        "type": "object",
+        "properties": {"list": {"type": "array", "items": {"type": "number"}, "uniqueItems": True}},
+    }
+    with pytest.raises(mcp.MCPError):
+        mcp.validate_arguments(array, {"list": [1, 1.0]})
+
+
+def test_dynamic_const_changes_still_stop_exact_schema_pinning(peer):
+    peer.schema["properties"]["SessionId"] = {
+        "type": ["string", "null"],
+        "default": "session-a",
+        "const": "session-a",
+    }
+    pinned = copy.deepcopy(peer.schema)
+    definition = {**execution(), "input_schema": pinned, "schema_hash": mcp.schema_hash(pinned)}
+    peer.schema["properties"]["SessionId"].update(default="session-b", const="session-b")
+    result = mcp.execute(definition, {"arguments": {"text": "hello"}})
+    assert result["error_code"] == "schema_changed"
+    assert not peer.tool_calls
+
+
+def test_nullable_header_is_omitted_for_null():
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": ["string", "null"], "x-mcp-header": "Name"}},
+    }
+    mcp.validate_arguments(schema, {"name": None})
+    assert mcp.parameter_headers(schema, {"name": None}) == {}
+
+
+def test_deepwiki_anyof_catalogue_can_be_discovered_and_validated(peer):
+    schema = {
+        "type": "object",
+        "properties": {
+            "repoName": {
+                "anyOf": [
+                    {"type": "string"},
+                    {"type": "array", "items": {"type": "string"}},
+                ]
+            },
+            "question": {"type": "string"},
+        },
+        "required": ["repoName", "question"],
+    }
+    peer.schema = schema
+    catalogue = mcp.discover(URL)
+    assert catalogue["tools"][0]["inputSchema"] == schema
+    for repo in ("owner/repo", ["owner/first", "owner/second"]):
+        mcp.validate_arguments(schema, {"repoName": repo, "question": "How does it work?"})
+    for repo in (None, 7, ["owner/repo", False], {"name": "owner/repo"}):
+        with pytest.raises(mcp.MCPError) as exc:
+            mcp.validate_arguments(schema, {"repoName": repo, "question": "Question"})
+        assert exc.value.code == "invalid_arguments"
+
+
+def test_anyof_and_oneof_preserve_overlapping_branch_semantics():
+    alternatives = [{"type": "integer"}, {"type": "number", "minimum": 0}]
+    for keyword in ("anyOf", "oneOf"):
+        schema = {"type": "object", "properties": {"value": {keyword: alternatives}}}
+        mcp.validate_arguments(schema, {"value": -1})
+        mcp.validate_arguments(schema, {"value": 0.5})
+        if keyword == "anyOf":
+            mcp.validate_arguments(schema, {"value": 1})
+        else:
+            with pytest.raises(mcp.MCPError):
+                mcp.validate_arguments(schema, {"value": 1})
+        with pytest.raises(mcp.MCPError):
+            mcp.validate_arguments(schema, {"value": False})
+
+
+def test_alternatives_apply_sibling_constraints_and_validate_every_branch():
+    value_schema = {
+        "type": "string",
+        "maxLength": 4,
+        "anyOf": [{"type": "string", "const": "hello"}, {"type": "string", "const": "hi"}],
+    }
+    schema = {"type": "object", "properties": {"value": value_schema}}
+    mcp.validate_arguments(schema, {"value": "hi"})
+    for value in ("hello", "no", 4):
+        with pytest.raises(mcp.MCPError):
+            mcp.validate_arguments(schema, {"value": value})
+    value_schema["anyOf"].append({"$ref": "https://schema.example/ref"})
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.validate_schema(schema)
+    assert exc.value.code == "unsupported_schema"
+
+
+@pytest.mark.parametrize(
+    "alternatives",
+    [[], {}, [True], [{"type": "string"}] * 9, [{"type": "string", "x-mcp-header": "Branch"}]],
+)
+def test_schema_alternatives_are_bounded_and_cannot_add_conditional_headers(alternatives):
+    schema = {"type": "object", "properties": {"value": {"anyOf": alternatives}}}
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.validate_schema(schema)
+    assert exc.value.code == "unsupported_schema"
+
+
+def test_schema_alternative_work_is_bounded():
+    schema = {
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"oneOf": [{"type": "number"}] * 7 + [{"type": "string"}]},
+            }
+        },
+    }
+    mcp.validate_arguments(schema, {"values": ["x"] * 100})
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.validate_arguments(schema, {"values": ["x"] * 2300})
+    assert exc.value.code == "value_too_complex"
+
+
+def test_alternative_schema_drift_is_not_normalized(peer):
+    peer.schema["properties"]["text"] = {
+        "anyOf": [{"type": "string", "maxLength": 30}, {"type": "null"}]
+    }
+    pinned = copy.deepcopy(peer.schema)
+    definition = {**execution(), "input_schema": pinned, "schema_hash": mcp.schema_hash(pinned)}
+    peer.schema["properties"]["text"]["anyOf"][0]["maxLength"] = 31
+    result = mcp.execute(definition, {"arguments": {"text": "hello"}})
+    assert result["error_code"] == "schema_changed"
+    assert not peer.tool_calls

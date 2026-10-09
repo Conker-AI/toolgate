@@ -1,10 +1,11 @@
 """Bounded external MCP tools over public HTTPS, without credential or grant discovery.
 
-Supported input schemas use one explicit type at every node: object, array,
-string, integer, number, boolean or null. Objects support properties, required
+Supported input schemas use explicit types, bounded type lists or anyOf/oneOf:
+object, array, string, integer, number, boolean or null. Objects support properties, required
 and boolean additionalProperties; arrays support a single items schema; scalar
-enums and size/range constraints are supported. References, combinators, regex,
-formats and remote schema resolution are rejected, never silently weakened.
+enum, const and size/range constraints are supported. Alternatives are limited to eight
+branches, 128 schema nodes and 16,384 validation visits. References, other combinators,
+regex, formats and remote schema resolution are rejected, never silently weakened.
 """
 
 from __future__ import annotations
@@ -65,6 +66,43 @@ def _encoded(value):
 
 def schema_hash(schema):
     return hashlib.sha256(_encoded(schema)).hexdigest()
+
+
+def _types(node):
+    if "type" not in node and any(key in node for key in ("anyOf", "oneOf")):
+        return set()
+    value = node.get("type")
+    kinds = [value] if isinstance(value, str) else value
+    if (
+        not isinstance(kinds, list)
+        or not 1 <= len(kinds) <= 7
+        or any(
+            not isinstance(kind, str)
+            or kind not in {"object", "array", "string", "integer", "number", "boolean", "null"}
+            for kind in kinds
+        )
+        or len(set(kinds)) != len(kinds)
+    ):
+        _error(
+            "unsupported_schema",
+            "Every schema node needs explicit supported types or bounded anyOf/oneOf alternatives.",
+        )
+    return set(kinds)
+
+
+def _comparable(value):
+    # JSON Schema numeric equality treats 1 and 1.0 as equal, but not true and 1.
+    if type(value) is float and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _comparable(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_comparable(item) for item in value]
+    return value
+
+
+def _value_key(value):
+    return _encoded(_comparable(value))
 
 
 def bounded(value, *, maximum=32768):
@@ -136,14 +174,17 @@ def validate_schema(schema):
         _error("unsupported_schema", "The MCP input schema must declare type object.")
 
     header_names = set()
+    schema_nodes = 0
 
     def visit(node, depth=0, header_path=True):
-        if not isinstance(node, dict) or depth > 10:
+        nonlocal schema_nodes
+        schema_nodes += 1
+        if not isinstance(node, dict) or depth > 10 or schema_nodes > 128:
             _error(
                 "unsupported_schema",
-                "Schemas must be typed objects with at most ten nested levels.",
+                "Schemas must contain at most 128 schema nodes and ten nested levels.",
             )
-        kind = node.get("type")
+        kinds = _types(node)
         fields = {
             "object": {
                 "properties",
@@ -159,11 +200,6 @@ def validate_schema(schema):
             "boolean": set(),
             "null": set(),
         }
-        if not isinstance(kind, str) or kind not in fields:
-            _error(
-                "unsupported_schema",
-                "Every schema node needs one supported explicit type; unions are unavailable.",
-            )
         common = {
             "type",
             "title",
@@ -171,13 +207,16 @@ def validate_schema(schema):
             "default",
             "examples",
             "enum",
+            "const",
+            "anyOf",
+            "oneOf",
             "$schema",
             "x-mcp-header",
         }
-        if set(node) - common - fields[kind]:
+        if set(node) - common - set().union(*(fields[kind] for kind in kinds)):
             _error(
                 "unsupported_schema",
-                "Schema contains unsupported constraints; references, combinators, regex and formats are unavailable.",
+                "Schema contains unsupported constraints; references, other combinators, regex and formats are unavailable.",
             )
         for key in ("title", "description", "$schema"):
             if key in node and (not isinstance(node[key], str) or len(node[key]) > 4000):
@@ -193,7 +232,8 @@ def validate_schema(schema):
             if (
                 not header_path
                 or depth == 0
-                or kind not in {"string", "integer", "boolean"}
+                or len(kinds - {"null"}) != 1
+                or not kinds - {"null"} <= {"string", "integer", "boolean"}
                 or not isinstance(name, str)
                 or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}", name)
                 or name.casefold() in header_names
@@ -230,7 +270,7 @@ def validate_schema(schema):
                 or (type(node[key]) is float and not math.isfinite(node[key]))
             ):
                 _error("unsupported_schema", "Schema numeric constraints must be finite numbers.")
-        if kind == "object":
+        if "object" in kinds:
             props, required = node.get("properties", {}), node.get("required", [])
             if not isinstance(props, dict) or len(props) > 64 or not isinstance(required, list):
                 _error(
@@ -248,12 +288,22 @@ def validate_schema(schema):
                 )
             for child in props.values():
                 visit(child, depth + 1, header_path)
-        if kind == "array":
+        if "array" in kinds:
             if "items" not in node:
                 _error("unsupported_schema", "Arrays require one typed items schema.")
             if "uniqueItems" in node and type(node["uniqueItems"]) is not bool:
                 _error("unsupported_schema", "uniqueItems must be boolean.")
             visit(node["items"], depth + 1, False)
+        for keyword in ("anyOf", "oneOf"):
+            if keyword in node:
+                branches = node[keyword]
+                if not isinstance(branches, list) or not 1 <= len(branches) <= 8:
+                    _error(
+                        "unsupported_schema", "Schema alternatives require one to eight branches."
+                    )
+                for branch in branches:
+                    # Conditional branches have no unambiguous static parameter-header path.
+                    visit(branch, depth + 1, False)
 
     visit(schema)
 
@@ -261,24 +311,34 @@ def validate_schema(schema):
 def validate_arguments(schema, value):
     validate_schema(schema)
     bounded(value)
+    visits = 0
 
     def visit(node, item):
-        kind = node["type"]
+        nonlocal visits
+        visits += 1
+        if visits > 16384:
+            _error("value_too_complex", "Arguments exceed the bounded schema validation budget.")
+        kinds = _types(node)
         matches = {
             "object": isinstance(item, dict),
             "array": isinstance(item, list),
             "string": isinstance(item, str),
-            "integer": type(item) is int,
+            "integer": type(item) is int or (type(item) is float and item.is_integer()),
             "number": type(item) in (int, float),
             "boolean": type(item) is bool,
             "null": item is None,
         }
-        if not matches[kind]:
+        kind = next(
+            (kind for kind, matches_kind in matches.items() if matches_kind and kind in kinds), None
+        )
+        if kinds and kind is None:
             _error("invalid_arguments", "Arguments do not match the pinned MCP input schema.")
         if "enum" in node and not any(
-            _encoded(item) == _encoded(choice) for choice in node["enum"]
+            _value_key(item) == _value_key(choice) for choice in node["enum"]
         ):
             _error("invalid_arguments", "An argument is outside the schema's enum.")
+        if "const" in node and _value_key(item) != _value_key(node["const"]):
+            _error("invalid_arguments", "An argument does not match the schema's const value.")
         if kind in {"object", "array", "string"}:
             suffix = {"object": "Properties", "array": "Items", "string": "Length"}[kind]
             if len(item) < node.get("min" + suffix, 0) or len(item) > node.get(
@@ -297,7 +357,7 @@ def validate_arguments(schema, value):
                 if key in props:
                     visit(props[key], child)
         elif kind == "array":
-            if node.get("uniqueItems") and len({_encoded(child) for child in item}) != len(item):
+            if node.get("uniqueItems") and len({_value_key(child) for child in item}) != len(item):
                 _error("invalid_arguments", "Arguments require unique array items.")
             for child in item:
                 visit(node["items"], child)
@@ -309,12 +369,30 @@ def validate_arguments(schema, value):
                 or ("exclusiveMaximum" in node and item >= node["exclusiveMaximum"])
             ):
                 _error("invalid_arguments", "A numeric argument is outside the schema's range.")
+        for keyword in ("anyOf", "oneOf"):
+            if keyword not in node:
+                continue
+            matched = 0
+            for branch in node[keyword]:
+                try:
+                    visit(branch, item)
+                except MCPError as exc:
+                    if exc.code != "invalid_arguments":
+                        raise
+                else:
+                    matched += 1
+                    if keyword == "anyOf" or matched > 1:
+                        break
+            if matched == 0 or (keyword == "oneOf" and matched != 1):
+                _error("invalid_arguments", "Arguments do not match the schema's alternatives.")
 
     visit(schema, value)
     parameter_headers(schema, value)
 
 
 def _header_value(value):
+    if type(value) is float and value.is_integer():
+        value = int(value)
     if type(value) is int and abs(value) > 2**53 - 1:
         _error("invalid_arguments", "MCP header integers must be within the JavaScript safe range.")
     text = str(value).lower() if type(value) is bool else str(value)
@@ -335,7 +413,7 @@ def parameter_headers(schema, value):
     def visit(node, item):
         if "x-mcp-header" in node and item is not None:
             headers["Mcp-Param-" + node["x-mcp-header"]] = _header_value(item)
-        if node["type"] == "object" and isinstance(item, dict):
+        if "object" in _types(node) and isinstance(item, dict):
             for key, child in node.get("properties", {}).items():
                 if key in item:
                     visit(child, item[key])
