@@ -85,7 +85,7 @@ def import_tool(payload: Import, validate):
     }
     mcp_http.validate_execution(execution)
     discovered = mcp_http.discover(payload.url, payload.secret_ref)
-    mcp_http.require_match(discovered["tools"], execution)
+    mcp_http.require_match(discovered["tools"], execution, discovered.get("unsupportedTools", []))
     body = {
         "id": payload.id,
         "name": payload.name.strip(),
@@ -99,7 +99,7 @@ def import_tool(payload: Import, validate):
                 "type": "object",
                 "required": True,
                 "description": "JSON arguments matching the imported MCP schema: "
-                + json.dumps(payload.input_schema, separators=(",", ":")),
+                + json.dumps(payload.input_schema, separators=(",", ":"), ensure_ascii=False),
             }
         ],
         "outputs": [],

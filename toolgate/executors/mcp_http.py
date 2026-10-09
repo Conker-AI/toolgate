@@ -470,6 +470,7 @@ class Session:
         self.version = MODERN_VERSION
         self.modern = True
         self.client = None
+        self.unsupported_tools = []
 
     def __enter__(self):
         if not public_url(self.url):
@@ -563,7 +564,22 @@ class Session:
         except (ValueError, UnicodeError, RecursionError):
             _error("invalid_response", "The MCP server returned invalid JSON.", 502)
         bounded(value, maximum=MAX_BYTES)
-        if self.secret and self.secret in _encoded(value).decode("utf-8"):
+
+        def contains_secret(item):
+            if isinstance(item, str):
+                return self.secret in item
+            if isinstance(item, dict):
+                return any(
+                    self.secret in key or contains_secret(child) for key, child in item.items()
+                )
+            if isinstance(item, list):
+                return any(contains_secret(child) for child in item)
+            return False
+
+        # Inspect decoded keys and values: JSON escaping can hide a raw bearer
+        # containing quotes or backslashes from a serialized-string search.
+        # bounded() above limits this traversal to 4096 nodes and depth 16.
+        if self.secret and contains_secret(value):
             _error(
                 "credential_echo",
                 "The MCP server echoed its credential; the response was withheld.",
@@ -733,10 +749,11 @@ class Session:
 
     def tools(self):
         tools, names, cursors, cursor = [], set(), set(), None
+        self.unsupported_tools = []
         for _ in range(MAX_PAGES):
             result = self.rpc("tools/list", {"cursor": cursor} if cursor else {})
             values = result.get("tools")
-            if not isinstance(values, list) or len(tools) + len(values) > MAX_TOOLS:
+            if not isinstance(values, list) or len(names) + len(values) > MAX_TOOLS:
                 _error("catalogue_limit", "MCP tool catalogues are limited to 64 tools.", 502)
             for value in values:
                 if (
@@ -750,8 +767,12 @@ class Session:
                 if not isinstance(description, str) or len(description) > 4000:
                     _error("invalid_catalogue", "MCP tool descriptions must be bounded text.", 502)
                 schema = value.get("inputSchema")
-                validate_schema(schema)
                 names.add(value["name"])
+                try:
+                    validate_schema(schema)
+                except MCPError as exc:
+                    self.unsupported_tools.append({"name": value["name"], "reason": str(exc)[:500]})
+                    continue
                 tools.append(
                     {
                         "name": value["name"],
@@ -771,10 +792,15 @@ class Session:
 
 def discover(url, secret_ref=None):
     with Session(url, secret_ref) as session:
-        return {"schemaVersion": 1, "server": session.server, "tools": session.tools()}
+        result = {"schemaVersion": 1, "server": session.server, "tools": session.tools()}
+        if session.unsupported_tools:
+            result["unsupportedTools"] = session.unsupported_tools
+        return result
 
 
-def require_match(tools, execution):
+def require_match(tools, execution, unsupported_tools=()):
+    if any(tool["name"] == execution["tool_name"] for tool in unsupported_tools):
+        _error("unsupported_schema", "The selected MCP tool's current input schema is unsupported.")
     matches = [tool for tool in tools if tool["name"] == execution["tool_name"]]
     if len(matches) != 1 or matches[0]["schemaHash"] != execution["schema_hash"]:
         _error(
@@ -791,7 +817,7 @@ def execute(execution, args):
             _error("invalid_arguments", "Provide only the arguments object.")
         validate_arguments(execution["input_schema"], args["arguments"])
         with Session(execution["url"], execution.get("secret_ref")) as session:
-            require_match(session.tools(), execution)
+            require_match(session.tools(), execution, session.unsupported_tools)
             try:
                 result = session.rpc(
                     "tools/call",

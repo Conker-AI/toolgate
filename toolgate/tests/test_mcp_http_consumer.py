@@ -242,9 +242,14 @@ def test_missing_secret_uses_fixed_error(peer, monkeypatch):
 )
 def test_unsupported_constraints_are_not_silently_weakened(peer, change):
     change(peer.schema)
+    catalogue = mcp.discover(URL)
+    assert catalogue["tools"] == []
+    assert len(catalogue["unsupportedTools"]) == 1
+    assert catalogue["unsupportedTools"][0]["name"] == "echo"
     with pytest.raises(mcp.MCPError) as exc:
-        mcp.discover(URL)
+        mcp.validate_schema(peer.schema)
     assert exc.value.code == "unsupported_schema"
+    assert catalogue["unsupportedTools"][0]["reason"] == str(exc.value)
 
 
 @pytest.mark.parametrize(
@@ -908,3 +913,107 @@ def test_alternative_schema_drift_is_not_normalized(peer):
     result = mcp.execute(definition, {"arguments": {"text": "hello"}})
     assert result["error_code"] == "schema_changed"
     assert not peer.tool_calls
+
+
+def unsupported_tool(name="formatted"):
+    return {
+        "name": name,
+        "description": "Requires a schema keyword this client does not support",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"url": {"type": "string", "format": "uri"}},
+        },
+    }
+
+
+def test_unsupported_catalogue_entries_do_not_block_supported_discovery_or_execution(peer):
+    peer.extra_tools = [unsupported_tool()]
+    result = mcp.discover(URL)
+    assert [tool["name"] for tool in result["tools"]] == ["echo"]
+    assert [tool["name"] for tool in result["unsupportedTools"]] == ["formatted"]
+    assert "unsupported constraints" in result["unsupportedTools"][0]["reason"]
+    assert set(result["unsupportedTools"][0]) == {"name", "reason"}
+    assert mcp.execute(execution(), {"arguments": {"text": "hello"}})["ok"] is True
+    assert len(peer.tool_calls) == 1
+
+
+def test_selected_tool_becoming_unsupported_blocks_import_and_execution(api, peer):
+    peer.schema["properties"]["text"]["format"] = "uri"
+    result = mcp.execute(execution(), {"arguments": {"text": "hello"}})
+    assert result["error_code"] == "unsupported_schema"
+    client, _, _ = api
+    response = client.post("/v2/owner/mcp/import", json=import_body(), headers=owner_headers())
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "unsupported_schema"
+    assert not peer.tool_calls
+
+
+def test_unsupported_entries_cannot_bypass_duplicate_or_catalogue_bounds(peer):
+    peer.pages = [
+        {"tools": [unsupported_tool()], "nextCursor": "more"},
+        {"tools": [unsupported_tool()]},
+    ]
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.discover(URL)
+    assert exc.value.code == "invalid_catalogue"
+    peer.pages = [
+        {"tools": [unsupported_tool(f"first-{i}") for i in range(33)], "nextCursor": "more"},
+        {"tools": [unsupported_tool(f"second-{i}") for i in range(32)]},
+    ]
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.discover(URL)
+    assert exc.value.code == "catalogue_limit"
+
+
+@pytest.mark.parametrize("sse", [False, True])
+@pytest.mark.parametrize("in_key", [False, True])
+def test_json_escaped_bearer_echo_in_decoded_keys_or_values_is_withheld(
+    peer, monkeypatch, sse, in_key
+):
+    secret = 'dummy-bearer-"quote"-\\backslash'
+    monkeypatch.setattr(mcp.vault, "get_key", lambda _: secret)
+    peer.sse = sse
+    peer.result = {"content": [{"type": "text", "text": "Public result"}]}
+    peer.result["structuredContent"] = (
+        {f"prefix:{secret}:suffix": "value"}
+        if in_key
+        else {"nested": [{"value": f"prefix:{secret}:suffix"}]}
+    )
+    with pytest.raises(mcp.CallOutcomeUnknown) as exc:
+        mcp.execute({**execution(), "secret_ref": "MCP_BEARER"}, {"arguments": {"text": "hello"}})
+    assert len(peer.tool_calls) == 1
+    assert secret not in str(exc.value)
+    assert exc.value.__cause__.code == "credential_echo"
+    assert (
+        str(exc.value.__cause__)
+        == "The MCP server echoed its credential; the response was withheld."
+    )
+
+
+def test_json_escaped_bearer_in_catalogue_is_withheld_before_discovery(peer, monkeypatch):
+    secret = 'dummy-bearer-"quote"'
+    monkeypatch.setattr(mcp.vault, "get_key", lambda _: secret)
+    peer.schema["properties"]["text"]["default"] = secret
+    with pytest.raises(mcp.MCPError) as exc:
+        mcp.discover(URL, "MCP_BEARER")
+    assert exc.value.code == "credential_echo"
+    assert secret not in str(exc.value)
+    assert not peer.tool_calls
+
+
+def test_imported_schema_description_preserves_unicode_without_ascii_expansion(api, peer):
+    for i in range(4):
+        peer.schema["properties"][f"value{i}"] = {"type": "string", "description": "界" * 2000}
+    body = {
+        **import_body(),
+        "input_schema": peer.schema,
+        "schema_hash": mcp.schema_hash(peer.schema),
+    }
+    client, _, _ = api
+    response = client.post("/v2/owner/mcp/import", json=body, headers=owner_headers())
+    assert response.status_code == 200, response.text
+    published = publications.get("tool", body["id"], 1, published=True)
+    description = published["definition"]["inputs"][0]["description"]
+    assert "界" in description and "\\u754c" not in description
+    assert len(description.encode("utf-8")) < 32768
+    assert json.loads(description.split(": ", 1)[1]) == peer.schema
