@@ -250,12 +250,12 @@ MUTANTS.extend([('dispatch without a committed record',
   'v2_spend_reservations WHEN 0'),
   'toolgate/tests/test_spending.py::test_reservations_and_job_identity_cannot_be_erased'),
  ('budget policy accessible to execution key',
-  'toolgate/api/server.py',
+  'toolgate/api/routes/spending.py',
   'def spending_policy(payload: SpendPolicy, _tier: str = Depends(require_admin)):',
   'def spending_policy(payload: SpendPolicy, _tier: dict = Depends(require_agent)):',
   'toolgate/tests/test_spending.py::test_owner_only_can_set_caps_prices_and_mint_jobs'),
  ('budget jobs accessible to execution key',
-  'toolgate/api/server.py',
+  'toolgate/api/routes/spending.py',
   'def spending_job(payload: SpendJob, _tier: str = Depends(require_admin)):',
   'def spending_job(payload: SpendJob, _tier: dict = Depends(require_agent)):',
   'toolgate/tests/test_spending.py::test_owner_only_can_set_caps_prices_and_mint_jobs'),
@@ -282,7 +282,7 @@ MUTANTS.extend([
 
 
 MUTANTS.extend([
-    ("worker-can-release-spending", "toolgate/api/server.py",
+    ("worker-can-release-spending", "toolgate/api/routes/spending.py",
      "    action_id: str, payload: ReservationRelease, _tier: str = Depends(require_admin)\n",
      "    action_id: str, payload: ReservationRelease, _tier: dict = Depends(require_agent)\n",
      "toolgate/tests/test_reservation_release.py::test_owner_release_frees_local_hold_without_allowing_redispatch"),
