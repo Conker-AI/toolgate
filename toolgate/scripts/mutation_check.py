@@ -23,16 +23,21 @@ MUTANTS = [
     (
         "catalogue scope bypass",
         "toolgate/api/server.py",
-        'if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])]',
-        'if tool.get("status") == "active"]',
+        'if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])\n',
+        'if tool.get("status") == "active"\n',
         MCP + "test_scoped_catalogue_and_direct_call_cannot_escape",
     ),
     (
-        "invocation scope bypass",
+        # The invoke route checks scope first, but this recheck inside the dispatch
+        # transaction also denies, so removing the route check alone is not observable.
+        "dispatch scope recheck bypass",
         "toolgate/api/server.py",
-        'if tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):',
-        'if tool.get("status") != "active":',
-        MCP + "test_scoped_catalogue_and_direct_call_cannot_escape",
+        'deny("POLICY_DENIED", "The originating agent no longer has the required scope", 403)',
+        "pass",
+        (
+            "toolgate/tests/test_dispatch_authority.py::"
+            "test_http_authority_is_rechecked_inside_root_dispatch_transaction[scope-POLICY_DENIED]"
+        ),
     ),
     (
         "request identity bypass",
@@ -85,11 +90,15 @@ MUTANTS = [
         if not row:
             return None
         record = _row(row)
+        if guard is not None:
+            guard(conn, record)
         if record.get("status") != "pending":""",
         """    record = get("request", request_id)
     if not record:
         return None
     with _conn() as conn:
+        if guard is not None:
+            guard(conn, record)
         if record.get("status") != "pending":""",
         INTEGRITY + "test_late_decision_cannot_restore_a_consumed_token",
     ),
@@ -139,8 +148,10 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_spending.py::test_budget_denial_rolls_back_approval_and_dispatch_together'),
  ('workflow retries uncertain dispatch',
   'toolgate/api/server.py',
-  'if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:',
-  'if False:',
+  ('if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:\n'
+  '                deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)'),
+  ('if False:\n'
+  '                deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)'),
   'toolgate/tests/test_execution_journal.py::test_workflow_retry_block_never_repeats_uncertain_child'),
  ('action status disclosed to another agent',
   'toolgate/api/server.py',
@@ -250,8 +261,8 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_spending.py::test_owner_only_can_set_caps_prices_and_mint_jobs'),
  ('child spending job omitted',
   'toolgate/api/server.py',
-  'job_id=state.get("job_id"), parent_action_id=parent_id)',
-  'job_id=None, parent_action_id=parent_id)',
+  'job_id=state.get("job_id"),\n                parent_action_id=parent_id,',
+  'job_id=None,\n                parent_action_id=parent_id,',
   'toolgate/tests/test_spending.py::test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run'),
  ('stale quote accepted after owner price refresh',
   'toolgate/core/spending.py',
@@ -272,8 +283,8 @@ MUTANTS.extend([
 
 MUTANTS.extend([
     ("worker-can-release-spending", "toolgate/api/server.py",
-     'def release_reservation(action_id: str, payload: ReservationRelease, _tier: str = Depends(require_admin)):',
-     'def release_reservation(action_id: str, payload: ReservationRelease, _tier: dict = Depends(require_agent)):',
+     "    action_id: str, payload: ReservationRelease, _tier: str = Depends(require_admin)\n",
+     "    action_id: str, payload: ReservationRelease, _tier: dict = Depends(require_agent)\n",
      "toolgate/tests/test_reservation_release.py::test_owner_release_frees_local_hold_without_allowing_redispatch"),
     ("release-ignores-live-dispatch", "toolgate/core/spending.py",
      'or action["status"] != "outcome_unknown"', '',
@@ -310,7 +321,19 @@ def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedPr
     )
 
 
+def stale_anchors() -> list[str]:
+    return [
+        f"{label} ({file}: anchor found {count}x, expected 1)"
+        for label, file, before, _after, _test in MUTANTS
+        if (count := (ROOT / file).read_text(encoding="utf-8").count(before)) != 1
+    ]
+
+
 def main() -> int:
+    if stale := stale_anchors():
+        print("Mutation anchors changed; update the drill before relying on it:")
+        print("\n".join(f"  {line}" for line in stale))
+        return 1
     with tempfile.TemporaryDirectory(prefix="toolgate-mutations-") as directory:
         root = Path(directory)
         for source in (ROOT / "toolgate").rglob("*.py"):
