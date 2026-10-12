@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, StrictBool, StrictInt
 
-from toolgate.api.server import deny, require_admin, require_agent
+from toolgate.api.deps import deny, require_admin, require_agent
 from toolgate.core import control_plane, spending, spending_allowances
 
 router = APIRouter()

@@ -23,6 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, StrictInt
 
+from toolgate.api.deps import deny, require_admin, require_agent, require_owner
+from toolgate.api.routes.spending import router as _spending_router
 from toolgate.core import (
     container_admission,
     control_plane,
@@ -131,26 +133,6 @@ app.add_middleware(
         "X-ToolGate-Signature",
     ],
 )
-
-
-def require_admin(x_toolgate_key: str | None = Header(None, alias="X-ToolGate-Key")) -> str:
-    key = vault.get_control_key("TOOLGATE_ADMIN_KEY")
-    if not key or not x_toolgate_key or not secrets.compare_digest(key, x_toolgate_key):
-        raise HTTPException(401, "requires TOOLGATE_ADMIN_KEY")
-    return "admin"
-
-
-def require_agent(
-    x_toolgate_execution_key: str | None = Header(None, alias="X-ToolGate-Execution-Key"),
-) -> dict:
-    agent = control_plane.authenticate_agent(x_toolgate_execution_key)
-    if not agent:
-        raise HTTPException(401, "missing or invalid X-ToolGate-Execution-Key")
-    return agent
-
-
-def require_owner(x_toolgate_owner_key: str | None = Header(None, alias="X-ToolGate-Owner-Key")):
-    owner_channel.authenticate(x_toolgate_owner_key)
 
 
 @app.on_event("startup")
@@ -1003,10 +985,6 @@ class VerificationCallback(BaseModel):
     request_id: str
     decision: str
     nonce: str
-
-
-def deny(code: str, message: str, status: int = 403, next_action: str = ""):
-    raise HTTPException(status, {"code": code, "message": message, "next_action": next_action})
 
 
 SUPPORTED_TOOL_EXECUTORS = {
@@ -3933,7 +3911,5 @@ def agent_events(limit: int = 50, _agent: dict = Depends(require_agent)):
         for event in control_plane.events(limit)
     ]
 
-
-from toolgate.api.routes.spending import router as _spending_router  # noqa: E402
 
 app.include_router(_spending_router)
