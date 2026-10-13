@@ -148,43 +148,18 @@ def startup():
     ensure_builtin_system_capabilities()
 
 
+# Registration order is dispatch order (first match wins); append new routers at the end.
 app.include_router(_health_router)
-
-
 app.include_router(_vault_router)
-
-
 app.include_router(_settings_router)
-
-
 app.include_router(_agent_keys_router)
-
-
 app.include_router(_services_router)
-
-
 app.include_router(_tools_router)
-
-
 app.include_router(_agent_router)
-
-
 app.include_router(_system_router)
-
-
 app.include_router(_publications_router)
-
-
 app.include_router(_automations_router)
-
-
 app.include_router(_activity_router)
-
-
 app.include_router(_requests_router)
-
-
 app.include_router(_editor_router)
-
-
 app.include_router(_spending_router)
