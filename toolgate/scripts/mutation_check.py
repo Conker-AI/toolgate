@@ -22,7 +22,7 @@ INTEGRITY = "toolgate/tests/test_approval_integrity.py::"
 MUTANTS = [
     (
         "catalogue scope bypass",
-        "toolgate/api/server.py",
+        "toolgate/api/routes/agent.py",
         'if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])\n',
         'if tool.get("status") == "active"\n',
         MCP + "test_scoped_catalogue_and_direct_call_cannot_escape",
@@ -41,7 +41,7 @@ MUTANTS = [
     ),
     (
         "request identity bypass",
-        "toolgate/api/server.py",
+        "toolgate/api/routes/requests.py",
         'if not request or request.get("payload", {}).get("created_by_agent_key") != agent["id"]:',
         "if not request:",
         MCP + "test_approvals_keep_identity_arguments_and_single_consumption",
@@ -62,9 +62,9 @@ MUTANTS = [
     ),
     (
         "AI route restored",
-        "toolgate/api/server.py",
-        '@app.get("/v2/archives/ai")',
-        '@app.post("/v2/ai/conversation")\n@app.get("/v2/archives/ai")',
+        "toolgate/api/routes/settings.py",
+        '@router.get("/v2/archives/ai")',
+        '@router.post("/v2/ai/conversation")\n@router.get("/v2/archives/ai")',
         ARCHIVE + "test_startup_retires_ai_routes_and_preserves_other_tools",
     ),
     (
@@ -154,7 +154,7 @@ MUTANTS.extend([('dispatch without a committed record',
   '                deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)'),
   'toolgate/tests/test_execution_journal.py::test_workflow_retry_block_never_repeats_uncertain_child'),
  ('action status disclosed to another agent',
-  'toolgate/api/server.py',
+  'toolgate/api/routes/agent.py',
   'if not record or record["actor_id"] != agent["id"]:',
   'if not record:',
   'toolgate/tests/test_execution_journal.py::test_status_is_visible_only_to_owner_or_originating_agent'),
@@ -275,7 +275,7 @@ MUTANTS.extend([
     ("automation child binding omitted", "toolgate/core/control_plane.py",
      'if binding.get("child_tools") != current:', 'if False:',
      "toolgate/tests/test_automation_approval.py::test_changed_child_invalidates_approval_without_consumption"),
-    ("automation child snapshot discarded", "toolgate/api/server.py",
+    ("automation child snapshot discarded", "toolgate/api/routes/automations.py",
      '"tool_snapshot": tool_snapshot,', '',
      "toolgate/tests/test_automation_approval.py::test_edit_after_consumption_cannot_replace_pinned_child"),
 ])
