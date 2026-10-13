@@ -34,8 +34,6 @@ from toolgate.api.invocation import (
     require_current_dispatch_authority,
 )
 from toolgate.api.models import (
-    AgentKeyCreate,
-    AgentKeyScopes,
     OwnerDecision,
     PortFinalizationRequest,
     PortReviewRequest,
@@ -47,6 +45,7 @@ from toolgate.api.models import (
     V2Service,
     V2Tool,
 )
+from toolgate.api.routes.agent_keys import router as _agent_keys_router
 from toolgate.api.routes.health import router as _health_router
 from toolgate.api.routes.settings import router as _settings_router
 from toolgate.api.routes.spending import router as _spending_router
@@ -201,32 +200,7 @@ app.include_router(_vault_router)
 app.include_router(_settings_router)
 
 
-@app.get("/v2/agent-keys")
-def list_agent_keys(_tier: str = Depends(require_admin)):
-    return control_plane.list_agent_keys()
-
-
-@app.post("/v2/agent-keys")
-def create_agent_key(payload: AgentKeyCreate, _tier: str = Depends(require_admin)):
-    record, raw = control_plane.issue_agent_key(payload.name, payload.scopes)
-    return {"key": raw, "record": record}
-
-
-@app.patch("/v2/agent-keys/{key_id}/scopes")
-def update_agent_key_scopes(
-    key_id: str, payload: AgentKeyScopes, _tier: str = Depends(require_admin)
-):
-    record = control_plane.update_agent_key_scopes(key_id, payload.scopes)
-    if not record:
-        raise HTTPException(404, "agent key not found")
-    return record
-
-
-@app.delete("/v2/agent-keys/{key_id}")
-def revoke_agent_key(key_id: str, _tier: str = Depends(require_admin)):
-    if not control_plane.revoke_agent_key(key_id):
-        raise HTTPException(404, "agent key not found")
-    return {"ok": True}
+app.include_router(_agent_keys_router)
 
 
 @app.get("/v2/services")
