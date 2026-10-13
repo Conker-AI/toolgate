@@ -8,7 +8,7 @@ from toolgate.api.deps import deny
 from toolgate.api.dispatch import _dispatch_tool, _render_template
 from toolgate.core import container_admission, control_plane, port_reviews, publications, spending
 from toolgate.core import execution_journal as journal
-from toolgate.executors import container_control, port_control
+from toolgate.executors import container_control, mcp_http, port_control
 
 
 def enforce_usage_limits(subject_type: str, subject: dict, event_type: str):
@@ -117,6 +117,17 @@ def invoke_tool(
         )
         deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423, "Ask the owner to unlock ToolGate")
     errors = control_plane.validate_inputs(tool.get("inputs", []), args)
+    if tool.get("execution", {}).get("type") == "mcp_http":
+        # MCP schemas stay exact; the legacy flat input validator is insufficient.
+        try:
+            mcp_http.validate_execution(tool["execution"])
+            if set(args) != {"arguments"}:
+                raise mcp_http.MCPError("invalid_arguments", "Provide only the arguments object.")
+            mcp_http.validate_arguments(tool["execution"]["input_schema"], args["arguments"])
+        except mcp_http.MCPError as exc:
+            errors.append(str(exc))
+        if tool.get("authorization") != "owner_confirmation":
+            deny("POLICY_DENIED", "External MCP tools require owner confirmation", 403)
     if errors:
         control_plane.event(
             "validation_failed", "warning", "tool", tool["id"], actor, {"errors": errors}

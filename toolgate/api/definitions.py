@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 
 from toolgate.core import control_plane, editor_publication, publications
-from toolgate.executors import research
+from toolgate.executors import mcp_http, research
 
 SUPPORTED_TOOL_EXECUTORS = {
     "echo",
@@ -24,6 +24,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "container_control",
     "process_control",
     "port_control",
+    "mcp_http",
 }
 
 
@@ -157,7 +158,17 @@ def tool_definition_errors(tool: dict) -> list[str]:
             f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}"
         )
         return errors
-    if execution["type"] == "port_control":
+    if execution["type"] == "mcp_http":
+        try:
+            mcp_http.validate_execution(execution)
+        except mcp_http.MCPError as exc:
+            errors.append(str(exc))
+        if tool.get("authorization") != "owner_confirmation":
+            errors.append("External MCP tools require owner_confirmation")
+        if (input_names != {"arguments"} or len(inputs) != 1
+                or inputs[0].get("type") != "object" or inputs[0].get("required") is not True):
+            errors.append("External MCP tools require one object input named arguments")
+    elif execution["type"] == "port_control":
         if (
             execution != {"type": "port_control"}
             or tool.get("id") != "system.port-control"

@@ -19,6 +19,7 @@ from toolgate.api.routes.agent_keys import router as _agent_keys_router
 from toolgate.api.routes.automations import router as _automations_router
 from toolgate.api.routes.editor import router as _editor_router
 from toolgate.api.routes.health import router as _health_router
+from toolgate.api.routes.mcp import router as _mcp_router
 from toolgate.api.routes.publications import router as _publications_router
 from toolgate.api.routes.requests import router as _requests_router
 from toolgate.api.routes.services import router as _services_router
@@ -37,6 +38,7 @@ from toolgate.core import (
     vault,
 )
 from toolgate.core import execution_journal as journal
+from toolgate.executors import mcp_http
 
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
 
@@ -73,6 +75,12 @@ async def owner_error(_request: Request, error: owner_channel.OwnerError):
     return JSONResponse(
         {"detail": {"code": error.code, "message": str(error)}}, status_code=error.status
     )
+
+
+@app.exception_handler(mcp_http.MCPError)
+async def mcp_error(_request: Request, error: mcp_http.MCPError):
+    return JSONResponse({"detail": {"code": error.code, "message": str(error)}},
+                        status_code=error.status, headers={"Cache-Control": "no-store"})
 
 
 @app.exception_handler(RequestValidationError)
@@ -163,3 +171,4 @@ app.include_router(_activity_router)
 app.include_router(_requests_router)
 app.include_router(_editor_router)
 app.include_router(_spending_router)
+app.include_router(_mcp_router)

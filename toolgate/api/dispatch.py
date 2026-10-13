@@ -14,6 +14,7 @@ from toolgate.core.public_https import DestinationDenied, public_client, public_
 from toolgate.executors import (
     container_control,
     filesystem_inventory,
+    mcp_http,
     process_control,
     research,
     system_inventory,
@@ -358,6 +359,8 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         result = _execute_local_echo(args)
     elif executor_type == "http_json":
         result = _execute_http_json(tool["execution"], args)
+    elif executor_type == "mcp_http":
+        result = mcp_http.execute(tool["execution"], args)
     elif executor_type == "memorygate":
         result = _execute_memorygate(tool["execution"], args)
     elif executor_type == "ollama_generate":
