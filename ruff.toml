@@ -35,7 +35,7 @@ ignore = [
 "toolgate/tests/*" = ["N802", "RUF012", "F811"]
 # Reviewed: every closure flagged here is called within the same loop iteration,
 # so it cannot observe a later value of the loop variable.
-"toolgate/api/server.py" = ["B023"]
+"toolgate/api/workflows.py" = ["B023"]
 "toolgate/core/editor_execution.py" = ["B023"]
 "toolgate/core/editor_graph.py" = ["B023"]
 

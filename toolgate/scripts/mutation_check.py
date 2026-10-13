@@ -22,21 +22,26 @@ INTEGRITY = "toolgate/tests/test_approval_integrity.py::"
 MUTANTS = [
     (
         "catalogue scope bypass",
-        "toolgate/api/server.py",
-        'if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])]',
-        'if tool.get("status") == "active"]',
+        "toolgate/api/routes/agent.py",
+        'if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])\n',
+        'if tool.get("status") == "active"\n',
         MCP + "test_scoped_catalogue_and_direct_call_cannot_escape",
     ),
     (
-        "invocation scope bypass",
-        "toolgate/api/server.py",
-        'if tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):',
-        'if tool.get("status") != "active":',
-        MCP + "test_scoped_catalogue_and_direct_call_cannot_escape",
+        # The invoke route checks scope first, but this recheck inside the dispatch
+        # transaction also denies, so removing the route check alone is not observable.
+        "dispatch scope recheck bypass",
+        "toolgate/api/invocation.py",
+        'deny("POLICY_DENIED", "The originating agent no longer has the required scope", 403)',
+        "pass",
+        (
+            "toolgate/tests/test_dispatch_authority.py::"
+            "test_http_authority_is_rechecked_inside_root_dispatch_transaction[scope-POLICY_DENIED]"
+        ),
     ),
     (
         "request identity bypass",
-        "toolgate/api/server.py",
+        "toolgate/api/routes/requests.py",
         'if not request or request.get("payload", {}).get("created_by_agent_key") != agent["id"]:',
         "if not request:",
         MCP + "test_approvals_keep_identity_arguments_and_single_consumption",
@@ -57,9 +62,9 @@ MUTANTS = [
     ),
     (
         "AI route restored",
-        "toolgate/api/server.py",
-        '@app.get("/v2/archives/ai")',
-        '@app.post("/v2/ai/conversation")\n@app.get("/v2/archives/ai")',
+        "toolgate/api/routes/settings.py",
+        '@router.get("/v2/archives/ai")',
+        '@router.post("/v2/ai/conversation")\n@router.get("/v2/archives/ai")',
         ARCHIVE + "test_startup_retires_ai_routes_and_preserves_other_tools",
     ),
     (
@@ -85,11 +90,15 @@ MUTANTS = [
         if not row:
             return None
         record = _row(row)
+        if guard is not None:
+            guard(conn, record)
         if record.get("status") != "pending":""",
         """    record = get("request", request_id)
     if not record:
         return None
     with _conn() as conn:
+        if guard is not None:
+            guard(conn, record)
         if record.get("status") != "pending":""",
         INTEGRITY + "test_late_decision_cannot_restore_a_consumed_token",
     ),
@@ -138,12 +147,14 @@ MUTANTS.extend([('dispatch without a committed record',
   '        if reserve:\n            conn.commit()\n            reserve(conn)',
   'toolgate/tests/test_spending.py::test_budget_denial_rolls_back_approval_and_dispatch_together'),
  ('workflow retries uncertain dispatch',
-  'toolgate/api/server.py',
-  'if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:',
-  'if False:',
+  'toolgate/api/workflows.py',
+  ('if result.get("code") in {"OUTCOME_UNKNOWN", "IN_PROGRESS"}:\n'
+  '                deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)'),
+  ('if False:\n'
+  '                deny("OUTCOME_UNKNOWN", "A child dispatch is uncertain; this workflow is held", 409)'),
   'toolgate/tests/test_execution_journal.py::test_workflow_retry_block_never_repeats_uncertain_child'),
  ('action status disclosed to another agent',
-  'toolgate/api/server.py',
+  'toolgate/api/routes/agent.py',
   'if not record or record["actor_id"] != agent["id"]:',
   'if not record:',
   'toolgate/tests/test_execution_journal.py::test_status_is_visible_only_to_owner_or_originating_agent'),
@@ -186,12 +197,12 @@ MUTANTS.extend([('dispatch without a committed record',
   'if not policy:\n            raise BudgetDenied("Paid routes',
   'toolgate/tests/test_spending.py::test_quote_requires_enabled_policy_and_current_known_price[disabled]'),
  ('unknown HTTP billing allowed',
-  'toolgate/api/server.py',
+  'toolgate/api/invocation.py',
   'if kind == "http_json" and execution.get("billing") != {"mode": "free"}:',
   'if False:',
   'toolgate/tests/test_spending.py::test_unaccounted_paid_routes_never_reach_network[http_json]'),
  ('delegated billing allowed',
-  'toolgate/api/server.py',
+  'toolgate/api/invocation.py',
   'if kind == "memorygate" and execution.get("operation") != "context":',
   'if False:',
   'toolgate/tests/test_spending.py::test_unaccounted_paid_routes_never_reach_network[memorygate]'),
@@ -202,7 +213,7 @@ MUTANTS.extend([('dispatch without a committed record',
   '    return _tavily_unmetered(query, source, limit, recency_days, timeout)',
   'toolgate/tests/test_spending.py::test_unaccounted_paid_routes_never_reach_network[tavily]'),
  ('thinking enabled on bounded paid request',
-  'toolgate/api/server.py',
+  'toolgate/api/dispatch.py',
   '"thinkingConfig": {"thinkingBudget": 0}',
   '"thinkingConfig": {"thinkingBudget": 512}',
   'toolgate/tests/test_spending.py::test_reservation_precedes_network_reconciles_and_replay_does_not_charge'),
@@ -239,19 +250,19 @@ MUTANTS.extend([('dispatch without a committed record',
   'v2_spend_reservations WHEN 0'),
   'toolgate/tests/test_spending.py::test_reservations_and_job_identity_cannot_be_erased'),
  ('budget policy accessible to execution key',
-  'toolgate/api/server.py',
+  'toolgate/api/routes/spending.py',
   'def spending_policy(payload: SpendPolicy, _tier: str = Depends(require_admin)):',
   'def spending_policy(payload: SpendPolicy, _tier: dict = Depends(require_agent)):',
   'toolgate/tests/test_spending.py::test_owner_only_can_set_caps_prices_and_mint_jobs'),
  ('budget jobs accessible to execution key',
-  'toolgate/api/server.py',
+  'toolgate/api/routes/spending.py',
   'def spending_job(payload: SpendJob, _tier: str = Depends(require_admin)):',
   'def spending_job(payload: SpendJob, _tier: dict = Depends(require_agent)):',
   'toolgate/tests/test_spending.py::test_owner_only_can_set_caps_prices_and_mint_jobs'),
  ('child spending job omitted',
-  'toolgate/api/server.py',
-  'job_id=state.get("job_id"), parent_action_id=parent_id)',
-  'job_id=None, parent_action_id=parent_id)',
+  'toolgate/api/workflows.py',
+  'job_id=state.get("job_id"),\n                parent_action_id=parent_id,',
+  'job_id=None,\n                parent_action_id=parent_id,',
   'toolgate/tests/test_spending.py::test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run'),
  ('stale quote accepted after owner price refresh',
   'toolgate/core/spending.py',
@@ -264,16 +275,16 @@ MUTANTS.extend([
     ("automation child binding omitted", "toolgate/core/control_plane.py",
      'if binding.get("child_tools") != current:', 'if False:',
      "toolgate/tests/test_automation_approval.py::test_changed_child_invalidates_approval_without_consumption"),
-    ("automation child snapshot discarded", "toolgate/api/server.py",
+    ("automation child snapshot discarded", "toolgate/api/routes/automations.py",
      '"tool_snapshot": tool_snapshot,', '',
      "toolgate/tests/test_automation_approval.py::test_edit_after_consumption_cannot_replace_pinned_child"),
 ])
 
 
 MUTANTS.extend([
-    ("worker-can-release-spending", "toolgate/api/server.py",
-     'def release_reservation(action_id: str, payload: ReservationRelease, _tier: str = Depends(require_admin)):',
-     'def release_reservation(action_id: str, payload: ReservationRelease, _tier: dict = Depends(require_agent)):',
+    ("worker-can-release-spending", "toolgate/api/routes/spending.py",
+     "    action_id: str, payload: ReservationRelease, _tier: str = Depends(require_admin)\n",
+     "    action_id: str, payload: ReservationRelease, _tier: dict = Depends(require_agent)\n",
      "toolgate/tests/test_reservation_release.py::test_owner_release_frees_local_hold_without_allowing_redispatch"),
     ("release-ignores-live-dispatch", "toolgate/core/spending.py",
      'or action["status"] != "outcome_unknown"', '',
@@ -310,7 +321,19 @@ def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedPr
     )
 
 
+def stale_anchors() -> list[str]:
+    return [
+        f"{label} ({file}: anchor found {count}x, expected 1)"
+        for label, file, before, _after, _test in MUTANTS
+        if (count := (ROOT / file).read_text(encoding="utf-8").count(before)) != 1
+    ]
+
+
 def main() -> int:
+    if stale := stale_anchors():
+        print("Mutation anchors changed; update the drill before relying on it:")
+        print("\n".join(f"  {line}" for line in stale))
+        return 1
     with tempfile.TemporaryDirectory(prefix="toolgate-mutations-") as directory:
         root = Path(directory)
         for source in (ROOT / "toolgate").rglob("*.py"):

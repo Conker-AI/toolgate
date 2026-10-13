@@ -55,8 +55,17 @@ jobs:
           fi
           echo "all tracked text files are LF"
 
+      - name: File sizes
+        # 600 lines per source file; files that were already larger may only shrink.
+        run: python toolgate/scripts/check_file_sizes.py
+
       - name: Tests
         run: python -m pytest toolgate/tests/ --ignore=toolgate/tests/test_module_contract.py -q
+
+      - name: Approval and spending mutation drill
+        # Proves the boundary tests still catch broken authority, approval and spending code.
+        # It rotted unnoticed for weeks while it ran only by hand; a moved anchor fails here.
+        run: python toolgate/scripts/mutation_check.py
 
   contract:
     # The health contract is an HTTP contract, so it is asserted against a

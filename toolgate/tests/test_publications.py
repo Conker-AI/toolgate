@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import deps, server
 from toolgate.core import control_plane as cp
 from toolgate.core import publications as pub
 
@@ -95,7 +95,7 @@ def test_concurrent_publication_has_one_snapshot(definitions):
 def test_owner_http_publication_and_history(definitions):
     client = TestClient(server.app)
     assert client.post("/v2/automations/flow/publish", json={"expected_version": 1}).status_code in {401, 403}
-    server.app.dependency_overrides[server.require_admin] = lambda: "admin"
+    server.app.dependency_overrides[deps.require_admin] = lambda: "admin"
     try:
         response = client.post("/v2/automations/flow/publish", json={"expected_version": 1})
         assert response.status_code == 200, response.text
@@ -108,4 +108,4 @@ def test_owner_http_publication_and_history(definitions):
         for invalid in [0, True, "1"]:
             assert client.post("/v2/automations/flow/publish", json={"expected_version": invalid}).status_code == 422
     finally:
-        server.app.dependency_overrides.pop(server.require_admin, None)
+        server.app.dependency_overrides.pop(deps.require_admin, None)

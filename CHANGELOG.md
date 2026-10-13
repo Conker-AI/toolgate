@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.4.0
+
+- Publish revision-safe workflow drafts, validation, immutable publications and
+  owner-reviewed access and execution through the existing durable action ledger.
+- Expose scoped workflow capabilities and bounded owner policy summaries without
+  leaking credentials or expanding the execution boundary.
+
+- Add a scoped, secret-free policy summary whose digest covers the full effective tool definitions,
+  scope patterns and lockdown state. Setup review can now detect policy drift without exposing
+  executor destinations, headers or credentials.
+
+- Reserve per-minute, hourly and cooldown capacity atomically with the durable
+  dispatch journal. Concurrent distinct actions can no longer pass the same
+  usage-limit check, while idempotent retries continue to reuse one slot.
+
 ## 0.3.0
 
 ToolGate becomes only an execution boundary, and the money and approval paths

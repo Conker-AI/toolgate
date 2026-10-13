@@ -8,7 +8,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, models, server
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.executors import system_inventory
 from toolgate.tests.test_system_inventory import Stream, envelope
@@ -19,7 +20,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "system.db")
     monkeypatch.setenv("TOOLGATE_SYSTEMGATE_URL", "http://systemgate.internal:8040")
     monkeypatch.setenv("TOOLGATE_SYSTEMGATE_KEY", "synthetic-private-key")
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     actual = system_inventory.collect
     requests = []
 
@@ -74,7 +75,7 @@ def test_owner_disabled_definition_is_not_reenabled_on_registration(setup):
     cp.create_tool(
         {**tool, "status": "disabled", "authorization": "owner_confirmation"}
     )
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     saved = cp.get("tool", "system.inventory")
     assert saved["status"] == "disabled"
     assert saved["authorization"] == "owner_confirmation"
@@ -82,13 +83,13 @@ def test_owner_disabled_definition_is_not_reenabled_on_registration(setup):
 
 def test_definition_and_dispatch_cannot_choose_private_destination(setup):
     tool = cp.get("tool", "system.inventory")
-    assert server.tool_definition_errors(tool) == []
+    assert definitions.tool_definition_errors(tool) == []
     changed = copy.deepcopy(tool)
     changed["execution"]["url"] = "http://another.internal/secrets"
-    assert server.tool_definition_errors(changed)
-    assert server._dispatch_tool(changed, {})["ok"] is False
+    assert definitions.tool_definition_errors(changed)
+    assert invocation._dispatch_tool(changed, {})["ok"] is False
     with pytest.raises(HTTPException):
-        server._dispatch_tool(tool, {"path": "/files"})
+        invocation._dispatch_tool(tool, {"path": "/files"})
     assert setup == []
 
 
@@ -99,21 +100,21 @@ def test_failed_read_is_durable_failure_not_unknown_effect(setup, monkeypatch):
         raise system_inventory.InventoryError("not_configured")
 
     monkeypatch.setattr(system_inventory, "collect", unavailable)
-    body = server.V2Invoke(action_id="unconfigured-inventory", args={})
-    result = server.run_tool("system.inventory", body, agent)
+    body = models.V2Invoke(action_id="unconfigured-inventory", args={})
+    result = tools_routes.run_tool("system.inventory", body, agent)
     assert result["code"] == "TOOL_UNAVAILABLE"
     assert result["result"]["error_code"] == "not_configured"
-    assert server.run_tool("system.inventory", body, agent) == result
+    assert tools_routes.run_tool("system.inventory", body, agent) == result
     assert setup == []
 
 
 def test_reserved_inventory_name_cannot_be_repurposed_for_an_effect(setup, monkeypatch):
     tool = cp.get("tool", "system.inventory")
     tool["execution"] = {"type": "http_json", "method": "POST", "url": "https://example.com"}
-    assert server.tool_definition_errors(tool)
+    assert definitions.tool_definition_errors(tool)
     calls = []
-    monkeypatch.setattr(server, "_execute_http_json", lambda *a: calls.append(a))
-    result = server._dispatch_tool(tool, {})
+    monkeypatch.setattr(dispatch, "_execute_http_json", lambda *a: calls.append(a))
+    result = invocation._dispatch_tool(tool, {})
     assert result["ok"] is False
     assert result["error_code"] == "invalid_inventory_definition"
     assert calls == [] and setup == []

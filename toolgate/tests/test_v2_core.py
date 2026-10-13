@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,7 +8,8 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server, workflows
+from toolgate.api.routes import agent as agent_routes
 from toolgate.core import control_plane
 from toolgate.executors import research
 
@@ -45,7 +47,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(control_plane.authenticate_agent(raw)["scopes"], ["tool:research.*"])
 
     def test_agent_status_exposes_public_key_id_for_scope_sync(self):
-        status = server.agent_status({"id": "agent-key-1", "name": "Scoped agent", "scopes": ["tool:research.*"]})
+        status = agent_routes.agent_status({"id": "agent-key-1", "name": "Scoped agent", "scopes": ["tool:research.*"]})
         self.assertEqual(status["id"], "agent-key-1")
         self.assertEqual(status["agent"], "Scoped agent")
         self.assertEqual(status["scopes"], ["tool:research.*"])
@@ -106,13 +108,13 @@ class ControlPlaneTests(unittest.TestCase):
             "execution": {"type": "http_json", "method": "POST", "url": "https://api.example.com/run",
                           "allowed_hosts": ["api.example.com"], "result_path": "result"},
         }
-        self.assertIn("require owner_confirmation", "; ".join(server.tool_definition_errors(post_tool)))
+        self.assertIn("require owner_confirmation", "; ".join(definitions.tool_definition_errors(post_tool)))
 
         ai_tool = {
             "id": "ai", "inputs": [], "authorization": "auto",
             "execution": {"type": "ollama_generate", "prompt_template": "Summarize {text}"},
         }
-        self.assertIn("declared inputs", "; ".join(server.tool_definition_errors(ai_tool)))
+        self.assertIn("declared inputs", "; ".join(definitions.tool_definition_errors(ai_tool)))
 
         hosted_ai_tool = {
             "id": "hosted-ai", "name": "Hosted AI", "description": "Bounded reasoning",
@@ -121,20 +123,20 @@ class ControlPlaneTests(unittest.TestCase):
             "execution": {"type": "gemini_generate", "prompt_template": "{prompt}",
                           "model": "unapproved-model", "secret_ref": "GOOGLE_API_KEY"},
         }
-        self.assertIn("must be one of", "; ".join(server.tool_definition_errors(hosted_ai_tool)))
+        self.assertIn("must be one of", "; ".join(definitions.tool_definition_errors(hosted_ai_tool)))
 
         memory_tool = {
             "id": "memory", "inputs": [], "authorization": "auto",
             "execution": {"type": "memorygate", "operation": "context", "secret_ref": "MEMORY_KEY"},
         }
-        self.assertIn("declared 'query' input", "; ".join(server.tool_definition_errors(memory_tool)))
+        self.assertIn("declared 'query' input", "; ".join(definitions.tool_definition_errors(memory_tool)))
 
         malformed = {
             "id": "malformed", "name": "Malformed", "description": "Invalid policy metadata",
             "inputs": [{"name": "value", "type": "string", "required": "yes"}],
             "execution": {"type": "echo"}, "authorization": "anything", "status": "active",
         }
-        malformed_errors = "; ".join(server.tool_definition_errors(malformed))
+        malformed_errors = "; ".join(definitions.tool_definition_errors(malformed))
         self.assertIn("authorization must be one of", malformed_errors)
         self.assertIn("required must be true or false", malformed_errors)
 
@@ -143,17 +145,17 @@ class ControlPlaneTests(unittest.TestCase):
             "inputs": [{"name": "query", "type": "string", "required": True}],
             "execution": {"type": "research_search"}, "authorization": "auto", "status": "active",
         }
-        self.assertIn("requires declared inputs", "; ".join(server.tool_definition_errors(research_tool)))
+        self.assertIn("requires declared inputs", "; ".join(definitions.tool_definition_errors(research_tool)))
 
     def test_builtin_approval_test_echo_is_local_and_redacted(self):
-        server.ensure_builtin_research_capabilities()
+        builtin_capabilities.ensure_builtin_research_capabilities()
         tool = control_plane.get("tool", "approval.test-echo")
 
         self.assertEqual(tool["authorization"], "owner_confirmation")
         self.assertEqual(tool["execution"], {"type": "local_echo"})
-        self.assertEqual(server.tool_definition_errors(tool), [])
+        self.assertEqual(definitions.tool_definition_errors(tool), [])
 
-        result = server.invoke_tool(tool, {"value": "do-not-return-me"}, "test", approval_granted=True)
+        result = invocation.invoke_tool(tool, {"value": "do-not-return-me"}, "test", approval_granted=True)
         self.assertEqual(result["code"], "OK")
         self.assertNotIn("do-not-return-me", str(result))
         self.assertEqual(result["result"]["proof"]["length"], 16)
@@ -171,8 +173,8 @@ class ControlPlaneTests(unittest.TestCase):
             "secret_ref": "GOOGLE_API_KEY", "prompt_template": "Review {prompt}",
             "max_tokens": 800, "temperature": 0, "timeout_seconds": 60,
         }
-        with patch.object(server.vault, "get_key", return_value="secret-value"), patch.object(server.httpx, "post", return_value=response) as post:
-            result = server._execute_gemini(execution, {"prompt": "public evidence"})
+        with patch.object(server.vault, "get_key", return_value="secret-value"), patch.object(httpx, "post", return_value=response) as post:
+            result = dispatch._execute_gemini(execution, {"prompt": "public evidence"})
         self.assertTrue(result["ok"])
         self.assertEqual('{"decision":"reject"}', result["result"]["text"])
         self.assertEqual(50, result["result"]["usage"]["total_tokens"])
@@ -767,7 +769,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertTrue(control_plane.validate_inputs(schema, {"ids": [valid[0], valid[0]]}))
 
     def test_builtin_research_tool_includes_new_safe_sources(self):
-        server.ensure_builtin_research_capabilities()
+        builtin_capabilities.ensure_builtin_research_capabilities()
         tool = control_plane.get("tool", "research.search")
         source = next(field for field in tool["inputs"] if field["name"] == "source")
         self.assertIn("youtube", source["allowed_values"])
@@ -819,7 +821,7 @@ class ControlPlaneTests(unittest.TestCase):
             "execution": {"type": "research_search", "fixed_source": "reddit"},
             "authorization": "auto", "status": "active",
         }
-        self.assertEqual([], server.tool_definition_errors(tool))
+        self.assertEqual([], definitions.tool_definition_errors(tool))
 
     def test_reddit_uses_bounded_search_excerpt_instead_of_direct_scraping(self):
         item = {
@@ -925,15 +927,15 @@ class ControlPlaneTests(unittest.TestCase):
             {"type": "return", "value": {"total": "$vars.total", "large": "$vars.large",
                                              "last": "$vars.last_item", "speed": "$vars.speed"}},
         ]
-        self.assertEqual([], server.workflow_definition_errors(workflow))
+        self.assertEqual([], definitions.workflow_definition_errors(workflow))
         state = {"automation_id": "test", "args": {"base": 3, "items": ["a", "b"], "mode": "fast"},
                  "vars": {}, "last": None, "results": [], "count": 0, "max_steps": 50,
-                 "started_at": server.time.monotonic(), "runtime_ceiling": 5}
-        result = server._run_workflow_steps(workflow, state, "test", False)
+                 "started_at": time.monotonic(), "runtime_ceiling": 5}
+        result = workflows._run_workflow_steps(workflow, state, "test", False)
         self.assertEqual({"total": 5, "large": True, "last": "b", "speed": 2}, result["result"])
 
     def test_loop_ceiling_and_unsupported_blocks_are_rejected(self):
-        errors = server.workflow_definition_errors([
+        errors = definitions.workflow_definition_errors([
             {"type": "loop", "items": [], "max_iterations": 21, "steps": []},
             {"type": "python", "code": "print('unsafe')"},
         ])
@@ -942,16 +944,16 @@ class ControlPlaneTests(unittest.TestCase):
 
         state = {"automation_id": "test", "args": {"items": [1, 2]}, "vars": {}, "last": None,
                  "results": [], "count": 0, "max_steps": 1,
-                 "started_at": server.time.monotonic(), "runtime_ceiling": 5}
+                 "started_at": time.monotonic(), "runtime_ceiling": 5}
         with self.assertRaises(HTTPException) as raised:
-            server._run_workflow_steps([
+            workflows._run_workflow_steps([
                 {"type": "set", "name": "one", "value": 1},
                 {"type": "set", "name": "two", "value": 2},
             ], state, "test", False)
         self.assertEqual(403, raised.exception.status_code)
 
     def test_workflow_block_contracts_reject_display_only_ai_syntax(self):
-        errors = server.workflow_definition_errors([
+        errors = definitions.workflow_definition_errors([
             {"type": "condition", "condition": "enabled == true", "then": [], "else": []},
             {"type": "set", "name": "bad-name", "value": "null"},
             {"type": "retry", "max_attempts": 2},
@@ -970,7 +972,7 @@ class ControlPlaneTests(unittest.TestCase):
             "inputs": [], "policy": {"usage_limits": {"max_steps": 10}},
             "authorization": "auto", "status": "draft", "schedule": None,
         }
-        errors = server.automation_definition_errors({
+        errors = definitions.automation_definition_errors({
             **base, "workflow": [{"type": "tool_call", "tool_id": "does-not-exist", "args": {}}],
         })
         self.assertIn("unavailable tool 'does-not-exist'", "; ".join(errors))
@@ -980,11 +982,11 @@ class ControlPlaneTests(unittest.TestCase):
             "inputs": [], "outputs": [], "execution": {"type": "echo"},
             "authorization": "owner_confirmation", "status": "active",
         })
-        errors = server.automation_definition_errors({
+        errors = definitions.automation_definition_errors({
             **base, "workflow": [{"type": "tool_call", "tool_id": "sensitive-action", "args": {}}],
         })
         self.assertIn("auto automation cannot call 'sensitive-action'", "; ".join(errors))
-        self.assertEqual([], server.automation_definition_errors({
+        self.assertEqual([], definitions.automation_definition_errors({
             **base, "authorization": "owner_confirmation",
             "workflow": [{"type": "tool_call", "tool_id": "sensitive-action", "args": {}}],
         }))
@@ -996,11 +998,11 @@ class ControlPlaneTests(unittest.TestCase):
             "id": "count", "name": "Count", "description": "Returns one count.",
             "inputs": [], "outputs": [{"name": "total", "type": "integer"}],
         }
-        result = server._shape_tool_result(tool, {"ok": True, "result": 7})
+        result = dispatch._shape_tool_result(tool, {"ok": True, "result": 7})
         self.assertEqual(7, result["total"])
         self.assertEqual(7, result["result"])
         with self.assertRaises(HTTPException) as raised:
-            server._shape_tool_result(
+            dispatch._shape_tool_result(
                 {"outputs": [{"name": "first", "type": "integer"},
                              {"name": "second", "type": "integer"}]},
                 {"ok": True, "result": {"first": 1}},
