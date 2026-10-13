@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from toolgate.api import dispatch, server
+from toolgate.api.routes import services as services_routes
 from toolgate.core import public_https
 from toolgate.executors import research
 
@@ -142,7 +143,7 @@ def test_public_health_probe_cannot_rebind_into_tailnet(monkeypatch):
     monkeypatch.setattr(server.control_plane, "update_service", lambda sid, fields: fields)
     monkeypatch.setattr(server.control_plane, "event", lambda *a: None)
     connections, _, _ = network(monkeypatch, [OK])
-    assert server.check_service("test-service")["health"] == "unhealthy"
+    assert services_routes.check_service("test-service")["health"] == "unhealthy"
     assert connections == []
 
 
