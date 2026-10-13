@@ -4,7 +4,8 @@ from threading import Event
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import invocation, models, server
+from toolgate.api import invocation, models
+from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import container_admission as admission
 from toolgate.core import control_plane as cp
@@ -21,7 +22,7 @@ from toolgate.tests.test_port_spec import CID, MAPPING
 def ready(request):
     daemon, _, _ = request.getfixturevalue("boundary_setup")
     agent, _ = cp.issue_agent_key("Both operations", ["tool:system.container-control", "tool:system.port-control"])
-    response = server.create_port_review(models.PortReviewRequest(
+    response = system_routes.create_port_review(models.PortReviewRequest(
         container_id=CID, operation="create", mapping=MAPPING), agent)
     import json
     rid = json.loads(response.body)["reviewId"]

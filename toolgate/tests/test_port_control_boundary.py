@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import builtin_capabilities, definitions, invocation, models, server
+from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -37,7 +38,7 @@ def setup(tmp_path, monkeypatch):
 
 
 def review(agent):
-    response = server.create_port_review(models.PortReviewRequest(
+    response = system_routes.create_port_review(models.PortReviewRequest(
         container_id=CID, operation="create", mapping=MAPPING), agent)
     assert response.headers["cache-control"] == "no-store"
     return json.loads(response.body)

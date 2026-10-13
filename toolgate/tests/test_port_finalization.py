@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import models, server
+from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import container_lineage, owner_channel, port_finalization, port_replacements
 from toolgate.core import control_plane as cp
@@ -131,7 +132,7 @@ def test_http_partial_recovery_does_not_create_approval(request):
     before = len(cp.list_objects("request"))
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as error:
-        server.finalize_port_recovery(models.PortFinalizationRequest(action_id=payload.action_id), agent)
+        system_routes.finalize_port_recovery(models.PortFinalizationRequest(action_id=payload.action_id), agent)
     assert error.value.status_code == 409
     assert len(cp.list_objects("request")) == before
 
@@ -232,7 +233,7 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
         *args, **kwargs, transport=httpx.MockTransport(daemon.handle)))
     body = models.PortFinalizationRequest(action_id=payload.action_id)
     count = len(daemon.requests)
-    pending = server.finalize_port_recovery(body, agent)
+    pending = system_routes.finalize_port_recovery(body, agent)
     rid = json.loads(pending.body)["request_id"]
     cp.decide_request(rid, "approved", "owner")
     body.approval_request_id = rid
@@ -240,15 +241,15 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
     daemon.replacement["Config"]["Cmd"] = ["changed-after-review"]
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as error:
-        server.finalize_port_recovery(body, agent)
+        system_routes.finalize_port_recovery(body, agent)
     assert error.value.status_code == 409
     assert not cp.get("request", rid)["payload"]["binding"].get("consumed_at")
     daemon.replacement["Config"]["Cmd"] = original_command
-    done = server.finalize_port_recovery(body, agent)
+    done = system_routes.finalize_port_recovery(body, agent)
     assert json.loads(done.body)["code"] == "OK"
     assert all(message.method == "GET" for message in daemon.requests[count:])
     count = len(daemon.requests)
-    assert server.finalize_port_recovery(body, agent).body == done.body
+    assert system_routes.finalize_port_recovery(body, agent).body == done.body
     assert len(daemon.requests) == count
 
 
