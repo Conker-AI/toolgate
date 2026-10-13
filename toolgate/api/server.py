@@ -3,7 +3,7 @@
 import os
 import sqlite3
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +13,7 @@ from toolgate.api.builtin_capabilities import (
     ensure_builtin_research_capabilities,
     ensure_builtin_system_capabilities,
 )
-from toolgate.api.deps import require_admin
+from toolgate.api.routes.activity import router as _activity_router
 from toolgate.api.routes.agent import router as _agent_router
 from toolgate.api.routes.agent_keys import router as _agent_keys_router
 from toolgate.api.routes.automations import router as _automations_router
@@ -178,20 +178,13 @@ app.include_router(_publications_router)
 app.include_router(_automations_router)
 
 
-@app.get("/v2/actions")
-def list_actions(_tier: str = Depends(require_admin)):
-    return {"results": journal.list_actions()}
+app.include_router(_activity_router)
 
 
 app.include_router(_requests_router)
 
 
 app.include_router(_editor_router)
-
-
-@app.get("/v2/events")
-def list_events(limit: int = 100, _tier: str = Depends(require_admin)):
-    return control_plane.events(limit)
 
 
 app.include_router(_spending_router)
