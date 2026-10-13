@@ -1,10 +1,8 @@
 """ToolGate v2 API: a typed, owner-controlled agent capability boundary."""
 
 import hashlib
-import hmac
 import json
 import os
-import re
 import secrets
 import sqlite3
 import time
@@ -13,7 +11,7 @@ from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,12 +45,10 @@ from toolgate.api.models import (
     V2Request,
     V2RequestDecision,
     V2Service,
-    V2Settings,
     V2Tool,
-    VerificationCallback,
-    VerificationMethodCreate,
 )
 from toolgate.api.routes.health import router as _health_router
+from toolgate.api.routes.settings import router as _settings_router
 from toolgate.api.routes.spending import router as _spending_router
 from toolgate.api.routes.vault import router as _vault_router
 from toolgate.api.version import SERVICE_VERSION
@@ -202,163 +198,7 @@ app.include_router(_health_router)
 app.include_router(_vault_router)
 
 
-@app.get("/v2/status")
-def status(_tier: str = Depends(require_admin)):
-    requests = control_plane.list_objects("request")
-    return {
-        "lockdown": control_plane.settings().get("lockdown", False),
-        "tools": len(control_plane.list_objects("tool")),
-        "automations": len(control_plane.list_objects("automation")),
-        "services": len(control_plane.list_objects("service")),
-        "pending_requests": sum(r.get("status") == "pending" for r in requests),
-    }
-
-
-@app.post("/v2/settings/lockdown")
-def set_lockdown(enabled: bool, reason: str = "", _tier: str = Depends(require_admin)):
-    return control_plane.set_lockdown(enabled, "admin", reason)
-
-
-@app.get("/v2/settings")
-def get_settings(_tier: str = Depends(require_admin)):
-    return {
-        "generation_model": "qwen3:4b",
-        "event_retention_days": 90,
-        "default_confirmation_expiry_seconds": 60,
-        "producthunt_commercial_use_approved": False,
-        **control_plane.settings(),
-    }
-
-
-@app.put("/v2/settings")
-def update_settings(payload: V2Settings, _tier: str = Depends(require_admin)):
-    return control_plane.update_settings(payload.model_dump(), "admin")
-
-
-@app.get("/v2/verification-methods")
-def list_verification_methods(_tier: str = Depends(require_admin)):
-    return control_plane.list_objects("verification_method")
-
-
-@app.post("/v2/verification-methods")
-def create_verification_method(
-    payload: VerificationMethodCreate, _tier: str = Depends(require_admin)
-):
-    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", payload.secret_ref):
-        raise HTTPException(422, "secret_ref must be a vault reference name")
-    try:
-        vault.get_key(payload.secret_ref)
-    except KeyError:
-        raise HTTPException(422, "secret_ref is not configured in ToolGate") from None
-    method = control_plane.create_verification_method(payload.model_dump())
-    control_plane.event(
-        "verification_method_created", "info", "verification_method", method["id"], "admin"
-    )
-    return method
-
-
-@app.delete("/v2/verification-methods/{method_id}")
-def delete_verification_method(method_id: str, _tier: str = Depends(require_admin)):
-    if not control_plane.remove("verification_method", method_id):
-        raise HTTPException(404, "verification method not found")
-    control_plane.event(
-        "verification_method_deleted", "warning", "verification_method", method_id, "admin"
-    )
-    return {"deleted": True, "id": method_id}
-
-
-@app.post("/v2/verification/callback")
-def verification_callback(
-    payload: VerificationCallback,
-    x_toolgate_timestamp: str | None = Header(None, alias="X-ToolGate-Timestamp"),
-    x_toolgate_signature: str | None = Header(None, alias="X-ToolGate-Signature"),
-):
-    if control_plane.settings().get("lockdown"):
-        deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423)
-    method = control_plane.get("verification_method", payload.method_id)
-    if (
-        not method
-        or method.get("status") != "active"
-        or method.get("method_type") != "signed_callback"
-    ):
-        deny("VERIFICATION_METHOD_INVALID", "Verification method is unavailable", 401)
-    try:
-        timestamp = int(x_toolgate_timestamp or "")
-    except ValueError:
-        timestamp = 0
-    canonical = json.dumps(
-        payload.model_dump(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
-    try:
-        secret = vault.get_key(method["secret_ref"])
-    except KeyError:
-        deny("VERIFICATION_METHOD_INVALID", "Verification method secret is unavailable", 503)
-    expected = hmac.new(
-        secret.encode(), f"{timestamp}.{canonical}".encode(), hashlib.sha256
-    ).hexdigest()
-    valid = (
-        abs(int(time.time()) - timestamp) <= 60
-        and bool(x_toolgate_signature)
-        and hmac.compare_digest(x_toolgate_signature.removeprefix("sha256="), expected)
-    )
-    if not valid:
-        control_plane.event(
-            "verification_callback_rejected",
-            "critical",
-            "verification_method",
-            method["id"],
-            "callback",
-            {"reason": "invalid signature or timestamp"},
-        )
-        failures = control_plane.event_count_since(
-            "verification_callback_rejected", "verification_method", method["id"], 300
-        )
-        if failures >= 5:
-            control_plane.set_lockdown(True, "system", "repeated invalid verification callbacks")
-        deny("CALLBACK_SIGNATURE_INVALID", "Callback signature or timestamp is invalid", 401)
-    request = control_plane.get("request", payload.request_id)
-    binding = request.get("payload", {}).get("binding", {}) if request else {}
-    if not request or request.get("kind") != "verification" or request.get("status") != "pending":
-        deny("REQUEST_NOT_PENDING", "Verification request is not pending", 409)
-    if not hmac.compare_digest(str(binding.get("nonce", "")), payload.nonce):
-        deny("CALLBACK_NONCE_INVALID", "Callback nonce does not match this request", 409)
-    if payload.decision not in {"approved", "rejected"}:
-        raise HTTPException(422, "decision must be approved or rejected")
-    try:
-        record = control_plane.decide_request(
-            payload.request_id, payload.decision, f"callback:{method['name']}"
-        )
-    except ValueError as exc:
-        deny(
-            "REQUEST_NOT_PENDING",
-            str(exc),
-            409,
-            "Refresh the request; do not retry a decided or expired approval",
-        )
-    if not record:
-        deny(
-            "REQUEST_NOT_PENDING",
-            "Verification request no longer exists",
-            409,
-            "Request fresh confirmation",
-        )
-    control_plane.update_verification_method(
-        method["id"], {"last_seen_at": datetime.now(UTC).isoformat()}
-    )
-    control_plane.event(
-        "verification_callback_accepted",
-        "info",
-        "verification_method",
-        method["id"],
-        "callback",
-        {"request_id": payload.request_id, "decision": payload.decision},
-    )
-    return {"status": record["status"], "request_id": record["id"]}
-
-
-@app.get("/v2/archives/ai")
-def export_ai_archive(_tier: str = Depends(require_admin)):
-    return legacy_archive.export()
+app.include_router(_settings_router)
 
 
 @app.get("/v2/agent-keys")
