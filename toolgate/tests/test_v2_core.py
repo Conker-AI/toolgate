@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import HTTPException
 
-from toolgate.api import builtin_capabilities, definitions, server
+from toolgate.api import builtin_capabilities, definitions, dispatch, server
 from toolgate.core import control_plane
 from toolgate.executors import research
 
@@ -172,7 +172,7 @@ class ControlPlaneTests(unittest.TestCase):
             "max_tokens": 800, "temperature": 0, "timeout_seconds": 60,
         }
         with patch.object(server.vault, "get_key", return_value="secret-value"), patch.object(server.httpx, "post", return_value=response) as post:
-            result = server._execute_gemini(execution, {"prompt": "public evidence"})
+            result = dispatch._execute_gemini(execution, {"prompt": "public evidence"})
         self.assertTrue(result["ok"])
         self.assertEqual('{"decision":"reject"}', result["result"]["text"])
         self.assertEqual(50, result["result"]["usage"]["total_tokens"])
@@ -996,11 +996,11 @@ class ControlPlaneTests(unittest.TestCase):
             "id": "count", "name": "Count", "description": "Returns one count.",
             "inputs": [], "outputs": [{"name": "total", "type": "integer"}],
         }
-        result = server._shape_tool_result(tool, {"ok": True, "result": 7})
+        result = dispatch._shape_tool_result(tool, {"ok": True, "result": 7})
         self.assertEqual(7, result["total"])
         self.assertEqual(7, result["result"])
         with self.assertRaises(HTTPException) as raised:
-            server._shape_tool_result(
+            dispatch._shape_tool_result(
                 {"outputs": [{"name": "first", "type": "integer"},
                              {"name": "second", "type": "integer"}]},
                 {"ok": True, "result": {"first": 1}},

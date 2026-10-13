@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, server
+from toolgate.api import builtin_capabilities, definitions, dispatch, server
 from toolgate.core import control_plane as cp
 from toolgate.executors import system_inventory
 from toolgate.tests.test_system_inventory import Stream, envelope
@@ -112,7 +112,7 @@ def test_reserved_inventory_name_cannot_be_repurposed_for_an_effect(setup, monke
     tool["execution"] = {"type": "http_json", "method": "POST", "url": "https://example.com"}
     assert definitions.tool_definition_errors(tool)
     calls = []
-    monkeypatch.setattr(server, "_execute_http_json", lambda *a: calls.append(a))
+    monkeypatch.setattr(dispatch, "_execute_http_json", lambda *a: calls.append(a))
     result = server._dispatch_tool(tool, {})
     assert result["ok"] is False
     assert result["error_code"] == "invalid_inventory_definition"
