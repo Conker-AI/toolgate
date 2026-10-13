@@ -5,7 +5,9 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import builtin_capabilities, definitions, invocation, models, server
+from toolgate.api.routes import system as system_routes
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import vault
@@ -24,7 +26,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOLGATE_VAULT_SALT", "a1" * 16)
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", "/synthetic/docker.sock")
     monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", json.dumps([CID]))
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     daemon = Daemon()
     inspect, execute = port_control.inspect_review, port_control.execute
     monkeypatch.setattr(port_control, "inspect_review", lambda *args, **kw: inspect(
@@ -36,23 +38,23 @@ def setup(tmp_path, monkeypatch):
 
 
 def review(agent):
-    response = server.create_port_review(server.PortReviewRequest(
+    response = system_routes.create_port_review(models.PortReviewRequest(
         container_id=CID, operation="create", mapping=MAPPING), agent)
     assert response.headers["cache-control"] == "no-store"
     return json.loads(response.body)
 
 
 def payload(review_id, **changes):
-    return server.V2Invoke(**{"action_id": "change-1",
+    return models.V2Invoke(**{"action_id": "change-1",
                              "args": {"container_id": CID, "review_id": review_id}, **changes})
 
 
 def test_full_review_owner_approval_real_executor_receipt_replay(setup):
     daemon, agent, _ = setup
-    server.require_valid_tool_definition(cp.get("tool", TOOL))
+    definitions.require_valid_tool_definition(cp.get("tool", TOOL))
     selected = review(agent)
     assert selected["preview"]["execution"] == "owner_approval_required"
-    pending = server.run_tool(TOOL, payload(selected["reviewId"]), agent)
+    pending = tools_routes.run_tool(TOOL, payload(selected["reviewId"]), agent)
     assert pending["code"] == "CONFIRMATION_REQUIRED"
     assert all(request.method == "GET" for request in daemon.requests)
     request = cp.get("request", pending["request_id"])
@@ -60,12 +62,12 @@ def test_full_review_owner_approval_real_executor_receipt_replay(setup):
     assert "8080" in json.dumps(request)
     cp.decide_request(pending["request_id"], "approved", "owner")
     approved = payload(selected["reviewId"], approval_request_id=pending["request_id"])
-    result = server.run_tool(TOOL, approved, agent)
+    result = tools_routes.run_tool(TOOL, approved, agent)
     assert result["code"] == "OK", result
     assert result["result"]["result"]["originalRetained"]
     assert container_control.targets() == [result["result"]["result"]["replacementId"]]
     count = len(daemon.requests)
-    assert server.run_tool(TOOL, approved, agent) == result
+    assert tools_routes.run_tool(TOOL, approved, agent) == result
     assert len(daemon.requests) == count
 
 
@@ -86,10 +88,10 @@ def test_review_http_auth_scope_and_private_projection(setup):
 def test_changed_review_cannot_borrow_approval(setup):
     daemon, agent, _ = setup
     first, second = review(agent), review(agent)
-    pending = server.run_tool(TOOL, payload(first["reviewId"]), agent)
+    pending = tools_routes.run_tool(TOOL, payload(first["reviewId"]), agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, payload(second["reviewId"], approval_request_id=pending["request_id"]), agent)
+        tools_routes.run_tool(TOOL, payload(second["reviewId"], approval_request_id=pending["request_id"]), agent)
     assert journal.get("change-1") is None
     assert all(request.method == "GET" for request in daemon.requests)
 
@@ -97,14 +99,14 @@ def test_changed_review_cannot_borrow_approval(setup):
 def test_lost_reply_returns_unknown_and_never_replays(setup):
     daemon, agent, _ = setup
     selected = review(agent)
-    pending = server.run_tool(TOOL, payload(selected["reviewId"]), agent)
+    pending = tools_routes.run_tool(TOOL, payload(selected["reviewId"]), agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
     daemon.fail = "/commit"
     approved = payload(selected["reviewId"], approval_request_id=pending["request_id"])
-    result = server.run_tool(TOOL, approved, agent)
+    result = tools_routes.run_tool(TOOL, approved, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"
     count = len(daemon.requests)
-    assert server.run_tool(TOOL, approved, agent) == result
+    assert tools_routes.run_tool(TOOL, approved, agent) == result
     assert len(daemon.requests) == count
 
 
@@ -118,5 +120,5 @@ def test_reserved_definition_cannot_bypass_approval(setup, change):
     else:
         tool["id"] = "other-tool"
     with pytest.raises(HTTPException):
-        server.require_valid_tool_definition(tool)
-    assert not server._dispatch_tool(tool, {})["ok"]
+        definitions.require_valid_tool_definition(tool)
+    assert not invocation._dispatch_tool(tool, {})["ok"]

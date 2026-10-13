@@ -4,7 +4,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import models, server
+from toolgate.api.routes import system as system_routes
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import container_lineage, owner_channel, port_finalization, port_replacements
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -25,7 +27,7 @@ def interrupted_verification(request, monkeypatch):
         return original(message)
 
     monkeypatch.setattr(daemon, "handle", handle)
-    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     monkeypatch.setattr(daemon, "handle", original)
     return daemon, agent, payload
 
@@ -39,7 +41,7 @@ def lost_receipt(request, monkeypatch):
 
     monkeypatch.setattr(journal, "finish", crash)
     with pytest.raises(RuntimeError, match="synthetic lost receipt"):
-        server.run_tool("system.port-control", payload, agent)
+        tools_routes.run_tool("system.port-control", payload, agent)
     return daemon, agent, payload
 
 
@@ -87,7 +89,7 @@ def test_other_actor_and_missing_lineage_cannot_finalize(request, monkeypatch):
 def test_partial_execution_cannot_finalize(request):
     daemon, agent, _, payload = request.getfixturevalue("pending")
     daemon.fail = "/start"
-    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     with pytest.raises(port_replacements.ReplacementError):
         port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail())
 
@@ -126,11 +128,11 @@ def test_http_recovery_requires_own_exact_approval_and_replays_receipt(request, 
 def test_http_partial_recovery_does_not_create_approval(request):
     daemon, agent, _, payload = request.getfixturevalue("pending")
     daemon.fail = "/start"
-    server.run_tool("system.port-control", payload, agent)
+    tools_routes.run_tool("system.port-control", payload, agent)
     before = len(cp.list_objects("request"))
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as error:
-        server.finalize_port_recovery(server.PortFinalizationRequest(action_id=payload.action_id), agent)
+        system_routes.finalize_port_recovery(models.PortFinalizationRequest(action_id=payload.action_id), agent)
     assert error.value.status_code == 409
     assert len(cp.list_objects("request")) == before
 
@@ -144,7 +146,7 @@ def test_crash_after_atomic_verification_can_recover_without_docker_replay(reque
         raise RuntimeError("lost verification acknowledgement")
 
     monkeypatch.setattr(container_lineage, "record", crash_after_commit)
-    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     assert port_replacements.steps(payload.action_id)[-1]["status"] == "observed"
     count = len(daemon.requests)
     approved = []
@@ -160,7 +162,7 @@ def test_failed_lineage_write_cannot_leave_successful_verification(request):
         conn.executescript(container_lineage.SCHEMA)
         conn.executescript("""CREATE TRIGGER synthetic_disk_failure BEFORE INSERT ON v2_container_lineage
             BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END;""")
-    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     assert port_replacements.steps(payload.action_id)[-1]["status"] == "outcome_unknown"
     with cp._conn() as conn:
         assert conn.execute("SELECT * FROM v2_container_lineage").fetchall() == []
@@ -229,9 +231,9 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
         *args, transport=httpx.MockTransport(daemon.handle)))
     monkeypatch.setattr(port_finalization, "finalize", lambda *args, **kwargs: finalize(
         *args, **kwargs, transport=httpx.MockTransport(daemon.handle)))
-    body = server.PortFinalizationRequest(action_id=payload.action_id)
+    body = models.PortFinalizationRequest(action_id=payload.action_id)
     count = len(daemon.requests)
-    pending = server.finalize_port_recovery(body, agent)
+    pending = system_routes.finalize_port_recovery(body, agent)
     rid = json.loads(pending.body)["request_id"]
     cp.decide_request(rid, "approved", "owner")
     body.approval_request_id = rid
@@ -239,15 +241,15 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
     daemon.replacement["Config"]["Cmd"] = ["changed-after-review"]
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as error:
-        server.finalize_port_recovery(body, agent)
+        system_routes.finalize_port_recovery(body, agent)
     assert error.value.status_code == 409
     assert not cp.get("request", rid)["payload"]["binding"].get("consumed_at")
     daemon.replacement["Config"]["Cmd"] = original_command
-    done = server.finalize_port_recovery(body, agent)
+    done = system_routes.finalize_port_recovery(body, agent)
     assert json.loads(done.body)["code"] == "OK"
     assert all(message.method == "GET" for message in daemon.requests[count:])
     count = len(daemon.requests)
-    assert server.finalize_port_recovery(body, agent).body == done.body
+    assert system_routes.finalize_port_recovery(body, agent).body == done.body
     assert len(daemon.requests) == count
 
 
@@ -289,7 +291,7 @@ def test_started_container_recovers_without_repeating_start(request, monkeypatch
                 raise RuntimeError("crashed before verification claim")
             return original_begin(identity, ordinal, name, **kwargs)
         monkeypatch.setattr(port_replacements, "begin_step", begin)
-    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     assert port_replacements.steps(payload.action_id)[-1]["name"] == "start"
     monkeypatch.setattr(daemon, "handle", original)
     count = len(daemon.requests)
@@ -322,7 +324,7 @@ def test_stopped_source_recovers_after_create_before_verification(request, monke
             raise RuntimeError("crashed before verification")
         return original_begin(identity, ordinal, name, **kwargs)
     monkeypatch.setattr(port_replacements, "begin_step", begin)
-    assert server.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
+    assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     assert port_replacements.steps(payload.action_id)[-1]["name"] == "create"
     count = len(daemon.requests)
     assert port_finalization.finalize(payload.action_id, agent["id"],

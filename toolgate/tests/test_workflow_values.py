@@ -1,20 +1,21 @@
 """Runtime value contracts used by the visual workflow editor."""
+import time
 import unittest
 
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import definitions, workflows
 
 
 class WorkflowValueTests(unittest.TestCase):
     def state(self, variables=None):
         return {"automation_id": "value-test", "args": {}, "vars": variables or {},
                 "last": None, "results": [], "count": 0, "max_steps": 50,
-                "started_at": server.time.monotonic(), "runtime_ceiling": 5}
+                "started_at": time.monotonic(), "runtime_ceiling": 5}
 
     def run_steps(self, steps, state):
-        self.assertEqual([], server.workflow_definition_errors(steps))
-        return server._run_workflow_steps(steps, state, "test", False)
+        self.assertEqual([], definitions.workflow_definition_errors(steps))
+        return workflows._run_workflow_steps(steps, state, "test", False)
 
     def test_membership_selects_the_matching_branch(self):
         for selected, expected in (("ready", "yes"), ("missing", "no")):

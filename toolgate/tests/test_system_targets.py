@@ -3,7 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import builtin_capabilities, server
 from toolgate.core import control_plane as cp
 
 
@@ -12,7 +12,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", "/secret/daemon.sock")
     monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", json.dumps(["b" * 64, "a" * 64, "a" * 64]))
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     agent, key = cp.issue_agent_key("Managed", ["tool:system.container-control"])
     return TestClient(server.app), agent, {"X-ToolGate-Execution-Key": key}
 

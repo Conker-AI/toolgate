@@ -7,7 +7,8 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import dispatch, server
+from toolgate.api.routes import services as services_routes
 from toolgate.core import public_https
 from toolgate.executors import research
 
@@ -27,10 +28,10 @@ def answers(*addresses):
 def test_private_answers_are_denied_everywhere(address, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers(address))
     assert not research._public_https_url("https://public-looking.example/page")
-    assert not server._public_destination("public-looking.example")
+    assert not dispatch._public_destination("public-looking.example")
     assert research._normalize("title", "https://public-looking.example", "text", "web") is None
     with pytest.raises(HTTPException) as denied:
-        server._execute_http_json({"url": "https://public-looking.example/page",
+        dispatch._execute_http_json({"url": "https://public-looking.example/page",
                                    "allowed_hosts": ["public-looking.example"]}, {})
     assert denied.value.detail["code"] == "DESTINATION_DENIED"
 
@@ -142,7 +143,7 @@ def test_public_health_probe_cannot_rebind_into_tailnet(monkeypatch):
     monkeypatch.setattr(server.control_plane, "update_service", lambda sid, fields: fields)
     monkeypatch.setattr(server.control_plane, "event", lambda *a: None)
     connections, _, _ = network(monkeypatch, [OK])
-    assert server.check_service("test-service")["health"] == "unhealthy"
+    assert services_routes.check_service("test-service")["health"] == "unhealthy"
     assert connections == []
 
 
@@ -153,9 +154,9 @@ def test_http_json_uses_pinned_transport_and_refuses_redirects(monkeypatch):
         b"HTTP/1.1 302 Found\r\nLocation: https://100.64.0.1/\r\nContent-Length: 0\r\n\r\n",
     ])
     execution = {"url": "https://example.com/page", "allowed_hosts": ["example.com"]}
-    assert server._execute_http_json(execution, {}) == {"ok": True, "result": {}}
+    assert dispatch._execute_http_json(execution, {}) == {"ok": True, "result": {}}
     with pytest.raises(HTTPException) as denied:
-        server._execute_http_json(execution, {})
+        dispatch._execute_http_json(execution, {})
     assert denied.value.detail["code"] == "DESTINATION_DENIED"
     assert connections == [("93.184.216.34", 443), ("93.184.216.34", 443)]
 

@@ -17,7 +17,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import server, version
+from toolgate.api.routes import health as health_routes
 from toolgate.core import control_plane, vault
 
 
@@ -53,7 +54,7 @@ class HealthTests(unittest.TestCase):
             "MEMORYGATE_URL": self.upstream_url,
         })
         self.os_patch.start()
-        server._health_snapshot = None
+        health_routes._health_snapshot = None
         self.client = TestClient(server.app)
 
     def tearDown(self):
@@ -61,7 +62,7 @@ class HealthTests(unittest.TestCase):
         self.upstream.shutdown()
         self.upstream.server_close()
         self.thread.join(timeout=5)
-        server._health_snapshot = None
+        health_routes._health_snapshot = None
         self.os_patch.stop()
         self.env_patch.stop()
         self.db_patch.stop()
@@ -74,7 +75,7 @@ class HealthTests(unittest.TestCase):
         vault.set_secret("MEMORYGATE_READ_KEY", "mg_read_test_value")
 
     def health(self) -> dict:
-        server._health_snapshot = None
+        health_routes._health_snapshot = None
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         return response.json()
@@ -90,7 +91,7 @@ class HealthTests(unittest.TestCase):
         # The module contract requires this module's own version, not the API
         # revision - a dashboard reading one field for both is wrong everywhere.
         self.assertEqual(body["service"], "toolgate")
-        self.assertEqual(body["version"], server.SERVICE_VERSION)
+        self.assertEqual(body["version"], version.SERVICE_VERSION)
         self.assertEqual({name: check["status"] for name, check in body["checks"].items()}, {
             "control_plane_db": "ok", "vault": "ok",
             "searxng": "ok", "memorygate": "ok", "generation": "ok",
@@ -126,7 +127,7 @@ class HealthTests(unittest.TestCase):
             with self.subTest(code=code):
                 self.upstream.response_status = code
                 self.assertEqual({"status": "unavailable", "reason": "upstream_http_error"},
-                                 server._probe_http(self.upstream_url, "/health"))
+                                 health_routes._probe_http(self.upstream_url, "/health"))
 
     def test_memorygate_probe_rejects_wrong_service_or_health_shape(self):
         for body in ([], {"service": "other", "status": "ok"},
@@ -134,7 +135,7 @@ class HealthTests(unittest.TestCase):
             with self.subTest(body=body):
                 self.upstream.health_body = body
                 self.assertEqual({"status": "unavailable", "reason": "invalid_health_response"},
-                                 server._probe_http(self.upstream_url, "/health", "memorygate"))
+                                 health_routes._probe_http(self.upstream_url, "/health", "memorygate"))
 
     def test_health_reports_degraded_when_the_control_plane_database_is_gone(self):
         self.point_upstreams_at(self.upstream_url)

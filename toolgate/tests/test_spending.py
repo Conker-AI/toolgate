@@ -10,7 +10,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import deps, invocation, models, server
+from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane, spending
 from toolgate.core import execution_journal as journal
 from toolgate.executors import research
@@ -34,7 +35,7 @@ def setup_budget(root="root", cap=10_000_000, cumulative=20_000_000, actor="agen
 
 
 def invoke(paid, job=None, action="root", actor="agent", **kwargs):
-    return server.invoke_tool(paid, {}, "Actor", actor_id=actor, action_id=action,
+    return invocation.invoke_tool(paid, {}, "Actor", actor_id=actor, action_id=action,
                               job_id=job, **kwargs)
 
 
@@ -53,7 +54,7 @@ def provider(monkeypatch, usage=None, before=None):
             "candidates": [{"content": {"parts": [{"text": "reply"}]}}],
             **({"usageMetadata": usage} if usage is not None else {})})
 
-    monkeypatch.setattr(server.httpx, "post", post)
+    monkeypatch.setattr(httpx, "post", post)
     return calls
 
 
@@ -97,7 +98,7 @@ def test_uncertain_billing_keeps_reservation_across_restart(paid, monkeypatch, m
     if mode in {"timeout", "crash"}:
         def post(*args, **kwargs):
             raise (SystemExit("power loss") if mode == "crash" else httpx.ReadTimeout("lost reply"))
-        monkeypatch.setattr(server.httpx, "post", post)
+        monkeypatch.setattr(httpx, "post", post)
     else:
         provider(monkeypatch, {"promptTokenCount": 1, "totalTokenCount": 1} if mode == "bad_usage" else None)
     if mode == "crash":
@@ -110,7 +111,7 @@ def test_uncertain_billing_keeps_reservation_across_restart(paid, monkeypatch, m
     expected = spending.amount(spending.quote(spending.MODEL, 128), spending.MAX_INPUT_TOKENS, 128)
     assert spending.status()["held_microusd"] == expected
     second = spending.create_job("agent", "second", 1_100_000)["job_id"]
-    monkeypatch.setattr(server.httpx, "post", lambda *a, **kw: pytest.fail("exceeded cumulative ceiling"))
+    monkeypatch.setattr(httpx, "post", lambda *a, **kw: pytest.fail("exceeded cumulative ceiling"))
     with pytest.raises(HTTPException) as error:
         invoke(paid, second, "second")
     assert error.value.detail["code"] == "BUDGET_DENIED"
@@ -154,10 +155,10 @@ def test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run(paid,
                       {"type": "loop", "items": [1, 2], "max_iterations": 2, "steps": [{"type": "tool_call", "tool_id": "paid"}]}]}
     control_plane.create_automation(automation)
     calls = provider(monkeypatch)
-    payload = server.V2Invoke(action_id="root", job_id=job)
-    result = server.run_automation("flow", payload, agent)
+    payload = models.V2Invoke(action_id="root", job_id=job)
+    result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"
-    assert server.run_automation("flow", payload, agent) == result
+    assert automations_routes.run_automation("flow", payload, agent) == result
     assert len(calls) == 1
     records = journal.list_actions()
     assert len(records) == 2
@@ -283,10 +284,10 @@ def test_execution_identity_can_only_read_own_budget(paid):
     client = TestClient(server.app)
     path = f"/v2/agent/spending/jobs/{job}"
     assert client.get(path).status_code in (401, 403)
-    server.app.dependency_overrides[server.require_agent] = lambda: {"id": "other"}
+    server.app.dependency_overrides[deps.require_agent] = lambda: {"id": "other"}
     try:
         assert client.get(path).status_code == 404
-        server.app.dependency_overrides[server.require_agent] = lambda: {"id": "agent"}
+        server.app.dependency_overrides[deps.require_agent] = lambda: {"id": "agent"}
         assert client.get(path).json() == spending.agent_job(job, "agent")
     finally:
-        server.app.dependency_overrides.pop(server.require_agent, None)
+        server.app.dependency_overrides.pop(deps.require_agent, None)

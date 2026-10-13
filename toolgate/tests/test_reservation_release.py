@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import spending
@@ -13,7 +13,7 @@ def held(paid, monkeypatch):
     job = setup_budget()
     def fail(*args, **kwargs):
         raise TimeoutError("provider reply lost")
-    monkeypatch.setattr(server, "_dispatch_tool", fail)
+    monkeypatch.setattr(invocation, "_dispatch_tool", fail)
     assert invoke(paid, job)["code"] == "OUTCOME_UNKNOWN"
     return job
 

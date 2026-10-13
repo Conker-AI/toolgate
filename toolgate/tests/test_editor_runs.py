@@ -1,6 +1,7 @@
 import contextlib
 import uuid
 
+from toolgate.api.routes import editor as editor_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import owner_channel
@@ -76,7 +77,6 @@ def test_no_scope_does_not_dispatch_and_wildcard_cannot_fake_revocation(gate):
 
 
 def test_lost_response_holds_request_without_second_dispatch(gate, monkeypatch):
-    from toolgate.api import server
     client, _agent, headers, target = setup(gate)
     base = '/v2/owner/editor-drafts/example'
     client.post(base + '/access', headers=headers, json={**target, 'enabled': True}).raise_for_status()
@@ -85,7 +85,7 @@ def test_lost_response_holds_request_without_second_dispatch(gate, monkeypatch):
     def lost(*args, **kwargs):
         calls.append(1)
         raise RuntimeError('transport lost')
-    monkeypatch.setattr(server, 'run_automation', lost)
+    monkeypatch.setattr(editor_routes, 'run_automation', lost)
     with contextlib.suppress(RuntimeError):
         client.post(base + '/runs', headers=headers, json=body)
     assert client.post(base + '/runs', headers=headers, json=body).json()['code'] == 'OUTCOME_UNKNOWN'

@@ -6,6 +6,7 @@ from threading import Barrier
 
 import pytest
 
+from toolgate.api import deps
 from toolgate.core import control_plane, spending
 from toolgate.core import execution_journal as journal
 from toolgate.core import spending_allowances as allowances
@@ -70,8 +71,8 @@ def test_allowance_api_authority_and_actor_isolation(target):
     app = server.app
     with TestClient(app) as client:
         assert client.post("/v2/spending/allowances", json={}).status_code in (401, 403)
-        app.dependency_overrides[server.require_admin] = lambda: "admin"
-        app.dependency_overrides[server.require_agent] = lambda: {"id": "agent", "scopes": ["*"]}
+        app.dependency_overrides[deps.require_admin] = lambda: "admin"
+        app.dependency_overrides[deps.require_agent] = lambda: {"id": "agent", "scopes": ["*"]}
         try:
             response = client.post("/v2/spending/allowances", json={"actor_id": "agent",
                 "target": target, "per_run_cap": 100, "total_cap": 200,
@@ -84,7 +85,7 @@ def test_allowance_api_authority_and_actor_isolation(target):
             assert first.status_code == 200
             assert first.headers["cache-control"] == "no-store"
             assert client.post(path, json=payload).json() == first.json()
-            app.dependency_overrides[server.require_agent] = lambda: {"id": "other", "scopes": ["*"]}
+            app.dependency_overrides[deps.require_agent] = lambda: {"id": "other", "scopes": ["*"]}
             assert client.post(path, json=payload).status_code == 422
             assert client.post(f"/v2/spending/allowances/{identity}/revoke").status_code == 200
         finally:
