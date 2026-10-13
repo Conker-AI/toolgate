@@ -8,6 +8,7 @@ import httpx
 from fastapi import HTTPException
 
 from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server, workflows
+from toolgate.api.routes import agent as agent_routes
 from toolgate.core import control_plane
 from toolgate.executors import research
 
@@ -45,7 +46,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(control_plane.authenticate_agent(raw)["scopes"], ["tool:research.*"])
 
     def test_agent_status_exposes_public_key_id_for_scope_sync(self):
-        status = server.agent_status({"id": "agent-key-1", "name": "Scoped agent", "scopes": ["tool:research.*"]})
+        status = agent_routes.agent_status({"id": "agent-key-1", "name": "Scoped agent", "scopes": ["tool:research.*"]})
         self.assertEqual(status["id"], "agent-key-1")
         self.assertEqual(status["agent"], "Scoped agent")
         self.assertEqual(status["scopes"], ["tool:research.*"])
