@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import HTTPException
 
-from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server
+from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server, workflows
 from toolgate.core import control_plane
 from toolgate.executors import research
 
@@ -929,7 +929,7 @@ class ControlPlaneTests(unittest.TestCase):
         state = {"automation_id": "test", "args": {"base": 3, "items": ["a", "b"], "mode": "fast"},
                  "vars": {}, "last": None, "results": [], "count": 0, "max_steps": 50,
                  "started_at": server.time.monotonic(), "runtime_ceiling": 5}
-        result = server._run_workflow_steps(workflow, state, "test", False)
+        result = workflows._run_workflow_steps(workflow, state, "test", False)
         self.assertEqual({"total": 5, "large": True, "last": "b", "speed": 2}, result["result"])
 
     def test_loop_ceiling_and_unsupported_blocks_are_rejected(self):
@@ -944,7 +944,7 @@ class ControlPlaneTests(unittest.TestCase):
                  "results": [], "count": 0, "max_steps": 1,
                  "started_at": server.time.monotonic(), "runtime_ceiling": 5}
         with self.assertRaises(HTTPException) as raised:
-            server._run_workflow_steps([
+            workflows._run_workflow_steps([
                 {"type": "set", "name": "one", "value": 1},
                 {"type": "set", "name": "two", "value": 2},
             ], state, "test", False)
