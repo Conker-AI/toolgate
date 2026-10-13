@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from toolgate.api import invocation, server
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import container_admission as admission
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -29,7 +30,7 @@ def ready(request):
         "system.container-control": server.V2Invoke(action_id="lifecycle-1", args={"container_id": CID, "action": "restart"}),
     }
     for tool, payload in requests.items():
-        pending = server.run_tool(tool, payload, agent)
+        pending = tools_routes.run_tool(tool, payload, agent)
         cp.decide_request(pending["request_id"], "approved", "owner")
         payload.approval_request_id = pending["request_id"]
     return daemon, agent, rid, requests
@@ -58,12 +59,12 @@ def test_mixed_approved_actions_cannot_dispatch_concurrently(ready, monkeypatch,
     monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     second = next(tool for tool in requests if tool != first)
     with ThreadPoolExecutor(1) as pool:
-        future = pool.submit(server.run_tool, first, requests[first], agent)
+        future = pool.submit(tools_routes.run_tool, first, requests[first], agent)
         assert entered.wait(5)
         count = len(daemon.requests)
         try:
             with pytest.raises(HTTPException) as error:
-                server.run_tool(second, requests[second], agent)
+                tools_routes.run_tool(second, requests[second], agent)
             assert error.value.detail["code"] == "ACTION_CONFLICT"
             assert len(daemon.requests) == count
             assert journal.get(requests[second].action_id) is None

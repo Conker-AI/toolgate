@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from toolgate.api import builtin_capabilities, definitions, invocation, server
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control
@@ -40,7 +41,7 @@ def payload(**changes):
 
 
 def approve(agent):
-    pending = server.run_tool(TOOL, payload(), agent)
+    pending = tools_routes.run_tool(TOOL, payload(), agent)
     assert pending["code"] == "CONFIRMATION_REQUIRED"
     cp.decide_request(pending["request_id"], "approved", "owner")
     return pending["request_id"]
@@ -50,17 +51,17 @@ def test_approval_scope_and_exact_receipt_replay(setup):
     agent, calls = setup
     denied, _ = cp.issue_agent_key("No container scope", ["tool:system.inventory"])
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, payload(), denied)
+        tools_routes.run_tool(TOOL, payload(), denied)
     request = approve(agent)
     assert calls == []
     changed = payload(args={"container_id": ID, "action": "stop"}, approval_request_id=request)
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, changed, agent)
+        tools_routes.run_tool(TOOL, changed, agent)
     assert calls == []
     body = payload(approval_request_id=request)
-    first = server.run_tool(TOOL, body, agent)
+    first = tools_routes.run_tool(TOOL, body, agent)
     assert first["code"] == "OK"
-    assert server.run_tool(TOOL, body, agent) == first
+    assert tools_routes.run_tool(TOOL, body, agent) == first
     assert calls == [(ID, "restart")]
 
 
@@ -74,10 +75,10 @@ def test_lost_mutation_reply_stays_unknown_without_retry(setup, monkeypatch):
 
     monkeypatch.setattr(container_control, "control", uncertain)
     body = payload(approval_request_id=request)
-    first = server.run_tool(TOOL, body, agent)
+    first = tools_routes.run_tool(TOOL, body, agent)
     assert first["code"] == "OUTCOME_UNKNOWN"
     assert "confidential" not in str(first)
-    assert server.run_tool(TOOL, body, agent) == first
+    assert tools_routes.run_tool(TOOL, body, agent) == first
     assert len(calls) == 1
 
 
@@ -86,7 +87,7 @@ def test_revocation_after_approval_prevents_dispatch(setup):
     request = approve(agent)
     cp.revoke_agent_key(agent["id"])
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, payload(approval_request_id=request), agent)
+        tools_routes.run_tool(TOOL, payload(approval_request_id=request), agent)
     assert calls == []
     assert journal.get("container-action-01") is None
 
@@ -138,11 +139,11 @@ def test_actual_adapter_through_approval_and_journal(tmp_path, monkeypatch):
     approval = approve(agent)
     assert requests == []
     body = payload(approval_request_id=approval)
-    result = server.run_tool(TOOL, body, agent)
+    result = tools_routes.run_tool(TOOL, body, agent)
     assert result["code"] == "OK"
     assert "SECRET" not in str(result)
     assert requests == [("GET", f"/v1.45/containers/{ID}/json"),
                         ("POST", f"/v1.45/containers/{ID}/restart"),
                         ("GET", f"/v1.45/containers/{ID}/json")]
-    assert server.run_tool(TOOL, body, agent) == result
+    assert tools_routes.run_tool(TOOL, body, agent) == result
     assert len(requests) == 3

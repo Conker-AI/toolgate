@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import invocation, server
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import owner_channel as owner
@@ -45,7 +46,7 @@ def test_publication_is_part_of_idempotency_identity(published, kind):
     tool, flow, agent, calls = published
     definition = tool if kind == "tool" else flow
     obj_id = definition["id"]
-    run = server.run_tool if kind == "tool" else server.run_automation
+    run = tools_routes.run_tool if kind == "tool" else server.run_automation
     run(obj_id, server.V2Invoke(action_id="same", published_version=1), agent)
     getattr(cp, f"update_{kind}")(obj_id, definition)
     pub.publish(kind, obj_id, 2)
@@ -94,10 +95,10 @@ def test_live_approval_cannot_authorize_published_tool(published):
     tool, _, agent, calls = published
     tool = cp.update_tool("child", {**tool, "authorization": "owner_confirmation"})
     pub.publish("tool", "child", 2)
-    pending = server.run_tool("child", server.V2Invoke(action_id="approve"), agent)
+    pending = tools_routes.run_tool("child", server.V2Invoke(action_id="approve"), agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
     with pytest.raises(HTTPException) as error:
-        server.run_tool("child", server.V2Invoke(action_id="approve", published_version=2,
+        tools_routes.run_tool("child", server.V2Invoke(action_id="approve", published_version=2,
                         approval_request_id=pending["request_id"]), agent)
     assert error.value.detail["code"] == "APPROVAL_INVALID"
     assert calls == [] and journal.get("approve") is None
@@ -176,11 +177,11 @@ def test_unknown_published_receipt_retains_identity_and_never_redispatches(publi
         raise TimeoutError("lost reply")
     monkeypatch.setattr(invocation, "_dispatch_tool", lost_reply)
     payload = server.V2Invoke(action_id="unknown", published_version=1)
-    first = server.run_tool("child", payload, agent)
+    first = tools_routes.run_tool("child", payload, agent)
     assert first["code"] == "OUTCOME_UNKNOWN"
     assert first["definition_version"] == 1
     assert first["publication_digest"] == pub.get("tool", "child", 1, published=True)["digest"]
-    assert server.run_tool("child", payload, agent) == first
+    assert tools_routes.run_tool("child", payload, agent) == first
     assert len(calls) == 1
 
 
@@ -205,7 +206,7 @@ def test_revocation_race_at_dispatch_boundary_fails_without_effect(published, mo
         return original(*args, **kwargs)
     monkeypatch.setattr(journal, "begin", revoke_then_begin)
     with pytest.raises(HTTPException):
-        server.run_tool("child", server.V2Invoke(action_id="race", published_version=1), agent)
+        tools_routes.run_tool("child", server.V2Invoke(action_id="race", published_version=1), agent)
     assert calls == [] and journal.get("race") is None
 
 
@@ -214,11 +215,11 @@ def test_published_tool_owner_approval_and_journal_digest_immutability(published
     tool = cp.update_tool("child", {**tool, "authorization": "owner_confirmation"})
     pub.publish("tool", "child", 2)
     payload = server.V2Invoke(action_id="tool-confirm", published_version=2)
-    pending = server.run_tool("child", payload, agent)
+    pending = tools_routes.run_tool("child", payload, agent)
     assert owner.get(pending["request_id"])["reviewable"]
     owner.decide(pending["request_id"], "approved", "Reviewed publication")
     payload.approval_request_id = pending["request_id"]
-    assert server.run_tool("child", payload, agent)["code"] == "OK"
+    assert tools_routes.run_tool("child", payload, agent)["code"] == "OK"
     assert calls == [tool]
     with pytest.raises(sqlite3.IntegrityError), cp._conn() as conn:
         conn.execute("UPDATE v2_actions SET publication_digest=? WHERE action_id=?", ("0" * 64, payload.action_id))

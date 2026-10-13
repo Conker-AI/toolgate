@@ -26,7 +26,6 @@ from toolgate.api.deps import deny, require_admin, require_agent, require_owner
 from toolgate.api.invocation import (
     enforce_dispatch_usage_limits,
     enforce_usage_limits,
-    invoke_tool,
     require_current_dispatch_authority,
 )
 from toolgate.api.models import (
@@ -37,7 +36,6 @@ from toolgate.api.models import (
     V2Invoke,
     V2Request,
     V2RequestDecision,
-    V2Tool,
 )
 from toolgate.api.routes.agent_keys import router as _agent_keys_router
 from toolgate.api.routes.health import router as _health_router
@@ -46,6 +44,7 @@ from toolgate.api.routes.publications import router as _publications_router
 from toolgate.api.routes.services import router as _services_router
 from toolgate.api.routes.settings import router as _settings_router
 from toolgate.api.routes.spending import router as _spending_router
+from toolgate.api.routes.tools import router as _tools_router
 from toolgate.api.routes.vault import router as _vault_router
 from toolgate.api.version import SERVICE_VERSION
 from toolgate.api.workflows import _automation_input_errors, _run_workflow_steps
@@ -199,17 +198,7 @@ app.include_router(_agent_keys_router)
 app.include_router(_services_router)
 
 
-@app.get("/v2/tools")
-def list_tools(_tier: str = Depends(require_admin)):
-    return control_plane.list_objects("tool")
-
-
-@app.get("/v2/tools/{tool_id}")
-def get_tool(tool_id: str, _tier: str = Depends(require_admin)):
-    tool = control_plane.get("tool", tool_id)
-    if not tool:
-        raise HTTPException(404, "tool not found")
-    return tool
+app.include_router(_tools_router)
 
 
 @app.get("/v2/agent/tools")
@@ -514,62 +503,6 @@ def agent_file_roots(agent: dict = Depends(require_agent)):
     except filesystem_inventory.FileError as exc:
         result = {"mode": "unavailable", "code": exc.code, "roots": []}
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
-
-
-@app.post("/v2/tools")
-def create_tool(payload: V2Tool, _tier: str = Depends(require_admin)):
-    body = payload.model_dump()
-    require_valid_tool_definition(body)
-    tool = control_plane.create_tool(body)
-    control_plane.event("tool_saved", "info", "tool", tool["id"], "admin")
-    return tool
-
-
-@app.put("/v2/tools/{tool_id}")
-def update_tool(tool_id: str, payload: V2Tool, _tier: str = Depends(require_admin)):
-    body = payload.model_dump()
-    require_valid_tool_definition(body)
-    tool = control_plane.update_tool(tool_id, body)
-    if not tool:
-        raise HTTPException(404, "tool not found")
-    control_plane.event(
-        "tool_updated", "info", "tool", tool_id, "admin", {"version": tool["version"]}
-    )
-    return tool
-
-
-@app.delete("/v2/tools/{tool_id}")
-def delete_tool(tool_id: str, _tier: str = Depends(require_admin)):
-    if not control_plane.remove("tool", tool_id):
-        raise HTTPException(404, "tool not found")
-    control_plane.event("tool_deleted", "warning", "tool", tool_id, "admin")
-    return {"deleted": True, "id": tool_id}
-
-
-@app.post("/v2/tools/{tool_id}/invoke")
-def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agent)):
-    publication = _requested_publication("tool", tool_id, payload)
-    tool = publication["definition"] if publication else control_plane.get("tool", tool_id)
-    if not tool:
-        deny("TOOL_UNAVAILABLE", f"Tool '{tool_id}' was not found", 404, "Run `toolgate tool list`")
-    if tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):
-        deny(
-            "POLICY_DENIED",
-            "Your agent key is not allowed to use this tool",
-            403,
-            "Ask the owner for scope",
-        )
-    return invoke_tool(
-        tool,
-        payload.args,
-        agent["name"],
-        approval_request_id=payload.approval_request_id,
-        actor_id=agent["id"],
-        action_id=payload.action_id,
-        job_id=payload.job_id,
-        publication=publication,
-        authority_scope=tool_id,
-    )
 
 
 app.include_router(_publications_router)

@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import builtin_capabilities, definitions, invocation, server
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.executors import filesystem_inventory as files
 
@@ -33,13 +34,13 @@ def test_read_requires_scope_and_reuses_saved_receipt(setup):
     other, _ = cp.issue_agent_key("Inventory reader", ["tool:system.inventory"])
     body = server.V2Invoke(action_id="listing-01", args={"root_id": "project"})
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, body, other)
-    first = server.run_tool(TOOL, body, agent)
+        tools_routes.run_tool(TOOL, body, other)
+    first = tools_routes.run_tool(TOOL, body, agent)
     assert first["code"] == "OK" and calls == [("project", "", 200)]
-    assert server.run_tool(TOOL, body, agent) == first and len(calls) == 1
+    assert tools_routes.run_tool(TOOL, body, agent) == first and len(calls) == 1
     cp.revoke_agent_key(agent["id"])
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, body.model_copy(update={"action_id": "listing-02"}), agent)
+        tools_routes.run_tool(TOOL, body.model_copy(update={"action_id": "listing-02"}), agent)
 
 
 def test_reserved_name_and_root_override_are_rejected(setup):
@@ -76,7 +77,7 @@ def test_failed_listing_is_known_failure_with_static_receipt(setup, monkeypatch)
 
     monkeypatch.setattr(files, "list_directory", unavailable)
     body = server.V2Invoke(action_id="listing-failed", args={"root_id": "project"})
-    result = server.run_tool(TOOL, body, agent)
+    result = tools_routes.run_tool(TOOL, body, agent)
     assert result["code"] == "TOOL_UNAVAILABLE"
     assert result["result"]["error_code"] == "unavailable"
-    assert server.run_tool(TOOL, body, agent) == result and len(calls) == 1
+    assert tools_routes.run_tool(TOOL, body, agent) == result and len(calls) == 1

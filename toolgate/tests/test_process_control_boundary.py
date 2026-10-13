@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import builtin_capabilities, definitions, invocation, server
+from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import process_control
@@ -38,7 +39,7 @@ def body(**changes):
 
 
 def approve(agent):
-    result = server.run_tool(TOOL, body(), agent)
+    result = tools_routes.run_tool(TOOL, body(), agent)
     assert result["code"] == "CONFIRMATION_REQUIRED"
     cp.decide_request(result["request_id"], "approved", "owner")
     return result["request_id"]
@@ -51,10 +52,10 @@ def test_approval_binds_scope_target_action_and_replays_only_receipt(setup):
     changed = body(args={"service_id": "system:worker.service", "action": "restart"},
                    approval_request_id=pending)
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, changed, agent)
-    result = server.run_tool(TOOL, body(approval_request_id=pending), agent)
+        tools_routes.run_tool(TOOL, changed, agent)
+    result = tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent)
     assert result["code"] == "OK" and calls == [(SERVICE, "restart")]
-    assert server.run_tool(TOOL, body(approval_request_id=pending), agent) == result
+    assert tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent) == result
     assert len(calls) == 1
 
 
@@ -67,9 +68,9 @@ def test_unknown_effect_is_never_repeated(setup, monkeypatch):
         raise RuntimeError("private system diagnostics")
 
     monkeypatch.setattr(process_control, "control", unknown)
-    first = server.run_tool(TOOL, body(approval_request_id=pending), agent)
+    first = tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent)
     assert first["code"] == "OUTCOME_UNKNOWN" and "private" not in str(first)
-    assert server.run_tool(TOOL, body(approval_request_id=pending), agent) == first
+    assert tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent) == first
     assert len(calls) == 1
 
 
@@ -78,7 +79,7 @@ def test_current_revocation_prevents_effect(setup):
     pending = approve(agent)
     cp.revoke_agent_key(agent["id"])
     with pytest.raises(HTTPException):
-        server.run_tool(TOOL, body(approval_request_id=pending), agent)
+        tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent)
     assert calls == []
 
 
@@ -132,11 +133,11 @@ def test_actual_adapter_runs_fixed_arguments_behind_approved_journal(tmp_path, m
     monkeypatch.setattr(process_control, "control", lambda *args: actual(*args, runner=runner))
     pending = approve(agent)
     assert invocations == []
-    result = server.run_tool(TOOL, body(approval_request_id=pending), agent)
+    result = tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent)
     assert result["code"] == "OK"
     assert result["result"]["result"]["serviceId"] == SERVICE
     assert len(invocations) == 3
     assert invocations[1] == ["/usr/bin/systemctl", "--user", "--no-pager", "--no-ask-password",
                               "restart", "--", "worker.service"]
-    assert server.run_tool(TOOL, body(approval_request_id=pending), agent) == result
+    assert tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent) == result
     assert len(invocations) == 3
