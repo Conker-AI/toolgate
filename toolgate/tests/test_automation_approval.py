@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 
@@ -27,7 +27,7 @@ def test_changed_child_invalidates_approval_without_consumption(flow, monkeypatc
     child, agent, payload = flow
     cp.update_tool("child", {**child, "execution": {"type": "local_echo"}})
     calls = []
-    monkeypatch.setattr(server, "_dispatch_tool", lambda *a: calls.append(a))
+    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: calls.append(a))
     with pytest.raises(HTTPException) as exc:
         server.run_automation("flow", payload, agent)
     assert exc.value.detail["code"] == "APPROVAL_INVALID"
@@ -38,7 +38,7 @@ def test_changed_child_invalidates_approval_without_consumption(flow, monkeypatc
 def test_unchanged_approval_runs_and_replays_only_receipt(flow, monkeypatch):
     _, agent, payload = flow
     calls = []
-    monkeypatch.setattr(server, "_dispatch_tool", lambda *a: calls.append(a) or {"ok": True, "result": {}})
+    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: calls.append(a) or {"ok": True, "result": {}})
     first = server.run_automation("flow", payload, agent)
     assert first["code"] == "OK"
     assert server.run_automation("flow", payload, agent) == first
@@ -53,6 +53,6 @@ def test_edit_after_consumption_cannot_replace_pinned_child(flow, monkeypatch):
         cp.update_tool("child", {**child, "execution": {"type": "local_echo"}})
         return run(*args)
     monkeypatch.setattr(server, "_run_workflow_steps", race)
-    monkeypatch.setattr(server, "_dispatch_tool", lambda tool, args: versions.append(tool["version"]) or {"ok": True, "result": {}})
+    monkeypatch.setattr(invocation, "_dispatch_tool", lambda tool, args: versions.append(tool["version"]) or {"ok": True, "result": {}})
     assert server.run_automation("flow", payload, agent)["code"] == "OK"
     assert versions == [1]

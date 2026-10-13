@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, server
+from toolgate.api import builtin_capabilities, definitions, invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.executors import filesystem_inventory as files
 
@@ -49,8 +49,8 @@ def test_reserved_name_and_root_override_are_rejected(setup):
     for execution in ({"type": "echo"}, {"type": "filesystem_inventory", "root": "/"}):
         changed = {**tool, "execution": execution}
         assert definitions.tool_definition_errors(changed)
-        assert server._dispatch_tool(changed, {"root_id": "project"})["ok"] is False
-    assert server._dispatch_tool(tool, {"root_id": "project", "command": "read"})["ok"] is False
+        assert invocation._dispatch_tool(changed, {"root_id": "project"})["ok"] is False
+    assert invocation._dispatch_tool(tool, {"root_id": "project", "command": "read"})["ok"] is False
     assert calls == []
 
 

@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import owner_channel as owner
@@ -31,7 +31,7 @@ def nested(tmp_path, monkeypatch):
     publication = pub.publish("automation", "root", 1)
     agent, _ = cp.issue_agent_key("Caller", ["automation:root", "automation:child"])
     calls = []
-    monkeypatch.setattr(server, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
+    monkeypatch.setattr(invocation, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
     return tool, child, root, publication, agent, calls
 
 
@@ -155,7 +155,7 @@ def test_root_deadline_survives_nested_entry(nested, monkeypatch):
         calls.append(tool)
         now[0] = 4
         return {"ok": True, "result": {}}
-    monkeypatch.setattr(server, "_dispatch_tool", dispatch)
+    monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     assert run(agent, changed["version"])["code"] == "OUTCOME_UNKNOWN"
     assert len(calls) == 1
 
@@ -168,7 +168,7 @@ def test_unknown_nested_call_inside_retry_never_repeats_effect(nested, monkeypat
     def lost(tool, args):
         calls.append(tool)
         raise TimeoutError("lost receipt")
-    monkeypatch.setattr(server, "_dispatch_tool", lost)
+    monkeypatch.setattr(invocation, "_dispatch_tool", lost)
     first = run(agent, changed["version"])
     assert first["code"] == "OUTCOME_UNKNOWN" and len(calls) == 1
     assert run(agent, changed["version"]) == first and len(calls) == 1
@@ -216,7 +216,7 @@ def test_mid_nested_revocation_stops_later_leaf_dispatch(nested, monkeypatch, re
         else:
             cp.update_agent_key_scopes(agent["id"], ["automation:root"])
         return {"ok": True, "result": {}}
-    monkeypatch.setattr(server, "_dispatch_tool", dispatch)
+    monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     assert run(agent, root["version"])["code"] == "OUTCOME_UNKNOWN"
     assert len(calls) == 1
 

@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import publications
@@ -17,7 +17,7 @@ def test_version_digest_precondition_precedes_approval_and_dispatch(tmp_path, mo
     publication = publications.publish(kind, "item", 1)
     agent, raw = cp.issue_agent_key("Caller", ["item", "automation:item"])
     calls = []
-    monkeypatch.setattr(server, "_dispatch_tool", lambda *args: calls.append(args) or {"ok": True, "result": {}})
+    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *args: calls.append(args) or {"ok": True, "result": {}})
     client = TestClient(server.app)
     url = "/v2/tools/item/invoke" if kind == "tool" else "/v2/automations/item/run"
     headers = {"X-ToolGate-Execution-Key": raw}

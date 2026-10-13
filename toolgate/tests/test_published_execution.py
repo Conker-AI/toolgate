@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import owner_channel as owner
@@ -22,7 +22,7 @@ def published(tmp_path, monkeypatch):
     pub.publish("automation", "flow", 1)
     agent, _ = cp.issue_agent_key("Caller", ["child", "automation:flow"])
     calls = []
-    monkeypatch.setattr(server, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
+    monkeypatch.setattr(invocation, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
     return tool, flow, agent, calls
 
 
@@ -174,7 +174,7 @@ def test_unknown_published_receipt_retains_identity_and_never_redispatches(publi
     def lost_reply(tool, args):
         calls.append(tool)
         raise TimeoutError("lost reply")
-    monkeypatch.setattr(server, "_dispatch_tool", lost_reply)
+    monkeypatch.setattr(invocation, "_dispatch_tool", lost_reply)
     payload = server.V2Invoke(action_id="unknown", published_version=1)
     first = server.run_tool("child", payload, agent)
     assert first["code"] == "OUTCOME_UNKNOWN"

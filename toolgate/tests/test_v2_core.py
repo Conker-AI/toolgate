@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import HTTPException
 
-from toolgate.api import builtin_capabilities, definitions, dispatch, server
+from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server
 from toolgate.core import control_plane
 from toolgate.executors import research
 
@@ -153,7 +153,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(tool["execution"], {"type": "local_echo"})
         self.assertEqual(definitions.tool_definition_errors(tool), [])
 
-        result = server.invoke_tool(tool, {"value": "do-not-return-me"}, "test", approval_granted=True)
+        result = invocation.invoke_tool(tool, {"value": "do-not-return-me"}, "test", approval_granted=True)
         self.assertEqual(result["code"], "OK")
         self.assertNotIn("do-not-return-me", str(result))
         self.assertEqual(result["result"]["proof"]["length"], 16)

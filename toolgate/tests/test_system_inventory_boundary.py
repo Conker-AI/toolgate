@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, dispatch, server
+from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.executors import system_inventory
 from toolgate.tests.test_system_inventory import Stream, envelope
@@ -86,9 +86,9 @@ def test_definition_and_dispatch_cannot_choose_private_destination(setup):
     changed = copy.deepcopy(tool)
     changed["execution"]["url"] = "http://another.internal/secrets"
     assert definitions.tool_definition_errors(changed)
-    assert server._dispatch_tool(changed, {})["ok"] is False
+    assert invocation._dispatch_tool(changed, {})["ok"] is False
     with pytest.raises(HTTPException):
-        server._dispatch_tool(tool, {"path": "/files"})
+        invocation._dispatch_tool(tool, {"path": "/files"})
     assert setup == []
 
 
@@ -113,7 +113,7 @@ def test_reserved_inventory_name_cannot_be_repurposed_for_an_effect(setup, monke
     assert definitions.tool_definition_errors(tool)
     calls = []
     monkeypatch.setattr(dispatch, "_execute_http_json", lambda *a: calls.append(a))
-    result = server._dispatch_tool(tool, {})
+    result = invocation._dispatch_tool(tool, {})
     assert result["ok"] is False
     assert result["error_code"] == "invalid_inventory_definition"
     assert calls == [] and setup == []

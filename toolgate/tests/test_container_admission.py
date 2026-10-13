@@ -4,7 +4,7 @@ from threading import Event
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import container_admission as admission
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -40,7 +40,7 @@ def test_mixed_approved_actions_cannot_dispatch_concurrently(ready, monkeypatch,
     daemon, agent, rid, requests = ready
     entered, release = Event(), Event()
     actual_port = port_control.execute
-    actual_dispatch = server._dispatch_tool
+    actual_dispatch = invocation._dispatch_tool
 
     def port(*args, **kwargs):
         entered.set()
@@ -55,7 +55,7 @@ def test_mixed_approved_actions_cannot_dispatch_concurrently(ready, monkeypatch,
         return {"ok": True, "result": {"containerId": CID, "outcome": "observed"}}
 
     monkeypatch.setattr(port_control, "execute", port)
-    monkeypatch.setattr(server, "_dispatch_tool", dispatch)
+    monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     second = next(tool for tool in requests if tool != first)
     with ThreadPoolExecutor(1) as pool:
         future = pool.submit(server.run_tool, first, requests[first], agent)

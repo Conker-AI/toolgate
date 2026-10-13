@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import invocation, server
 from toolgate.core import control_plane, spending
 from toolgate.core import execution_journal as journal
 from toolgate.executors import research
@@ -34,7 +34,7 @@ def setup_budget(root="root", cap=10_000_000, cumulative=20_000_000, actor="agen
 
 
 def invoke(paid, job=None, action="root", actor="agent", **kwargs):
-    return server.invoke_tool(paid, {}, "Actor", actor_id=actor, action_id=action,
+    return invocation.invoke_tool(paid, {}, "Actor", actor_id=actor, action_id=action,
                               job_id=job, **kwargs)
 
 

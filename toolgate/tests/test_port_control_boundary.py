@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, server
+from toolgate.api import builtin_capabilities, definitions, invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import vault
@@ -119,4 +119,4 @@ def test_reserved_definition_cannot_bypass_approval(setup, change):
         tool["id"] = "other-tool"
     with pytest.raises(HTTPException):
         definitions.require_valid_tool_definition(tool)
-    assert not server._dispatch_tool(tool, {})["ok"]
+    assert not invocation._dispatch_tool(tool, {})["ok"]

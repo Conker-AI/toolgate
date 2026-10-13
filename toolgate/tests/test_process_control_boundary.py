@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, server
+from toolgate.api import builtin_capabilities, definitions, invocation, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import process_control
@@ -90,7 +90,7 @@ def test_reserved_identity_and_confirmation_cannot_be_replaced(setup):
                     {"execution": {"type": "process_control", "command": "whoami"}}):
         value = {**tool, **changes}
         assert definitions.tool_definition_errors(value)
-        assert server._dispatch_tool(value, body().args)["ok"] is False
+        assert invocation._dispatch_tool(value, body().args)["ok"] is False
     assert calls == []
 
 
