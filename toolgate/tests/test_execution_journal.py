@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from toolgate.api import invocation, server
+from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane
 from toolgate.core import execution_journal as journal
 
@@ -234,9 +235,9 @@ def test_workflow_retry_block_never_repeats_uncertain_child(tool, monkeypatch):
     monkeypatch.setattr(invocation, "_dispatch_tool", interrupted)
     agent, _ = control_plane.issue_agent_key("Actor", ["automation:flow"])
     payload = server.V2Invoke(action_id="flow-1")
-    result = server.run_automation("flow", payload, agent)
+    result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"
-    assert server.run_automation("flow", payload, agent) == result
+    assert automations_routes.run_automation("flow", payload, agent) == result
     assert calls == ["effect"]
     assert len(journal.list_actions()) == 2
 

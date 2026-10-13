@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import invocation, server
+from toolgate.api.routes import automations as automations_routes
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -32,12 +33,12 @@ def test_published_workflow_uses_exact_old_workflow_and_child_after_edits(publis
     cp.update_tool("child", {**tool, "execution": {"type": "local_echo"}})
     cp.update_automation("flow", {**flow, "workflow": [{"type": "return", "value": "new"}]})
     payload = server.V2Invoke(action_id="published-run", published_version=1, job_id="scheduled-job")
-    result = server.run_automation("flow", payload, agent)
+    result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OK"
     assert calls == [tool]
     assert result["publication"]["version"] == 1
     assert journal.get("published-run")["version"] == 1
-    assert server.run_automation("flow", payload, agent) == result
+    assert automations_routes.run_automation("flow", payload, agent) == result
     assert len(calls) == 1
 
 
@@ -46,7 +47,7 @@ def test_publication_is_part_of_idempotency_identity(published, kind):
     tool, flow, agent, calls = published
     definition = tool if kind == "tool" else flow
     obj_id = definition["id"]
-    run = tools_routes.run_tool if kind == "tool" else server.run_automation
+    run = tools_routes.run_tool if kind == "tool" else automations_routes.run_automation
     run(obj_id, server.V2Invoke(action_id="same", published_version=1), agent)
     getattr(cp, f"update_{kind}")(obj_id, definition)
     pub.publish(kind, obj_id, 2)
@@ -70,7 +71,7 @@ def test_current_revocation_of_child_prevents_published_dispatch(published, edit
                   "confirmation": {"authorization": "owner_confirmation"}}[edit]
         cp.update_tool("child", {**tool, **fields})
     with pytest.raises(pub.PublicationInvalid):
-        server.run_automation("flow", server.V2Invoke(action_id="revoked", published_version=1), agent)
+        automations_routes.run_automation("flow", server.V2Invoke(action_id="revoked", published_version=1), agent)
     assert calls == [] and journal.get("revoked") is None
 
 
@@ -80,14 +81,14 @@ def test_confirmation_binds_publication_and_survives_definition_only_edits(publi
     flow = cp.update_automation("flow", {**flow, "authorization": "owner_confirmation"})
     pub.publish("automation", "flow", 2)
     payload = server.V2Invoke(action_id="confirm", published_version=2)
-    pending = server.run_automation("flow", payload, agent)
+    pending = automations_routes.run_automation("flow", payload, agent)
     request = cp.get("request", pending["request_id"])
     assert request["payload"]["binding"]["publication_digest"] == pub.get("automation", "flow", 2, published=True)["digest"]
     cp.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]
     cp.update_tool("child", {**tool, "name": "Renamed after approval"})
     cp.update_automation("flow", {**flow, "name": "Renamed after approval"})
-    result = server.run_automation("flow", payload, agent)
+    result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OK" and calls == [tool]
 
 
@@ -123,10 +124,10 @@ def test_http_missing_publication_never_falls_back_and_validation_is_strict(publ
 def test_current_scope_and_lockdown_still_apply(published):
     _, _, agent, calls = published
     with pytest.raises(HTTPException):
-        server.run_automation("flow", server.V2Invoke(action_id="scope", published_version=1), {**agent, "scopes": []})
+        automations_routes.run_automation("flow", server.V2Invoke(action_id="scope", published_version=1), {**agent, "scopes": []})
     cp.set_lockdown(True, "owner")
     with pytest.raises(HTTPException) as error:
-        server.run_automation("flow", server.V2Invoke(action_id="lock", published_version=1), agent)
+        automations_routes.run_automation("flow", server.V2Invoke(action_id="lock", published_version=1), agent)
     assert error.value.detail["code"] == "LOCKED_DOWN"
     assert calls == []
 
@@ -136,7 +137,7 @@ def test_owner_published_review_projects_exact_target_and_rechecks_revocation(pu
     flow = cp.update_automation("flow", {**flow, "authorization": "owner_confirmation",
                                          "inputs": [{"name": "exact", "type": "string"}]})
     publication = pub.publish("automation", "flow", 2)
-    pending = server.run_automation("flow", server.V2Invoke(action_id="owner-review", published_version=2,
+    pending = automations_routes.run_automation("flow", server.V2Invoke(action_id="owner-review", published_version=2,
                                                           args={"exact": "arguments"}), agent)
     view = owner.get(pending["request_id"])
     assert view["reviewable"] and view["action"]["args"] == {"exact": "arguments"}
@@ -155,7 +156,7 @@ def test_tampered_publication_digest_cannot_be_reviewed_or_consumed(published):
     flow = cp.update_automation("flow", {**flow, "authorization": "owner_confirmation"})
     pub.publish("automation", "flow", 2)
     payload = server.V2Invoke(action_id="tamper", published_version=2)
-    pending = server.run_automation("flow", payload, agent)
+    pending = automations_routes.run_automation("flow", payload, agent)
     identity = pending["request_id"]
     assert owner.decide(identity, "approved", "Exact publication")["status"] == "approved"
     request = cp.get("request", identity)
@@ -165,7 +166,7 @@ def test_tampered_publication_digest_cannot_be_reviewed_or_consumed(published):
     assert owner.get(identity)["unavailable_reason"] == "invalid_origin"
     payload.approval_request_id = identity
     with pytest.raises(HTTPException) as error:
-        server.run_automation("flow", payload, agent)
+        automations_routes.run_automation("flow", payload, agent)
     assert error.value.detail["code"] == "APPROVAL_INVALID"
     assert calls == [] and journal.get("tamper") is None
 

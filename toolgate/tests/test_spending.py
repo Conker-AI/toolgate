@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import invocation, server
+from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane, spending
 from toolgate.core import execution_journal as journal
 from toolgate.executors import research
@@ -155,9 +156,9 @@ def test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run(paid,
     control_plane.create_automation(automation)
     calls = provider(monkeypatch)
     payload = server.V2Invoke(action_id="root", job_id=job)
-    result = server.run_automation("flow", payload, agent)
+    result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"
-    assert server.run_automation("flow", payload, agent) == result
+    assert automations_routes.run_automation("flow", payload, agent) == result
     assert len(calls) == 1
     records = journal.list_actions()
     assert len(records) == 2

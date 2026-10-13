@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from toolgate.api import invocation, server
+from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import publications
@@ -39,14 +40,14 @@ def test_mid_workflow_revocation_stops_next_child_without_scope_union(flow, monk
         return {"ok": True, "result": {}}
     monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     payload = server.V2Invoke(action_id="root", published_version=published_version)
-    result = server.run_automation("flow", payload, agent)
+    result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"
     assert calls == ["child"]
     records = journal.list_actions()
     assert len(records) == 2
     assert len([record for record in records if record["status"] == "completed"]) == 1
     # Reconciliation may return a receipt but can never restart the remaining steps.
-    assert server.run_automation("flow", payload, agent) == result
+    assert automations_routes.run_automation("flow", payload, agent) == result
     assert calls == ["child"]
 
 
@@ -73,14 +74,14 @@ def test_revoked_actor_cannot_consume_previously_approved_request(flow, monkeypa
     definition = cp.get("automation", "flow")
     cp.update_automation("flow", {**definition, "authorization": "owner_confirmation"})
     payload = server.V2Invoke(action_id="approved")
-    pending = server.run_automation("flow", payload, agent)
+    pending = automations_routes.run_automation("flow", payload, agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]
     cp.revoke_agent_key(agent["id"])
     calls = []
     monkeypatch.setattr(invocation, "_dispatch_tool", lambda *args: calls.append(args))
     with pytest.raises(HTTPException) as error:
-        server.run_automation("flow", payload, agent)
+        automations_routes.run_automation("flow", payload, agent)
     assert error.value.detail["code"] == "AGENT_REVOKED"
     assert cp.get("request", pending["request_id"])["payload"]["binding"]["consumed_at"] is None
     assert journal.get("approved") is None and calls == []
