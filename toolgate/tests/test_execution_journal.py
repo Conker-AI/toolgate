@@ -1,6 +1,6 @@
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from threading import Barrier, Event
 
 import pytest
 from fastapi import HTTPException
@@ -18,8 +18,9 @@ def tool(tmp_path, monkeypatch):
 
 
 def invoke(tool, **kwargs):
+    action_id = kwargs.pop("action_id", "job.action")
     return server.invoke_tool(tool, kwargs.pop("args", {}), "actor", actor_id="agent",
-                              action_id="job.action", **kwargs)
+                              action_id=action_id, **kwargs)
 
 
 def test_dispatch_is_durable_before_external_effect_and_replay_is_cached(tool, monkeypatch):
@@ -86,6 +87,74 @@ def test_two_callers_cannot_dispatch_same_action(tool, monkeypatch):
     assert calls == [1]
 
 
+@pytest.mark.parametrize("limits", [
+    {"max_per_minute": 1, "max_per_hour": 100, "cooldown_seconds": 0},
+    {"max_per_minute": 100, "max_per_hour": 1, "cooldown_seconds": 0},
+    {"max_per_minute": 100, "max_per_hour": 100, "cooldown_seconds": 60},
+], ids=["minute", "hour", "cooldown"])
+def test_concurrent_distinct_actions_cannot_exceed_usage_limit(tool, monkeypatch, limits):
+    tool["policy"] = {"usage_limits": limits}
+    ready = Barrier(2)
+    release = Event()
+    calls = []
+    real_begin = journal.begin
+
+    def simultaneous_begin(*args, **kwargs):
+        ready.wait(timeout=5)
+        return real_begin(*args, **kwargs)
+
+    def execute(*args):
+        calls.append(1)
+        assert release.wait(5)
+        return {"ok": True, "result": {}}
+
+    monkeypatch.setattr(journal, "begin", simultaneous_begin)
+    monkeypatch.setattr(server, "_dispatch_tool", execute)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(invoke, tool, action_id="race.one"),
+            pool.submit(invoke, tool, action_id="race.two"),
+        }
+        done, pending = wait(futures, timeout=5, return_when=FIRST_COMPLETED)
+        assert len(done) == 1
+        denied = done.pop().exception()
+        assert isinstance(denied, HTTPException)
+        assert denied.status_code == 429
+        assert denied.detail["code"] == "RATE_LIMITED"
+        release.set()
+        admitted = pending.pop().result(timeout=5)
+    assert admitted["status"] == "completed"
+    assert calls == [1]
+    with control_plane._conn() as db:
+        rows = db.execute("SELECT action_id,status FROM v2_actions").fetchall()
+    assert [(row["action_id"], row["status"]) for row in rows] in [
+        [("race.one", "completed")],
+        [("race.two", "completed")],
+    ]
+
+
+def test_completed_action_and_audit_event_consume_one_slot(tool, monkeypatch):
+    tool["policy"] = {"usage_limits": {"max_per_minute": 2}}
+    calls = []
+    monkeypatch.setattr(server, "_dispatch_tool", lambda *a: calls.append(1) or {"ok": True, "result": {}})
+    assert invoke(tool, action_id="slot.one")["code"] == "OK"
+    assert invoke(tool, action_id="slot.two")["code"] == "OK"
+    with pytest.raises(HTTPException) as caught:
+        invoke(tool, action_id="slot.three")
+    assert caught.value.status_code == 429
+    assert calls == [1, 1]
+
+
+def test_legacy_event_without_journal_row_still_consumes_capacity(tool, monkeypatch):
+    tool["policy"] = {"usage_limits": {"max_per_minute": 1}}
+    control_plane.event("tool_executed", "info", "tool", tool["id"], "legacy", {"ok": True})
+    monkeypatch.setattr(server, "_dispatch_tool", lambda *a: pytest.fail("legacy usage was ignored"))
+    with pytest.raises(HTTPException) as caught:
+        invoke(tool, action_id="after.legacy")
+    assert caught.value.status_code == 429
+    assert journal.get("after.legacy") is None
+
+
 def test_failed_journal_commit_cannot_dispatch_or_consume_approval(tool, monkeypatch):
     tool["authorization"] = "owner_confirmation"
     request = control_plane.create_verification_request("Run", "exact", "actor", "tool",
@@ -98,6 +167,21 @@ def test_failed_journal_commit_cannot_dispatch_or_consume_approval(tool, monkeyp
     monkeypatch.setattr(server, "_dispatch_tool", lambda *a: pytest.fail("dispatched without record"))
     with pytest.raises(sqlite3.IntegrityError):
         invoke(tool, approval_request_id=request["id"])
+    assert control_plane.get("request", request["id"])["payload"]["binding"]["consumed_at"] is None
+
+
+def test_rate_limited_dispatch_does_not_consume_approval(tool, monkeypatch):
+    tool["authorization"] = "owner_confirmation"
+    tool["policy"] = {"usage_limits": {"max_per_minute": 1}}
+    monkeypatch.setattr(server, "_dispatch_tool", lambda *a: {"ok": True, "result": {}})
+    assert invoke({**tool, "authorization": "auto"}, action_id="capacity.owner")["code"] == "OK"
+    request = control_plane.create_verification_request(
+        "Run", "exact", "actor", "tool", "act", {}, 1, actor_id="agent",
+    )
+    control_plane.decide_request(request["id"], "approved", "owner")
+    with pytest.raises(HTTPException) as caught:
+        invoke(tool, action_id="capacity.denied", approval_request_id=request["id"])
+    assert caught.value.status_code == 429
     assert control_plane.get("request", request["id"])["payload"]["binding"]["consumed_at"] is None
 
 
