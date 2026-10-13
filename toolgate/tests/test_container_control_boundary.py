@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import builtin_capabilities, definitions, invocation, server
+from toolgate.api import builtin_capabilities, definitions, invocation, models
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -34,7 +34,7 @@ def setup(tmp_path, monkeypatch):
 
 
 def payload(**changes):
-    return server.V2Invoke(**{
+    return models.V2Invoke(**{
         "action_id": "container-action-01", "args": {"container_id": ID, "action": "restart"},
         **changes,
     })

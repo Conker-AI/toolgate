@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server
+from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, models, server
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.executors import system_inventory
@@ -100,7 +100,7 @@ def test_failed_read_is_durable_failure_not_unknown_effect(setup, monkeypatch):
         raise system_inventory.InventoryError("not_configured")
 
     monkeypatch.setattr(system_inventory, "collect", unavailable)
-    body = server.V2Invoke(action_id="unconfigured-inventory", args={})
+    body = models.V2Invoke(action_id="unconfigured-inventory", args={})
     result = tools_routes.run_tool("system.inventory", body, agent)
     assert result["code"] == "TOOL_UNAVAILABLE"
     assert result["result"]["error_code"] == "not_configured"

@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import builtin_capabilities, definitions, invocation, server
+from toolgate.api import builtin_capabilities, definitions, invocation, models, server
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -37,14 +37,14 @@ def setup(tmp_path, monkeypatch):
 
 
 def review(agent):
-    response = server.create_port_review(server.PortReviewRequest(
+    response = server.create_port_review(models.PortReviewRequest(
         container_id=CID, operation="create", mapping=MAPPING), agent)
     assert response.headers["cache-control"] == "no-store"
     return json.loads(response.body)
 
 
 def payload(review_id, **changes):
-    return server.V2Invoke(**{"action_id": "change-1",
+    return models.V2Invoke(**{"action_id": "change-1",
                              "args": {"container_id": CID, "review_id": review_id}, **changes})
 
 

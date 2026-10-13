@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import definitions, server
+from toolgate.api import definitions, models
 from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -24,7 +24,7 @@ def save(identity, document, **fields):
 
 
 def run(agent, **fields):
-    return automations_routes.run_automation("graph", server.V2Invoke(action_id="graph-run", published_version=1, **fields), agent)
+    return automations_routes.run_automation("graph", models.V2Invoke(action_id="graph-run", published_version=1, **fields), agent)
 
 
 def test_published_graph_dispatches_pinned_tool_with_receipts_and_replay(registry):
@@ -48,7 +48,7 @@ def test_graph_requires_publication_and_live_scopes(registry):
     _, agent = registry
     save("graph", linear(("result", "return", {"value": 3})))
     with pytest.raises(HTTPException) as error:
-        automations_routes.run_automation("graph", server.V2Invoke(action_id="no-publication"), agent)
+        automations_routes.run_automation("graph", models.V2Invoke(action_id="no-publication"), agent)
     assert error.value.detail["code"] == "PUBLICATION_REQUIRED"
     pub.publish("automation", "graph", 1)
     agent = cp.update_agent_key_scopes(agent["id"], [])

@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import invocation, server
+from toolgate.api import invocation, models, server
 from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -37,7 +37,7 @@ def nested(tmp_path, monkeypatch):
 
 
 def run(agent, version=1, action="root-action"):
-    return automations_routes.run_automation("root", server.V2Invoke(action_id=action, published_version=version), agent)
+    return automations_routes.run_automation("root", models.V2Invoke(action_id=action, published_version=version), agent)
 
 
 def test_nested_snapshot_is_old_exact_definition_with_parent_receipts(nested):
@@ -185,7 +185,7 @@ def test_root_confirmation_binds_nested_publications(nested):
         pub.publish("automation", "root", root["version"])
     root = cp.update_automation("root", {**root, "authorization": "owner_confirmation"})
     publication = pub.publish("automation", "root", root["version"])
-    payload = server.V2Invoke(action_id="approval", published_version=root["version"])
+    payload = models.V2Invoke(action_id="approval", published_version=root["version"])
     pending = automations_routes.run_automation("root", payload, agent)
     view = owner.get(pending["request_id"])
     assert view["action"]["publication"]["automations"] == pub.automation_bindings(publication)
@@ -233,7 +233,7 @@ def test_nested_paid_leaves_share_root_job_ceiling(nested):
     spending.configure(True, 20_000_000, 1_100_000)
     spending.set_price(spending.MODEL, 1_000_000, 2_000_000, time.time() + 3600, "https://provider.example/pricing")
     job = spending.create_job(agent["id"], "paid-root", 1_100_000)["job_id"]
-    payload = server.V2Invoke(action_id="paid-root", published_version=root["version"], job_id=job)
+    payload = models.V2Invoke(action_id="paid-root", published_version=root["version"], job_id=job)
     result = automations_routes.run_automation("root", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN" and len(calls) == 1
     with cp._conn() as conn:

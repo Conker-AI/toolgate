@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import invocation, server
+from toolgate.api import invocation, models, server
 from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -39,7 +39,7 @@ def test_mid_workflow_revocation_stops_next_child_without_scope_union(flow, monk
         revoke(agent, change)
         return {"ok": True, "result": {}}
     monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
-    payload = server.V2Invoke(action_id="root", published_version=published_version)
+    payload = models.V2Invoke(action_id="root", published_version=published_version)
     result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN"
     assert calls == ["child"]
@@ -73,7 +73,7 @@ def test_revoked_actor_cannot_consume_previously_approved_request(flow, monkeypa
     agent, _ = flow
     definition = cp.get("automation", "flow")
     cp.update_automation("flow", {**definition, "authorization": "owner_confirmation"})
-    payload = server.V2Invoke(action_id="approved")
+    payload = models.V2Invoke(action_id="approved")
     pending = automations_routes.run_automation("flow", payload, agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]

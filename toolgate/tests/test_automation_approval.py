@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import invocation, server
+from toolgate.api import invocation, models
 from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -17,7 +17,7 @@ def flow(tmp_path, monkeypatch):
                               {"type": "condition", "left": 1, "operator": "equals", "right": 1,
                                "then": [{"type": "tool_call", "tool_id": "child"}]}]})
     agent, _ = cp.issue_agent_key("Caller", ["automation:flow"])
-    payload = server.V2Invoke(action_id="root")
+    payload = models.V2Invoke(action_id="root")
     pending = automations_routes.run_automation("flow", payload, agent)
     cp.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]

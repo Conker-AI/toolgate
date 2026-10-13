@@ -4,7 +4,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import models, server
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -19,10 +19,10 @@ from toolgate.tests.test_port_spec import CID, MAPPING
 @pytest.fixture
 def pending(request):
     daemon, agent, key = request.getfixturevalue("boundary_setup")
-    response = server.create_port_review(server.PortReviewRequest(
+    response = server.create_port_review(models.PortReviewRequest(
         container_id=CID, operation="create", mapping=MAPPING), agent)
     rid = json.loads(response.body)["reviewId"]
-    payload = server.V2Invoke(action_id="change-1", args={"container_id": CID, "review_id": rid})
+    payload = models.V2Invoke(action_id="change-1", args={"container_id": CID, "review_id": rid})
     approval = tools_routes.run_tool("system.port-control", payload, agent)
     cp.decide_request(approval["request_id"], "approved", "owner")
     payload.approval_request_id = approval["request_id"]
