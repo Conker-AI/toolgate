@@ -267,7 +267,7 @@ def test_process_death_after_effect_leaves_durable_unknown(tool, tmp_path):
     code = """
 import os, sys
 from pathlib import Path
-from toolgate.api import server
+from toolgate.api import invocation
 from toolgate.core import control_plane
 control_plane.DB_PATH = Path(sys.argv[1])
 def dispatch(tool, args):
