@@ -41,8 +41,6 @@ from toolgate.api.models import (
     OwnerDecision,
     PortFinalizationRequest,
     PortReviewRequest,
-    SecretCreate,
-    SecretUpdate,
     V2Automation,
     V2Invoke,
     V2Publish,
@@ -56,6 +54,7 @@ from toolgate.api.models import (
 )
 from toolgate.api.routes.health import router as _health_router
 from toolgate.api.routes.spending import router as _spending_router
+from toolgate.api.routes.vault import router as _vault_router
 from toolgate.api.version import SERVICE_VERSION
 from toolgate.api.workflows import _automation_input_errors, _run_workflow_steps
 from toolgate.core import (
@@ -200,49 +199,7 @@ def startup():
 app.include_router(_health_router)
 
 
-@app.get("/auth/check")
-def auth_check(_tier: str = Depends(require_admin)):
-    return {"tier": "admin"}
-
-
-@app.get("/vault/secrets")
-def list_secrets(_tier: str = Depends(require_admin)):
-    return vault.list_placeholders()
-
-
-@app.post("/vault/secrets")
-def create_secret(payload: SecretCreate, _tier: str = Depends(require_admin)):
-    try:
-        vault.set_secret(payload.name, payload.value, allow_existing=False)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-    control_plane.event("secret_created", "info", "secret", payload.name, "admin")
-    return {"name": payload.name}
-
-
-@app.put("/vault/secrets/{name}")
-def update_secret(name: str, payload: SecretUpdate, _tier: str = Depends(require_admin)):
-    try:
-        vault.set_secret(name, payload.value, allow_existing=True)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-    control_plane.event("secret_updated", "warning", "secret", name, "admin")
-    return {"name": name}
-
-
-@app.delete("/vault/secrets/{name}")
-def delete_secret(name: str, _tier: str = Depends(require_admin)):
-    try:
-        vault.delete_secret(name)
-    except KeyError:
-        raise HTTPException(404, "secret not found") from None
-    control_plane.event("secret_deleted", "warning", "secret", name, "admin")
-    return {"name": name}
-
-
-@app.post("/settings/keys/admin/rotate")
-def rotate_control_key(_tier: str = Depends(require_admin)):
-    return {"which": "admin", "key": vault.rotate_control_key("TOOLGATE_ADMIN_KEY")}
+app.include_router(_vault_router)
 
 
 @app.get("/v2/status")
