@@ -56,6 +56,7 @@ from toolgate.api.models import (
     VerificationMethodCreate,
 )
 from toolgate.api.routes.spending import router as _spending_router
+from toolgate.api.version import SERVICE_VERSION
 from toolgate.api.workflows import _automation_input_errors, _run_workflow_steps
 from toolgate.core import (
     control_plane,
@@ -85,8 +86,6 @@ from toolgate.executors import (
     process_control,
 )
 from toolgate.executors.port_plan import PlanError
-
-SERVICE_VERSION = "0.4.0"
 
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
 

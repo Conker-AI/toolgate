@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import server, version
 from toolgate.core import control_plane, vault
 
 
@@ -90,7 +90,7 @@ class HealthTests(unittest.TestCase):
         # The module contract requires this module's own version, not the API
         # revision - a dashboard reading one field for both is wrong everywhere.
         self.assertEqual(body["service"], "toolgate")
-        self.assertEqual(body["version"], server.SERVICE_VERSION)
+        self.assertEqual(body["version"], version.SERVICE_VERSION)
         self.assertEqual({name: check["status"] for name, check in body["checks"].items()}, {
             "control_plane_db": "ok", "vault": "ok",
             "searxng": "ok", "memorygate": "ok", "generation": "ok",
