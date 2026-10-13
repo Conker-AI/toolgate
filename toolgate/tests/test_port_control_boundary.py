@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import vault
@@ -49,7 +49,7 @@ def payload(review_id, **changes):
 
 def test_full_review_owner_approval_real_executor_receipt_replay(setup):
     daemon, agent, _ = setup
-    server.require_valid_tool_definition(cp.get("tool", TOOL))
+    definitions.require_valid_tool_definition(cp.get("tool", TOOL))
     selected = review(agent)
     assert selected["preview"]["execution"] == "owner_approval_required"
     pending = server.run_tool(TOOL, payload(selected["reviewId"]), agent)
@@ -118,5 +118,5 @@ def test_reserved_definition_cannot_bypass_approval(setup, change):
     else:
         tool["id"] = "other-tool"
     with pytest.raises(HTTPException):
-        server.require_valid_tool_definition(tool)
+        definitions.require_valid_tool_definition(tool)
     assert not server._dispatch_tool(tool, {})["ok"]

@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control
@@ -94,11 +94,11 @@ def test_revocation_after_approval_prevents_dispatch(setup):
 def test_reconfiguration_cannot_silently_remove_review_or_change_executor(setup):
     _, calls = setup
     tool = cp.get("tool", TOOL)
-    assert server.tool_definition_errors(tool) == []
+    assert definitions.tool_definition_errors(tool) == []
     for changes in ({"authorization": "auto"}, {"execution": {"type": "echo"}},
                     {"execution": {"type": "container_control", "socket": "/other"}}):
         changed = {**copy.deepcopy(tool), **changes}
-        assert server.tool_definition_errors(changed)
+        assert definitions.tool_definition_errors(changed)
         assert server._dispatch_tool(changed, payload().args)["ok"] is False
     assert calls == []
 

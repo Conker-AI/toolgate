@@ -3,7 +3,7 @@ import unittest
 
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import definitions, server
 
 
 class WorkflowValueTests(unittest.TestCase):
@@ -13,7 +13,7 @@ class WorkflowValueTests(unittest.TestCase):
                 "started_at": server.time.monotonic(), "runtime_ceiling": 5}
 
     def run_steps(self, steps, state):
-        self.assertEqual([], server.workflow_definition_errors(steps))
+        self.assertEqual([], definitions.workflow_definition_errors(steps))
         return server._run_workflow_steps(steps, state, "test", False)
 
     def test_membership_selects_the_matching_branch(self):

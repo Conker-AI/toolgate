@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.executors import filesystem_inventory as files
 
@@ -45,10 +45,10 @@ def test_read_requires_scope_and_reuses_saved_receipt(setup):
 def test_reserved_name_and_root_override_are_rejected(setup):
     _, _, calls = setup
     tool = cp.get("tool", TOOL)
-    assert server.tool_definition_errors(tool) == []
+    assert definitions.tool_definition_errors(tool) == []
     for execution in ({"type": "echo"}, {"type": "filesystem_inventory", "root": "/"}):
         changed = {**tool, "execution": execution}
-        assert server.tool_definition_errors(changed)
+        assert definitions.tool_definition_errors(changed)
         assert server._dispatch_tool(changed, {"root_id": "project"})["ok"] is False
     assert server._dispatch_tool(tool, {"root_id": "project", "command": "read"})["ok"] is False
     assert calls == []

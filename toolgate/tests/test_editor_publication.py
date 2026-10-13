@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import server
+from toolgate.api import definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import publications as pub
@@ -32,7 +32,7 @@ def test_published_graph_dispatches_pinned_tool_with_receipts_and_replay(registr
                       ("result", "return", {"value": "$steps.call.message"}))
     document["inputs"] = [{"name": "message", "type": "string", "required": True}]
     save("graph", document, inputs=document["inputs"])
-    published = pub.publish("automation", "graph", 1, validate=server.require_valid_automation_definition)
+    published = pub.publish("automation", "graph", 1, validate=definitions.require_valid_automation_definition)
     cp.update_tool("echo", {**tool, "execution": {"type": "local_echo"}})
     result = run(agent, args={"message": "$args.not_a_reference"})
     assert result["code"] == "OK", result
