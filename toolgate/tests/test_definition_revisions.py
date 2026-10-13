@@ -5,7 +5,7 @@ from threading import Barrier
 import pytest
 from fastapi.testclient import TestClient
 
-from toolgate.api import server
+from toolgate.api import deps, server
 from toolgate.core import control_plane as cp
 
 
@@ -84,7 +84,7 @@ def test_concurrent_legacy_updates_cannot_reuse_versions(database, kind):
 
 @pytest.mark.parametrize("kind", ["tool", "automation"])
 def test_http_conflict_validation_and_legacy_compatibility(database, kind):
-    server.app.dependency_overrides[server.require_admin] = lambda: "admin"
+    server.app.dependency_overrides[deps.require_admin] = lambda: "admin"
     try:
         client = TestClient(server.app)  # No lifespan: no bootstrap/provider activity.
         body = {"id": "item", "name": "Item", "execution": {"type": "echo"}} if kind == "tool" else {"id": "item", "workflow": []}
@@ -106,5 +106,5 @@ def test_http_conflict_validation_and_legacy_compatibility(database, kind):
             assert client.put(url + "/item", json={**body, "expected_version": invalid}).status_code == 422
         assert cp.get(kind, "item")["version"] == 3
     finally:
-        server.app.dependency_overrides.pop(server.require_admin, None)
+        server.app.dependency_overrides.pop(deps.require_admin, None)
 

@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import invocation, models, server
+from toolgate.api import deps, invocation, models, server
 from toolgate.api.routes import automations as automations_routes
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
@@ -151,7 +151,7 @@ def test_root_deadline_survives_nested_entry(nested, monkeypatch):
     changed = cp.update_automation("root", {**root, "policy": {"usage_limits": {"max_runtime_seconds": 3}}})
     pub.publish("automation", "root", changed["version"])
     now = [0]
-    monkeypatch.setattr(server.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
     def dispatch(tool, args):
         calls.append(tool)
         now[0] = 4
@@ -262,7 +262,7 @@ def test_nested_arguments_resolve_explicitly_without_sharing_variables(nested):
 
 def test_http_nested_authoring_and_publication_contract(nested):
     client = TestClient(server.app)
-    server.app.dependency_overrides[server.require_admin] = lambda: "admin"
+    server.app.dependency_overrides[deps.require_admin] = lambda: "admin"
     try:
         definition = {"id": "http-parent", "name": "HTTP parent", "description": "Nested source contract",
                       "status": "active", "workflow": [call("child")]}
@@ -275,4 +275,4 @@ def test_http_nested_authoring_and_publication_contract(nested):
         assert client.put("/v2/automations/http-parent", json=invalid).status_code == 422
         assert cp.get("automation", "http-parent")["version"] == 1
     finally:
-        server.app.dependency_overrides.pop(server.require_admin, None)
+        server.app.dependency_overrides.pop(deps.require_admin, None)

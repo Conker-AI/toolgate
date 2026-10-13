@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import invocation, models, server
+from toolgate.api import deps, invocation, models, server
 from toolgate.api.routes import automations as automations_routes
 from toolgate.api.routes import tools as tools_routes
 from toolgate.core import control_plane as cp
@@ -108,7 +108,7 @@ def test_live_approval_cannot_authorize_published_tool(published):
 
 def test_http_missing_publication_never_falls_back_and_validation_is_strict(published):
     _, _, agent, calls = published
-    server.app.dependency_overrides[server.require_agent] = lambda: agent
+    server.app.dependency_overrides[deps.require_agent] = lambda: agent
     try:
         client = TestClient(server.app)
         url = "/v2/automations/flow/run"
@@ -118,7 +118,7 @@ def test_http_missing_publication_never_falls_back_and_validation_is_strict(publ
         assert client.post(url, json={"published_version": 1}).status_code == 422
         assert calls == []
     finally:
-        server.app.dependency_overrides.pop(server.require_agent, None)
+        server.app.dependency_overrides.pop(deps.require_agent, None)
 
 
 def test_current_scope_and_lockdown_still_apply(published):

@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
@@ -172,7 +173,7 @@ class ControlPlaneTests(unittest.TestCase):
             "secret_ref": "GOOGLE_API_KEY", "prompt_template": "Review {prompt}",
             "max_tokens": 800, "temperature": 0, "timeout_seconds": 60,
         }
-        with patch.object(server.vault, "get_key", return_value="secret-value"), patch.object(server.httpx, "post", return_value=response) as post:
+        with patch.object(server.vault, "get_key", return_value="secret-value"), patch.object(httpx, "post", return_value=response) as post:
             result = dispatch._execute_gemini(execution, {"prompt": "public evidence"})
         self.assertTrue(result["ok"])
         self.assertEqual('{"decision":"reject"}', result["result"]["text"])
@@ -929,7 +930,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual([], definitions.workflow_definition_errors(workflow))
         state = {"automation_id": "test", "args": {"base": 3, "items": ["a", "b"], "mode": "fast"},
                  "vars": {}, "last": None, "results": [], "count": 0, "max_steps": 50,
-                 "started_at": server.time.monotonic(), "runtime_ceiling": 5}
+                 "started_at": time.monotonic(), "runtime_ceiling": 5}
         result = workflows._run_workflow_steps(workflow, state, "test", False)
         self.assertEqual({"total": 5, "large": True, "last": "b", "speed": 2}, result["result"])
 
@@ -943,7 +944,7 @@ class ControlPlaneTests(unittest.TestCase):
 
         state = {"automation_id": "test", "args": {"items": [1, 2]}, "vars": {}, "last": None,
                  "results": [], "count": 0, "max_steps": 1,
-                 "started_at": server.time.monotonic(), "runtime_ceiling": 5}
+                 "started_at": time.monotonic(), "runtime_ceiling": 5}
         with self.assertRaises(HTTPException) as raised:
             workflows._run_workflow_steps([
                 {"type": "set", "name": "one", "value": 1},
