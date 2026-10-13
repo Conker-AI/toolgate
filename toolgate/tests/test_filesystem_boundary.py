@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import definitions, server
+from toolgate.api import builtin_capabilities, definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.executors import filesystem_inventory as files
 
@@ -15,7 +15,7 @@ TOOL = "system.files-list"
 def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setenv("TOOLGATE_FILE_ROOTS", json.dumps({"project": "/configured/project"}))
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     agent, key = cp.issue_agent_key("Directory reader", [f"tool:{TOOL}"])
     calls = []
 
@@ -63,7 +63,7 @@ def test_root_discovery_is_scoped_and_configuration_only(setup):
     assert response.json()["mode"] == "configured"
     assert response.headers["cache-control"] == "no-store" and calls == []
     cp.create_tool({**cp.get("tool", TOOL), "status": "disabled"})
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     assert client.get(route, headers={"X-ToolGate-Execution-Key": key}).json()["roots"] == []
 
 

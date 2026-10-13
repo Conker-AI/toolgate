@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import definitions, server
+from toolgate.api import builtin_capabilities, definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import vault
@@ -24,7 +24,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOLGATE_VAULT_SALT", "a1" * 16)
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", "/synthetic/docker.sock")
     monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", json.dumps([CID]))
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     daemon = Daemon()
     inspect, execute = port_control.inspect_review, port_control.execute
     monkeypatch.setattr(port_control, "inspect_review", lambda *args, **kw: inspect(

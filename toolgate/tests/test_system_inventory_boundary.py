@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import definitions, server
+from toolgate.api import builtin_capabilities, definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.executors import system_inventory
 from toolgate.tests.test_system_inventory import Stream, envelope
@@ -19,7 +19,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "system.db")
     monkeypatch.setenv("TOOLGATE_SYSTEMGATE_URL", "http://systemgate.internal:8040")
     monkeypatch.setenv("TOOLGATE_SYSTEMGATE_KEY", "synthetic-private-key")
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     actual = system_inventory.collect
     requests = []
 
@@ -74,7 +74,7 @@ def test_owner_disabled_definition_is_not_reenabled_on_registration(setup):
     cp.create_tool(
         {**tool, "status": "disabled", "authorization": "owner_confirmation"}
     )
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     saved = cp.get("tool", "system.inventory")
     assert saved["status"] == "disabled"
     assert saved["authorization"] == "owner_confirmation"

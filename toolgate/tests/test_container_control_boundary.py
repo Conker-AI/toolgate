@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from toolgate.api import definitions, server
+from toolgate.api import builtin_capabilities, definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control
@@ -19,7 +19,7 @@ TOOL = "system.container-control"
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     calls = []
 
     def execute(container_id, action):
@@ -105,7 +105,7 @@ def test_reconfiguration_cannot_silently_remove_review_or_change_executor(setup)
 
 def test_registration_preserves_disabled_owner_definition(setup):
     cp.create_tool({**cp.get("tool", TOOL), "status": "disabled"})
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     assert cp.get("tool", TOOL)["status"] == "disabled"
 
 
@@ -113,7 +113,7 @@ def test_actual_adapter_through_approval_and_journal(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", "/synthetic/docker.sock")
     monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", json.dumps([ID]))
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     agent, _ = cp.issue_agent_key("Managed containers", [f"tool:{TOOL}"])
     requests = []
 

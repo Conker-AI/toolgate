@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import definitions, server
+from toolgate.api import builtin_capabilities, definitions, server
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import process_control
@@ -19,7 +19,7 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setenv("TOOLGATE_SYSTEMD_SCOPE", "user")
     monkeypatch.setenv("TOOLGATE_MANAGED_SERVICE_UNITS", json.dumps(["worker.service"]))
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     agent, key = cp.issue_agent_key("Service controls", [f"tool:{TOOL}"])
     calls = []
 
@@ -106,7 +106,7 @@ def test_discovery_is_scoped_and_not_a_live_observation(setup):
     assert response.json()["observed"] is False
     assert response.headers["cache-control"] == "no-store" and calls == []
     cp.create_tool({**cp.get("tool", TOOL), "status": "disabled"})
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     assert client.get(route, headers={"X-ToolGate-Execution-Key": key}).json()["services"] == []
 
 
@@ -115,7 +115,7 @@ def test_actual_adapter_runs_fixed_arguments_behind_approved_journal(tmp_path, m
     monkeypatch.setenv("TOOLGATE_SYSTEMD_SCOPE", "user")
     monkeypatch.setenv("TOOLGATE_MANAGED_SERVICE_UNITS", json.dumps(["worker.service"]))
     monkeypatch.setattr(process_control.os, "geteuid", lambda: 1000, raising=False)
-    server.ensure_builtin_system_capabilities()
+    builtin_capabilities.ensure_builtin_system_capabilities()
     agent, _ = cp.issue_agent_key("Service controls", [f"tool:{TOOL}"])
     invocations = []
 

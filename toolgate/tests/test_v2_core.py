@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import httpx
 from fastapi import HTTPException
 
-from toolgate.api import definitions, server
+from toolgate.api import builtin_capabilities, definitions, server
 from toolgate.core import control_plane
 from toolgate.executors import research
 
@@ -146,7 +146,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertIn("requires declared inputs", "; ".join(definitions.tool_definition_errors(research_tool)))
 
     def test_builtin_approval_test_echo_is_local_and_redacted(self):
-        server.ensure_builtin_research_capabilities()
+        builtin_capabilities.ensure_builtin_research_capabilities()
         tool = control_plane.get("tool", "approval.test-echo")
 
         self.assertEqual(tool["authorization"], "owner_confirmation")
@@ -767,7 +767,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertTrue(control_plane.validate_inputs(schema, {"ids": [valid[0], valid[0]]}))
 
     def test_builtin_research_tool_includes_new_safe_sources(self):
-        server.ensure_builtin_research_capabilities()
+        builtin_capabilities.ensure_builtin_research_capabilities()
         tool = control_plane.get("tool", "research.search")
         source = next(field for field in tool["inputs"] if field["name"] == "source")
         self.assertIn("youtube", source["allowed_values"])
