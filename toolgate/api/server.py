@@ -5,7 +5,7 @@ import json
 import os
 import sqlite3
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,17 +15,13 @@ from toolgate.api.builtin_capabilities import (
     ensure_builtin_research_capabilities,
     ensure_builtin_system_capabilities,
 )
-from toolgate.api.deps import deny, require_admin, require_agent, require_owner
-from toolgate.api.models import (
-    OwnerDecision,
-    V2Request,
-    V2RequestDecision,
-)
+from toolgate.api.deps import require_admin, require_agent
 from toolgate.api.routes.agent_keys import router as _agent_keys_router
 from toolgate.api.routes.automations import router as _automations_router
 from toolgate.api.routes.editor import router as _editor_router
 from toolgate.api.routes.health import router as _health_router
 from toolgate.api.routes.publications import router as _publications_router
+from toolgate.api.routes.requests import router as _requests_router
 from toolgate.api.routes.services import router as _services_router
 from toolgate.api.routes.settings import router as _settings_router
 from toolgate.api.routes.spending import router as _spending_router
@@ -298,121 +294,10 @@ def agent_automation_info(automation_id: str, agent: dict = Depends(require_agen
     return item
 
 
-@app.get("/v2/requests")
-def list_requests(_tier: str = Depends(require_admin)):
-    return control_plane.list_objects("request")
-
-
-@app.get("/v2/owner/requests", dependencies=[Depends(require_owner)])
-def owner_requests(
-    limit: int = Query(default=50, ge=1, le=200),
-    cursor: str | None = Query(
-        default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"
-    ),
-):
-    return owner_channel.list_requests(limit, cursor)
+app.include_router(_requests_router)
 
 
 app.include_router(_editor_router)
-
-
-@app.get("/v2/owner/requests/{request_id}", dependencies=[Depends(require_owner)])
-def owner_request(request_id: str):
-    return owner_channel.get(request_id)
-
-
-@app.post("/v2/owner/requests/{request_id}/decision", dependencies=[Depends(require_owner)])
-def owner_decision(request_id: str, payload: OwnerDecision):
-    return owner_channel.decide(request_id, payload.status, payload.note)
-
-
-@app.post("/v2/requests")
-def create_agent_request(payload: V2Request, agent: dict = Depends(require_agent)):
-    if control_plane.settings().get("lockdown"):
-        deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423)
-    if payload.kind == "ai_draft":
-        deny(
-            "AI_DRAFT_RETIRED",
-            "AI drafts belong in Pi",
-            410,
-            "Use the owner tools API to register a reviewed capability",
-        )
-    try:
-        return control_plane.create_request(
-            payload.kind,
-            payload.title,
-            payload.details,
-            agent["name"],
-            {**payload.payload, "created_by_agent_key": agent["id"]},
-            payload.severity,
-        )
-    except ValueError as exc:
-        deny(
-            "REQUEST_KIND_INVALID",
-            str(exc),
-            422,
-            "Invoke the exact tool or automation to request confirmation",
-        )
-
-
-@app.get("/v2/agent/requests/{request_id}")
-def agent_request_status(request_id: str, agent: dict = Depends(require_agent)):
-    request = control_plane.get("request", request_id)
-    if not request or request.get("payload", {}).get("created_by_agent_key") != agent["id"]:
-        raise HTTPException(404, "request not found")
-    return {
-        "id": request["id"],
-        "kind": request["kind"],
-        "status": request["status"],
-        "title": request["title"],
-        "created_at": request["created_at"],
-        "decision": request.get("decision"),
-    }
-
-
-@app.post("/v2/admin/requests")
-def create_admin_request(payload: V2Request, _tier: str = Depends(require_admin)):
-    if payload.kind == "ai_draft":
-        deny(
-            "AI_DRAFT_RETIRED",
-            "AI drafts belong in Pi",
-            410,
-            "Use the owner tools API to register a reviewed capability",
-        )
-    try:
-        return control_plane.create_request(
-            payload.kind, payload.title, payload.details, "admin", payload.payload, payload.severity
-        )
-    except ValueError as exc:
-        deny(
-            "REQUEST_KIND_INVALID",
-            str(exc),
-            422,
-            "Invoke the exact tool or automation to request confirmation",
-        )
-
-
-@app.post("/v2/requests/{request_id}/decision")
-def decide_request(
-    request_id: str, payload: V2RequestDecision, _tier: str = Depends(require_admin)
-):
-    if payload.status not in {"approved", "rejected", "dismissed"}:
-        raise HTTPException(400, "status must be approved, rejected, or dismissed")
-    existing = control_plane.get("request", request_id)
-    if existing and existing.get("kind") == "ai_draft":
-        deny(
-            "AI_DRAFT_RETIRED",
-            "Legacy AI drafts are read-only history",
-            410,
-            "Export /v2/archives/ai and recreate the capability through the owner tools API",
-        )
-    try:
-        record = control_plane.decide_request(request_id, payload.status, "admin", payload.note)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from None
-    if not record:
-        raise HTTPException(404, "request not found")
-    return record
 
 
 @app.get("/v2/events")
