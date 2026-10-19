@@ -1,5 +1,5 @@
 # Files that were over the 600-line limit when toolgate/scripts/check_file_sizes.py arrived.
 # Each may only shrink; delete its line once it is under the limit. Never add a line.
 toolgate/core/control_plane.py 800
-toolgate/executors/research.py 1453
+toolgate/executors/research.py 1310
 toolgate/tests/test_v2_core.py 1016
