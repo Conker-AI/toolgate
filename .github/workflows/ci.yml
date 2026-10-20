@@ -10,6 +10,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Read-only token: CI checks code; nothing here writes to the repository or packages.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
