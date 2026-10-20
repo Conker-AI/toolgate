@@ -405,7 +405,8 @@ class ControlPlaneTests(unittest.TestCase):
                 }]}}
             return response
 
-        with patch.object(research.httpx, "get", side_effect=fake_get) as request:
+        # A frozen clock keeps a slow runner from reaching the search deadline before every topic is read.
+        with patch.object(research.httpx, "get", side_effect=fake_get) as request,              patch.object(research.time, "monotonic", return_value=0.0):
             rows = research._discourse("invoice reconciliation workflow", "discourse", 6, 365, 5)
         self.assertEqual(len(research.DISCOURSE_HOSTS), len(rows))
         self.assertEqual(set(research.DISCOURSE_HOSTS), {row["community"] for row in rows})
