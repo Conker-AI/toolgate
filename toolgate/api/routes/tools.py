@@ -29,7 +29,8 @@ def get_tool(tool_id: str, _tier: str = Depends(require_admin)):
 def create_tool(payload: V2Tool, _tier: str = Depends(require_admin)):
     body = payload.model_dump()
     require_valid_tool_definition(body)
-    tool = control_plane.create_tool(body)
+    # Creating needs no version; replacing an existing tool needs the one the caller saw.
+    tool = control_plane.create_tool(body, require_absent=body.get("expected_version") is None)
     control_plane.event("tool_saved", "info", "tool", tool["id"], "admin")
     return tool
 

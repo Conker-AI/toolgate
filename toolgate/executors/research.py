@@ -15,7 +15,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from toolgate.core import control_plane, vault
+from toolgate.core import control_plane, research_cache, vault
 from toolgate.core.public_https import public_client, public_url
 from toolgate.executors.research_text import (
     clean_text,
@@ -1139,11 +1139,11 @@ def search(query: str, source: str, limit: int, recency_days: int) -> dict:
             "results": [],
             "notice": "Search completed safely but found no matching results.",
         }
-    control_plane.purge_expired_research_results()
+    research_cache.purge_expired_research_results()
     expires_at = datetime.now(UTC) + timedelta(hours=24)
     output = []
     for row in rows:
-        record = control_plane.cache_research_result(row, expires_at.isoformat())
+        record = research_cache.cache_research_result(row, expires_at.isoformat())
         output.append({
             key: value for key, value in {**row, "result_id": record["id"], "url": row["url"]}.items()
             if key != "document"
@@ -1196,7 +1196,7 @@ def search_bundle(query: str, sources: list[str], limit_per_source: int, recency
 
 
 def fetch(result_id: str, max_chars: int = 12000) -> dict:
-    record = control_plane.get_research_result(result_id)
+    record = research_cache.get_research_result(result_id)
     if not record:
         raise ResearchError("research result handle was not found")
     try:

@@ -81,7 +81,7 @@ OK = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\np
 
 
 def handle(monkeypatch, url="https://example.com/page"):
-    monkeypatch.setattr(research.control_plane, "get_research_result", lambda _: {
+    monkeypatch.setattr(research.research_cache, "get_research_result", lambda _: {
         "url": url, "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
     })
 
