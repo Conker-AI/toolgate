@@ -17,6 +17,7 @@ from toolgate.executors import (
     mcp_http,
     process_control,
     research,
+    research_base,
     system_inventory,
 )
 
@@ -265,7 +266,7 @@ def _execute_research_bundle(execution: dict, args: dict) -> dict:
 
 def _execute_research_fetch(args: dict) -> dict:
     try:
-        result = research.fetch(args["result_id"], args.get("max_chars", 12000))
+        result = research_base.fetch(args["result_id"], args.get("max_chars", 12000))
     except research.ResearchError as exc:
         deny(
             "RESEARCH_FETCH_DENIED", str(exc), 422, "Run research.search and use a fresh result_id"
@@ -275,7 +276,7 @@ def _execute_research_fetch(args: dict) -> dict:
 
 def _execute_research_fetch_batch(args: dict) -> dict:
     try:
-        result = research.fetch_batch(args["result_ids"], args.get("max_chars", 3500))
+        result = research_base.fetch_batch(args["result_ids"], args.get("max_chars", 3500))
     except research.ResearchError as exc:
         deny("RESEARCH_FETCH_DENIED", str(exc), 422, "Run research.search and use fresh result IDs")
     return {"ok": True, "result": result}

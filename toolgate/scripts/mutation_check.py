@@ -207,7 +207,7 @@ MUTANTS.extend([('dispatch without a committed record',
   'if False:',
   'toolgate/tests/test_spending.py::test_unaccounted_paid_routes_never_reach_network[memorygate]'),
  ('paid Tavily fallback reenabled',
-  'toolgate/executors/research.py',
+  'toolgate/executors/research_web.py',
   ('    raise ResearchError("Tavily is disabled until it has a bounded spending adapter; use '
   'SearXNG")'),
   '    return _tavily_unmetered(query, source, limit, recency_days, timeout)',
