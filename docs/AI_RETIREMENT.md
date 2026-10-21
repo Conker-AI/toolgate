@@ -55,7 +55,7 @@ AI-draft promotion, the AI Builder and unused planning modal, and MCP skill/cont
 injection. There is no dormant orchestration engine behind a switch.
 
 Kept: bounded search/fetch adapters, including deterministic source profiles and
-fallbacks, now under `toolgate/executors/research.py`; typed Ollama/Gemini calls;
+fallbacks, now under `toolgate/executors/research*.py`; typed Ollama/Gemini calls;
 owner-authored deterministic workflows; owner-only capability registration; the
 ordinary approval boundary. Search contains no LLM planner. Atomic generation
 returns text and usage, never dispatches model-selected tools or owns a session.

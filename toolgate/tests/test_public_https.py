@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from toolgate.api import dispatch, server
 from toolgate.api.routes import services as services_routes
 from toolgate.core import public_https
-from toolgate.executors import research
+from toolgate.executors import research, research_base
 
 
 def answers(*addresses):
@@ -27,9 +27,9 @@ def answers(*addresses):
 ])
 def test_private_answers_are_denied_everywhere(address, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers(address))
-    assert not research._public_https_url("https://public-looking.example/page")
+    assert not research_base._public_https_url("https://public-looking.example/page")
     assert not dispatch._public_destination("public-looking.example")
-    assert research._normalize("title", "https://public-looking.example", "text", "web") is None
+    assert research_base._normalize("title", "https://public-looking.example", "text", "web") is None
     with pytest.raises(HTTPException) as denied:
         dispatch._execute_http_json({"url": "https://public-looking.example/page",
                                    "allowed_hosts": ["public-looking.example"]}, {})
@@ -104,7 +104,7 @@ def test_dns_rebinding_is_denied_before_socket_connect(monkeypatch):
     connections, _, _ = network(monkeypatch, [OK])
     handle(monkeypatch)
     with pytest.raises(research.ResearchError):
-        research.fetch("issued-handle")
+        research_base.fetch("issued-handle")
     assert connections == []
 
 
@@ -123,7 +123,7 @@ def test_redirect_chain_never_contacts_private_target(location, monkeypatch):
     connections, _, _ = network(monkeypatch, responses)
     handle(monkeypatch)
     with pytest.raises(research.ResearchError, match="redirect"):
-        research.fetch("issued-handle")
+        research_base.fetch("issued-handle")
     assert connections == [("93.184.216.34", 443), ("93.184.216.34", 443)]
 
 
@@ -131,7 +131,7 @@ def test_public_fetch_still_returns_content(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers("93.184.216.34"))
     network(monkeypatch, [OK])
     handle(monkeypatch)
-    assert "public" in research.fetch("issued-handle")["content"]
+    assert "public" in research_base.fetch("issued-handle")["content"]
 
 
 def test_public_health_probe_cannot_rebind_into_tailnet(monkeypatch):
