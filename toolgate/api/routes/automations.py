@@ -36,7 +36,10 @@ def get_automation(automation_id: str, _tier: str = Depends(require_admin)):
 def create_automation(payload: V2Automation, _tier: str = Depends(require_admin)):
     body = payload.model_dump()
     require_valid_automation_definition(body)
-    automation = control_plane.create_automation(body)
+    # Creating needs no version; replacing an existing workflow needs the one the caller saw.
+    automation = control_plane.create_automation(
+        body, require_absent=body.get("expected_version") is None
+    )
     control_plane.event("automation_saved", "info", "automation", automation["id"], "admin")
     return automation
 

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 
 from toolgate.api import builtin_capabilities, definitions, dispatch, invocation, server, workflows
 from toolgate.api.routes import agent as agent_routes
-from toolgate.core import control_plane
+from toolgate.core import control_plane, research_cache
 from toolgate.executors import research
 
 
@@ -405,7 +405,7 @@ class ControlPlaneTests(unittest.TestCase):
                 }]}}
             return response
 
-        with patch.object(research.httpx, "get", side_effect=fake_get) as request:
+        with patch.object(research.httpx, "get", side_effect=fake_get) as request,              patch.object(research.time, "monotonic", return_value=0.0):
             rows = research._discourse("invoice reconciliation workflow", "discourse", 6, 365, 5)
         self.assertEqual(len(research.DISCOURSE_HOSTS), len(rows))
         self.assertEqual(set(research.DISCOURSE_HOSTS), {row["community"] for row in rows})
@@ -740,7 +740,7 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertNotIn("private-google-key", str(rows))
 
     def test_cached_provider_snapshot_is_scanned_without_network_fetch(self):
-        row = control_plane.cache_research_result({
+        row = research_cache.cache_research_result({
             "title": "Comment", "url": "https://www.youtube.com/watch?v=abcdefghijk",
             "source": "youtube", "document": "A manual workflow takes three hours every day.",
         }, "2099-01-01T00:00:00+00:00")
@@ -752,7 +752,7 @@ class ControlPlaneTests(unittest.TestCase):
         client.assert_not_called()
 
     def test_bounded_batch_fetch_scans_multiple_server_handles(self):
-        rows = [control_plane.cache_research_result({
+        rows = [research_cache.cache_research_result({
             "title": f"Result {index}", "url": f"https://example.com/{index}",
             "source": "general", "document": f"Manual workflow evidence {index}.",
         }, "2099-01-01T00:00:00+00:00") for index in range(2)]
@@ -898,19 +898,19 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(2, request.call_count)
 
     def test_research_fetch_requires_a_server_issued_handle(self):
-        self.assertIsNone(control_plane.get_research_result("https://example.com"))
+        self.assertIsNone(research_cache.get_research_result("https://example.com"))
         with patch.object(research, "_public_https_url", return_value=True):
-            row = control_plane.cache_research_result(
+            row = research_cache.cache_research_result(
                 {"title": "Example", "url": "https://example.com", "source": "general"},
                 "2099-01-01T00:00:00+00:00",
             )
-        loaded = control_plane.get_research_result(row["id"])
+        loaded = research_cache.get_research_result(row["id"])
         self.assertEqual("https://example.com", loaded["url"])
-        control_plane.cache_research_result(
+        research_cache.cache_research_result(
             {"title": "Expired", "url": "https://example.com/old", "source": "general"},
             "2000-01-01T00:00:00+00:00",
         )
-        self.assertEqual(1, control_plane.purge_expired_research_results())
+        self.assertEqual(1, research_cache.purge_expired_research_results())
 
     def test_nested_workflow_executes_deterministically(self):
         workflow = [

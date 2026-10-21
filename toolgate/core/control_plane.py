@@ -107,7 +107,8 @@ class DefinitionConflict(ValueError):
 
 
 def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
-         require_existing: bool = False, connection=None) -> dict | None:
+         require_existing: bool = False, require_absent: bool = False,
+         connection=None) -> dict | None:
     now = _now()
     body = {**body, "id": obj_id}
     with (nullcontext(connection) if connection is not None else _conn()) as conn:
@@ -117,6 +118,9 @@ def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = N
         existing = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
         if require_existing and not existing:
             return None
+        if require_absent and existing:
+            # Replacing needs the version the caller saw; a blind upsert could undo an edit.
+            raise DefinitionConflict(_row(existing).get("version", 1))
         if definition:
             if expected_version is not None and (type(expected_version) is not int or expected_version < 1):
                 raise ValueError("expected_version must be a positive integer")
@@ -175,38 +179,6 @@ def remove(kind: str, obj_id: str) -> bool:
             if row:
                 retain_definition(conn, kind, _row(row))
         return conn.execute("DELETE FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).rowcount > 0
-
-
-def cache_research_result(result: dict, expires_at: str) -> dict:
-    """Store a short-lived search result for provenance-bound page fetching."""
-    result_id = "rr_" + secrets.token_urlsafe(18)
-    return _put("research_result", result_id, {
-        "title": result.get("title", ""),
-        "url": result["url"],
-        "source": result.get("source", "general"),
-        "published_at": result.get("published_at"),
-        "document": str(result.get("document", ""))[:20000] if result.get("document") else None,
-        "expires_at": expires_at,
-    })
-
-
-def get_research_result(result_id: str) -> dict | None:
-    if not isinstance(result_id, str) or not re.fullmatch(r"rr_[A-Za-z0-9_-]{20,40}", result_id):
-        return None
-    return get("research_result", result_id)
-
-
-def purge_expired_research_results(now: datetime | None = None) -> int:
-    cutoff = now or datetime.now(UTC)
-    removed = 0
-    for record in list_objects("research_result"):
-        try:
-            expired = datetime.fromisoformat(record["expires_at"]) <= cutoff
-        except (KeyError, TypeError, ValueError):
-            expired = True
-        if expired and remove("research_result", record["id"]):
-            removed += 1
-    return removed
 
 
 def event(event_type: str, severity: str = "info", subject_type: str | None = None,
@@ -504,34 +476,36 @@ def with_default_limits(policy: dict | None) -> dict:
     return policy
 
 
-def create_tool(body: dict, *, require_existing: bool = False) -> dict | None:
+def create_tool(body: dict, *, require_existing: bool = False,
+                require_absent: bool = False) -> dict | None:
     tool_id = body["id"]
     return _put("tool", tool_id, {"name": body.get("name", tool_id), "description": body.get("description", ""),
         "service_id": body.get("service_id"), "category": body.get("category", "controlled"),
         "inputs": body.get("inputs", []), "outputs": body.get("outputs", []),
         "execution": body.get("execution", {}), "policy": with_default_limits(body.get("policy")),
         "authorization": body.get("authorization", "auto"), "version": body.get("version", 1), "status": body.get("status", "active")},
-        expected_version=body.get("expected_version"), require_existing=require_existing)
+        expected_version=body.get("expected_version"), require_existing=require_existing,
+        require_absent=require_absent)
 
 
 def update_tool(tool_id: str, body: dict) -> dict | None:
     return create_tool({**body, "id": tool_id}, require_existing=True)
 
 
-def create_automation(body: dict, *, require_existing: bool = False) -> dict | None:
+def create_automation(body: dict, *, require_existing: bool = False,
+                      require_absent: bool = False) -> dict | None:
     automation_id = body["id"]
     return _put("automation", automation_id, {"name": body.get("name", automation_id),
         "description": body.get("description", ""), "inputs": body.get("inputs", []),
         "workflow": body.get("workflow", []), "policy": with_default_limits(body.get("policy")),
         "authorization": body.get("authorization", "auto"), "schedule": body.get("schedule"),
         "version": body.get("version", 1), "status": body.get("status", "draft")},
-        expected_version=body.get("expected_version"), require_existing=require_existing)
+        expected_version=body.get("expected_version"), require_existing=require_existing,
+        require_absent=require_absent)
 
 
 def update_automation(automation_id: str, body: dict) -> dict | None:
     return create_automation({**body, "id": automation_id}, require_existing=True)
-
-
 
 
 
