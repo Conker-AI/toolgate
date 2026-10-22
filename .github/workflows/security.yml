@@ -1,0 +1,67 @@
+name: Weekly security check
+
+# New vulnerabilities are published for code nobody touched, and CI only looks when code
+# changes. This checks every dependency this repository ships against the public advisory
+# databases each Monday and whenever those dependencies change, and fails loudly: a red run,
+# which GitHub emails to whoever last edited this schedule. GitHub pauses schedules in public
+# repositories after 60 days without a commit; "Run workflow" on the Actions tab resumes it.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths:
+      - ".github/workflows/security.yml"
+      - "toolgate/requirements.txt"
+      - "dashboard/package.json"
+      - "dashboard/package-lock.json"
+      - "dashboard/Dockerfile"
+  workflow_dispatch:
+
+# Read-only token: the check reads code and public advisories; it writes nothing.
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit
+        run: python -m pip install --quiet pip-audit==2.10.1
+
+      - name: Service requirements
+        # Resolved the way the image build resolves them, then checked package by package.
+        run: pip-audit --strict --progress-spinner off -r toolgate/requirements.txt
+
+  dashboard:
+    name: Dashboard dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.11.1"
+
+      - name: npm packages, moderate advisories and above
+        working-directory: dashboard
+        run: npm audit --audit-level=moderate
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: The dashboard image's Python server
+        # The image installs these pins inline, so read them from the Dockerfile itself.
+        run: |
+          python -m pip install --quiet pip-audit==2.10.1
+          grep -oE '[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.]*' dashboard/Dockerfile > "$RUNNER_TEMP/server.txt"
+          test -s "$RUNNER_TEMP/server.txt"
+          pip-audit --strict --progress-spinner off -r "$RUNNER_TEMP/server.txt"

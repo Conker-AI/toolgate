@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Update the dashboard's build tooling (Vite 8.3.5 and its dependencies) for published
+  advisories.
+- A weekly security check (`.github/workflows/security.yml`) audits every dependency this
+  repository ships against the public advisory databases each Monday and whenever they
+  change, and fails loudly.
+
 ## 0.4.0
 
 - Publish revision-safe workflow drafts, validation, immutable publications and
