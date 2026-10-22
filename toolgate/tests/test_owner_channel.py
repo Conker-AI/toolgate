@@ -8,9 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
+from toolgate.core import approvals, vault
 from toolgate.core import control_plane as cp
 from toolgate.core import owner_channel as owner
-from toolgate.core import vault
 
 KEY = "dedicated-owner-" + "x" * 40
 ADMIN = "operator-only-" + "a" * 40
@@ -30,7 +30,7 @@ def gate(tmp_path, monkeypatch):
 
 
 def mint(gate, args=None):
-    return cp.create_verification_request("Run example", "Review the exact invocation.", "Pi",
+    return approvals.create_verification_request("Run example", "Review the exact invocation.", "Pi",
         "tool", "example", {"text": "precise action"} if args is None else args, 1,
         actor_id=gate[1]["id"])
 
@@ -75,7 +75,7 @@ def test_fixed_projection_has_full_args_but_no_nonce_originating_key_or_unknown_
                    gate[1]["id"], KEY, ADMIN):
         assert hidden not in text
     # Informational messages can never masquerade as execution approvals.
-    other = cp.create_request("info", "Message", "No execution authority", "Pi", {"secret": "hidden"})
+    other = approvals.create_request("info", "Message", "No execution authority", "Pi", {"secret": "hidden"})
     assert detail(gate, other["id"]).status_code == 404
     assert decide(gate, other["id"]).status_code == 404
     assert len(gate[0].get("/v2/owner/requests", headers=HEADERS).json()["results"]) == 1
@@ -122,7 +122,7 @@ def test_expired_pending_remains_pending_but_can_only_be_rejected_or_dismissed(g
         def now(cls, tz=None):
             return datetime.now(UTC) - timedelta(hours=1)
     with monkeypatch.context() as context:
-        context.setattr(cp, "datetime", Past)
+        context.setattr(approvals, "datetime", Past)
         request = mint(gate)
     view = detail(gate, request["id"]).json()
     assert view["status"] == "pending" and view["unavailable_reason"] == "expired"
@@ -163,7 +163,7 @@ def test_concurrent_decisions_commit_one_transition_and_reconcile_by_detail(gate
 def test_consumption_cannot_be_undone_by_a_late_decision(gate):
     request = mint(gate)
     assert decide(gate, request["id"]).status_code == 200
-    assert cp.consume_verification(request["id"], "tool", "example", {"text": "precise action"},
+    assert approvals.consume_verification(request["id"], "tool", "example", {"text": "precise action"},
                                    1, "Pi", gate[1]["id"])[0]
     assert decide(gate, request["id"]).status_code == 409
     view = detail(gate, request["id"]).json()

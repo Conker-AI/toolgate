@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from toolgate.api.deps import deny, require_admin, require_agent, require_owner
 from toolgate.api.models import OwnerDecision, V2Request, V2RequestDecision
-from toolgate.core import control_plane, owner_channel
+from toolgate.core import approvals, control_plane, owner_channel
 
 router = APIRouter()
 
@@ -46,7 +46,7 @@ def create_agent_request(payload: V2Request, agent: dict = Depends(require_agent
             "Use the owner tools API to register a reviewed capability",
         )
     try:
-        return control_plane.create_request(
+        return approvals.create_request(
             payload.kind,
             payload.title,
             payload.details,
@@ -88,7 +88,7 @@ def create_admin_request(payload: V2Request, _tier: str = Depends(require_admin)
             "Use the owner tools API to register a reviewed capability",
         )
     try:
-        return control_plane.create_request(
+        return approvals.create_request(
             payload.kind, payload.title, payload.details, "admin", payload.payload, payload.severity
         )
     except ValueError as exc:
@@ -115,7 +115,7 @@ def decide_request(
             "Export /v2/archives/ai and recreate the capability through the owner tools API",
         )
     try:
-        record = control_plane.decide_request(request_id, payload.status, "admin", payload.note)
+        record = approvals.decide_request(request_id, payload.status, "admin", payload.note)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
     if not record:

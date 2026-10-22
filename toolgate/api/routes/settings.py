@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from toolgate.api.deps import deny, require_admin
 from toolgate.api.models import V2Settings, VerificationCallback, VerificationMethodCreate
-from toolgate.core import control_plane, legacy_archive, vault
+from toolgate.core import approvals, control_plane, legacy_archive, vault
 
 router = APIRouter()
 
@@ -139,7 +139,7 @@ def verification_callback(
     if payload.decision not in {"approved", "rejected"}:
         raise HTTPException(422, "decision must be approved or rejected")
     try:
-        record = control_plane.decide_request(
+        record = approvals.decide_request(
             payload.request_id, payload.decision, f"callback:{method['name']}"
         )
     except ValueError as exc:

@@ -76,14 +76,14 @@ MUTANTS = [
     ),
     (
         "forged verification accepted through generic requests",
-        "toolgate/core/control_plane.py",
+        "toolgate/core/approvals.py",
         "if kind not in INFORMATIONAL_REQUEST_KINDS:",
         'if kind not in INFORMATIONAL_REQUEST_KINDS and kind != "verification":',
         INTEGRITY + "test_execution_key_cannot_forge_approval_text_or_binding",
     ),
     (
         "stale decision overwrites consumption",
-        "toolgate/core/control_plane.py",
+        "toolgate/core/approvals.py",
         """    with _conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
@@ -272,7 +272,7 @@ MUTANTS.extend([('dispatch without a committed record',
 
 
 MUTANTS.extend([
-    ("automation child binding omitted", "toolgate/core/control_plane.py",
+    ("automation child binding omitted", "toolgate/core/approvals.py",
      'if binding.get("child_tools") != current:', 'if False:',
      "toolgate/tests/test_automation_approval.py::test_changed_child_invalidates_approval_without_consumption"),
     ("automation child snapshot discarded", "toolgate/api/routes/automations.py",

@@ -13,7 +13,7 @@ from toolgate.api.invocation import (
 from toolgate.api.models import V2Automation, V2Invoke
 from toolgate.api.routes.publications import _requested_publication
 from toolgate.api.workflows import _automation_input_errors, _run_workflow_steps
-from toolgate.core import control_plane, publications
+from toolgate.core import approvals, control_plane, publications
 from toolgate.core import execution_journal as journal
 
 router = APIRouter()
@@ -140,7 +140,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
     tool_snapshot = {}
     if authorization != "auto" and not payload.approval_request_id:
         expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
-        request = control_plane.create_verification_request(
+        request = approvals.create_verification_request(
             f"Run {automation['name']}",
             "Owner confirmation is required for this exact immutable automation run.",
             agent["name"],
@@ -169,12 +169,12 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
                 conn, "automation", automation_id, publication["version"]
             )["tools"]
         else:
-            tool_snapshot = control_plane.automation_tool_snapshot(
+            tool_snapshot = approvals.automation_tool_snapshot(
                 conn, automation_id, automation.get("version")
             )
         enforce_dispatch_usage_limits(conn, "automation", automation, "automation_executed")
         if authorization != "auto":
-            approval_granted, reason = control_plane.consume_verification_in_transaction(
+            approval_granted, reason = approvals.consume_verification_in_transaction(
                 conn,
                 payload.approval_request_id,
                 "automation",

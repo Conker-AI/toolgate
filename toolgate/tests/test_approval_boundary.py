@@ -16,7 +16,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
-from toolgate.core import control_plane, vault
+from toolgate.core import approvals, control_plane, vault
 
 ADMIN_KEY = "test-admin-key"
 TOOL_ID = "approval.boundary-echo"
@@ -140,7 +140,7 @@ class ApprovalBoundaryTests(unittest.TestCase):
         self.approve(request_id)
         # Advance time without rewriting an immutable approval or sleeping out its lifetime.
         future = datetime.now(UTC) + timedelta(seconds=901)
-        with patch("toolgate.core.control_plane.datetime") as clock:
+        with patch("toolgate.core.approvals.datetime") as clock:
             clock.now.return_value = future
             clock.fromisoformat.side_effect = datetime.fromisoformat
             self.assert_denied(self.invoke(self.agent_key, "hello", request_id), "has expired")
@@ -151,7 +151,7 @@ class ApprovalBoundaryTests(unittest.TestCase):
         agent = control_plane.authenticate_agent(self.agent_key)
 
         def consume():
-            return control_plane.consume_verification(
+            return approvals.consume_verification(
                 request_id, "tool", TOOL_ID, {"value": "hello"}, TOOL["version"],
                 agent["name"], agent["id"])
 

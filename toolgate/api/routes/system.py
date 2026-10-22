@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from toolgate.api.deps import deny, require_agent
 from toolgate.api.invocation import enforce_usage_limits, require_current_dispatch_authority
 from toolgate.api.models import PortFinalizationRequest, PortReviewRequest
-from toolgate.core import control_plane, port_finalization, port_reviews
+from toolgate.core import approvals, control_plane, port_finalization, port_reviews
 from toolgate.core import execution_journal as journal
 from toolgate.executors import (
     container_control,
@@ -103,7 +103,7 @@ def finalize_port_recovery(
         receipt = port_finalization.preview(payload.action_id, agent["id"])
         if not payload.approval_request_id:
             enforce_usage_limits("tool", tool, "port_finalization_requested")
-            request = control_plane.create_verification_request(
+            request = approvals.create_verification_request(
                 "Recover verified port replacement receipt",
                 "Restore the recorded successful result and release its reservation. "
                 "No container changes will run. Recovery may recheck Docker inspection. "
@@ -141,7 +141,7 @@ def finalize_port_recovery(
                 or current.get("execution") != {"type": "port_control"}
             ):
                 deny("POLICY_DENIED", "Port replacement policy changed", 403)
-            approved, reason = control_plane.consume_verification_in_transaction(
+            approved, reason = approvals.consume_verification_in_transaction(
                 conn,
                 payload.approval_request_id,
                 "tool",

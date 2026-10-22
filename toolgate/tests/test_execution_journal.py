@@ -7,7 +7,7 @@ from fastapi import HTTPException
 
 from toolgate.api import invocation, models, server
 from toolgate.api.routes import automations as automations_routes
-from toolgate.core import control_plane
+from toolgate.core import approvals, control_plane
 from toolgate.core import execution_journal as journal
 
 
@@ -158,9 +158,9 @@ def test_legacy_event_without_journal_row_still_consumes_capacity(tool, monkeypa
 
 def test_failed_journal_commit_cannot_dispatch_or_consume_approval(tool, monkeypatch):
     tool["authorization"] = "owner_confirmation"
-    request = control_plane.create_verification_request("Run", "exact", "actor", "tool",
+    request = approvals.create_verification_request("Run", "exact", "actor", "tool",
                                                         "act", {}, 1, actor_id="agent")
-    control_plane.decide_request(request["id"], "approved", "owner")
+    approvals.decide_request(request["id"], "approved", "owner")
     with control_plane._conn() as db:
         journal.initialize(db)
         db.execute("CREATE TRIGGER reject_dispatch BEFORE INSERT ON v2_actions "
@@ -176,10 +176,10 @@ def test_rate_limited_dispatch_does_not_consume_approval(tool, monkeypatch):
     tool["policy"] = {"usage_limits": {"max_per_minute": 1}}
     monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: {"ok": True, "result": {}})
     assert invoke({**tool, "authorization": "auto"}, action_id="capacity.owner")["code"] == "OK"
-    request = control_plane.create_verification_request(
+    request = approvals.create_verification_request(
         "Run", "exact", "actor", "tool", "act", {}, 1, actor_id="agent",
     )
-    control_plane.decide_request(request["id"], "approved", "owner")
+    approvals.decide_request(request["id"], "approved", "owner")
     with pytest.raises(HTTPException) as caught:
         invoke(tool, action_id="capacity.denied", approval_request_id=request["id"])
     assert caught.value.status_code == 429

@@ -30,6 +30,7 @@ from toolgate.api.routes.tools import router as _tools_router
 from toolgate.api.routes.vault import router as _vault_router
 from toolgate.api.version import SERVICE_VERSION
 from toolgate.core import (
+    approvals,
     control_plane,
     legacy_archive,
     owner_channel,
@@ -130,7 +131,7 @@ def startup():
             "AI archive migration failed; keep ToolGate stopped, preserve toolgate.db, "
             "and inspect the migration error before retrying"
         ) from exc
-    control_plane.invalidate_legacy_verifications()
+    approvals.invalidate_legacy_verifications()
     journal.recover_interrupted()
     generated = vault.ensure_control_keys()
     for name in generated:

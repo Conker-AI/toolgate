@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from toolgate.api import builtin_capabilities, definitions, invocation, models, server
 from toolgate.api.routes import tools as tools_routes
+from toolgate.core import approvals
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import process_control
@@ -41,7 +42,7 @@ def body(**changes):
 def approve(agent):
     result = tools_routes.run_tool(TOOL, body(), agent)
     assert result["code"] == "CONFIRMATION_REQUIRED"
-    cp.decide_request(result["request_id"], "approved", "owner")
+    approvals.decide_request(result["request_id"], "approved", "owner")
     return result["request_id"]
 
 

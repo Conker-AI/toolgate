@@ -13,7 +13,7 @@ import pytest
 import uvicorn
 
 from toolgate.api import server
-from toolgate.core import control_plane, vault
+from toolgate.core import approvals, control_plane, vault
 from toolgate.mcp import toolgate_mcp as bridge
 
 
@@ -117,7 +117,7 @@ def test_approvals_keep_identity_arguments_and_single_consumption(
         bridge._invoke("toolgate_request_status", {"request_id": request_id})["status"]
         == "pending"
     )
-    control_plane.decide_request(request_id, "approved", "admin")
+    approvals.decide_request(request_id, "approved", "admin")
     monkeypatch.setenv("TOOLGATE_EXECUTION_KEY", boundary["other_key"])
     with pytest.raises(RuntimeError, match="404"):
         bridge._invoke("toolgate_request_status", {"request_id": request_id})

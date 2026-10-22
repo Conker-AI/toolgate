@@ -12,7 +12,13 @@ from toolgate.api.invocation import (
     invoke_tool,
     require_current_dispatch_authority,
 )
-from toolgate.core import control_plane, editor_execution, editor_publication, publications
+from toolgate.core import (
+    approvals,
+    control_plane,
+    editor_execution,
+    editor_publication,
+    publications,
+)
 from toolgate.core import execution_journal as journal
 
 
@@ -288,7 +294,7 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             time.sleep(float(step.get("seconds", 0)))
             result = {"code": "DELAY_COMPLETE", "seconds": step.get("seconds", 0)}
         elif kind == "notification":
-            notification = control_plane.create_request(
+            notification = approvals.create_request(
                 "update",
                 step.get("title", "Automation update"),
                 str(_workflow_value(step.get("message", "Automation notification"), state)),

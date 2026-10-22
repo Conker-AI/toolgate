@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from toolgate.api import models, server
 from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
-from toolgate.core import control_plane as cp
+from toolgate.core import approvals
 from toolgate.core import execution_journal as journal
 from toolgate.executors import port_recovery
 from toolgate.tests.test_port_control import Stream
@@ -25,7 +25,7 @@ def pending(request):
     rid = json.loads(response.body)["reviewId"]
     payload = models.V2Invoke(action_id="change-1", args={"container_id": CID, "review_id": rid})
     approval = tools_routes.run_tool("system.port-control", payload, agent)
-    cp.decide_request(approval["request_id"], "approved", "owner")
+    approvals.decide_request(approval["request_id"], "approved", "owner")
     payload.approval_request_id = approval["request_id"]
     return daemon, agent, key, payload
 
