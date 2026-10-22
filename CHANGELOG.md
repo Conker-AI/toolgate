@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.5.0
+
+- Add owner-reviewed external MCP tools: `/v2/owner/mcp/discover`, `/import`, `/tools`, and
+  each tool's `state` and `access`. Discovery and import pin each tool's schema and never
+  grant an execution scope; the owner enables a tool and its access separately. Bounded
+  nullable and alternative input schemas are supported; unsupported tools are isolated, and
+  a server that echoes a decoded credential back is detected.
+- **Contract change:** replacing an existing tool or workflow through `POST /v2/tools` or
+  `POST /v2/automations` now needs `expected_version`, checked under the same lock as the
+  write (409 `DEFINITION_CONFLICT` otherwise), so a stale save can no longer replace a newer
+  edit. Creating a new definition still needs no version.
+- `server.py` is split into router modules, and approvals, invocation, dispatch, definitions
+  and the research executor live in their own modules. Routes, models and behaviour are
+  unchanged; the mutation drill follows the moved code and runs on every build.
 - Update the dashboard's build tooling (Vite 8.3.5 and its dependencies) for published
   advisories.
 - A weekly security check (`.github/workflows/security.yml`) audits every dependency this
