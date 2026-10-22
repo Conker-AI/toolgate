@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from toolgate.api import deps, invocation, models, server
 from toolgate.api.routes import automations as automations_routes
-from toolgate.core import control_plane, spending
+from toolgate.core import approvals, control_plane, spending
 from toolgate.core import execution_journal as journal
 from toolgate.executors import research
 
@@ -122,9 +122,9 @@ def test_uncertain_billing_keeps_reservation_across_restart(paid, monkeypatch, m
 def test_budget_denial_rolls_back_approval_and_dispatch_together(paid, monkeypatch):
     job = setup_budget(cap=1)
     paid["authorization"] = "owner_confirmation"
-    request = control_plane.create_verification_request("Run", "exact", "Actor", "tool", "paid", {}, 1,
+    request = approvals.create_verification_request("Run", "exact", "Actor", "tool", "paid", {}, 1,
                                                         actor_id="agent")
-    control_plane.decide_request(request["id"], "approved", "owner")
+    approvals.decide_request(request["id"], "approved", "owner")
     calls = provider(monkeypatch)
     with pytest.raises(HTTPException) as error:
         invoke(paid, job, approval_request_id=request["id"])

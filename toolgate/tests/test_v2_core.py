@@ -8,7 +8,7 @@ import httpx
 from fastapi import HTTPException
 
 from toolgate.api import definitions, dispatch, server, workflows
-from toolgate.core import control_plane
+from toolgate.core import approvals, control_plane
 
 
 class ControlPlaneTests(unittest.TestCase):
@@ -40,22 +40,22 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertIn("'extra' is not an allowed argument", errors)
 
     def test_verification_is_bound_to_action_and_consumed_once(self):
-        request = control_plane.create_verification_request(
+        request = approvals.create_verification_request(
             "Run test", "Bound action", "agent", "tool", "echo", {"value": 3}, 2, 60, "agent-key"
         )
-        control_plane.decide_request(request["id"], "approved", "owner")
+        approvals.decide_request(request["id"], "approved", "owner")
 
-        changed, reason = control_plane.consume_verification(
+        changed, reason = approvals.consume_verification(
             request["id"], "tool", "echo", {"value": 4}, 2, "agent", "agent-key"
         )
         self.assertFalse(changed)
         self.assertIn("does not match", reason)
 
-        approved, reason = control_plane.consume_verification(
+        approved, reason = approvals.consume_verification(
             request["id"], "tool", "echo", {"value": 3}, 2, "agent", "agent-key"
         )
         self.assertTrue(approved, reason)
-        replayed, reason = control_plane.consume_verification(
+        replayed, reason = approvals.consume_verification(
             request["id"], "tool", "echo", {"value": 3}, 2, "agent", "agent-key"
         )
         self.assertFalse(replayed)
@@ -63,18 +63,18 @@ class ControlPlaneTests(unittest.TestCase):
 
 
     def test_verification_consumption_is_bound_to_creator_agent_key(self):
-        request = control_plane.create_verification_request(
+        request = approvals.create_verification_request(
             "Run test", "Bound actor", "agent one", "tool", "echo", {"value": 3}, 2, 60, "agent-key-1"
         )
-        control_plane.decide_request(request["id"], "approved", "owner")
+        approvals.decide_request(request["id"], "approved", "owner")
 
-        stolen, reason = control_plane.consume_verification(
+        stolen, reason = approvals.consume_verification(
             request["id"], "tool", "echo", {"value": 3}, 2, "agent two", "agent-key-2"
         )
         self.assertFalse(stolen)
         self.assertIn("originating agent", reason)
 
-        approved, reason = control_plane.consume_verification(
+        approved, reason = approvals.consume_verification(
             request["id"], "tool", "echo", {"value": 3}, 2, "agent one", "agent-key-1"
         )
         self.assertTrue(approved, reason)

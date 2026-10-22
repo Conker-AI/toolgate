@@ -2,9 +2,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import invocation, server
+from toolgate.core import approvals, publications
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import publications
 
 
 @pytest.mark.parametrize("kind", ["tool", "automation"])
@@ -33,7 +33,7 @@ def test_version_digest_precondition_precedes_approval_and_dispatch(tmp_path, mo
     pending = client.post(url, headers=headers, json=payload)
     assert pending.status_code == 200 and pending.json()["code"] == "CONFIRMATION_REQUIRED"
     request_id = pending.json()["request_id"]
-    cp.decide_request(request_id, "approved", "owner")
+    approvals.decide_request(request_id, "approved", "owner")
     payload["approval_request_id"] = request_id
     assert client.post(url, headers=headers, json={**payload, "expected_publication_digest": "0" * 64}).status_code == 409
     assert cp.get("request", request_id)["payload"]["binding"]["consumed_at"] is None

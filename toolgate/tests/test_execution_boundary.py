@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
-from toolgate.core import control_plane, legacy_archive, vault
+from toolgate.core import approvals, control_plane, legacy_archive, vault
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def store(tmp_path, monkeypatch):
         "admin",
         {"session_id": "original-session"},
     )
-    ordinary = control_plane.create_request(
+    ordinary = approvals.create_request(
         "warning", "Still relevant", "Retain in queue", "admin"
     )
     return ordinary

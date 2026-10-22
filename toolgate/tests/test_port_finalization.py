@@ -7,7 +7,13 @@ from fastapi.testclient import TestClient
 from toolgate.api import models, server
 from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
-from toolgate.core import container_lineage, owner_channel, port_finalization, port_replacements
+from toolgate.core import (
+    approvals,
+    container_lineage,
+    owner_channel,
+    port_finalization,
+    port_replacements,
+)
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control
@@ -116,7 +122,7 @@ def test_http_recovery_requires_own_exact_approval_and_replays_receipt(request, 
                        headers=headers).status_code == 409
     approved_body = {**body, "approval_request_id": rid}
     assert client.post(url, json=approved_body, headers=headers).status_code == 409
-    cp.decide_request(rid, "approved", "owner")
+    approvals.decide_request(rid, "approved", "owner")
     done = client.post(url, json=approved_body, headers=headers)
     assert done.status_code == 200 and done.json()["code"] == "OK", done.text
     assert done.headers["cache-control"] == "no-store"
@@ -235,7 +241,7 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
     count = len(daemon.requests)
     pending = system_routes.finalize_port_recovery(body, agent)
     rid = json.loads(pending.body)["request_id"]
-    cp.decide_request(rid, "approved", "owner")
+    approvals.decide_request(rid, "approved", "owner")
     body.approval_request_id = rid
     original_command = daemon.replacement["Config"]["Cmd"]
     daemon.replacement["Config"]["Cmd"] = ["changed-after-review"]

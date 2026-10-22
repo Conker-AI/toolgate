@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 from toolgate.api import builtin_capabilities, definitions, invocation, models, server
 from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
+from toolgate.core import approvals, vault
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import vault
 from toolgate.executors import container_control, port_control
 from toolgate.tests.test_port_control import Daemon
 from toolgate.tests.test_port_spec import CID, MAPPING
@@ -60,7 +60,7 @@ def test_full_review_owner_approval_real_executor_receipt_replay(setup):
     request = cp.get("request", pending["request_id"])
     assert "private-value" not in json.dumps(request)
     assert "8080" in json.dumps(request)
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     approved = payload(selected["reviewId"], approval_request_id=pending["request_id"])
     result = tools_routes.run_tool(TOOL, approved, agent)
     assert result["code"] == "OK", result
@@ -89,7 +89,7 @@ def test_changed_review_cannot_borrow_approval(setup):
     daemon, agent, _ = setup
     first, second = review(agent), review(agent)
     pending = tools_routes.run_tool(TOOL, payload(first["reviewId"]), agent)
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     with pytest.raises(HTTPException):
         tools_routes.run_tool(TOOL, payload(second["reviewId"], approval_request_id=pending["request_id"]), agent)
     assert journal.get("change-1") is None
@@ -100,7 +100,7 @@ def test_lost_reply_returns_unknown_and_never_replays(setup):
     daemon, agent, _ = setup
     selected = review(agent)
     pending = tools_routes.run_tool(TOOL, payload(selected["reviewId"]), agent)
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     daemon.fail = "/commit"
     approved = payload(selected["reviewId"], approval_request_id=pending["request_id"])
     result = tools_routes.run_tool(TOOL, approved, agent)

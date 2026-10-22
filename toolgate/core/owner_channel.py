@@ -9,8 +9,8 @@ import re
 import secrets
 from datetime import UTC, datetime
 
+from . import approvals, vault
 from . import control_plane as cp
-from . import vault
 
 OWNER_HASH = "TOOLGATE_OWNER_KEY_SHA256"
 ARGUMENT_BYTES = 32768
@@ -97,7 +97,7 @@ def project(db, record):
     binding = payload.get("binding")
     binding = binding if isinstance(binding, dict) else {}
     try:
-        origin_valid = cp._verification_origin_valid(db, record)
+        origin_valid = approvals._verification_origin_valid(db, record)
     except (ValueError, TypeError, AttributeError, RecursionError):
         origin_valid = False
     subject_type = binding.get("subject_type")
@@ -136,7 +136,7 @@ def project(db, record):
         try:
             publication = publications.for_execution(db, subject_type, subject_id, version)
             if (binding["publication_digest"] != publication["digest"]
-                    or binding.get("child_tools") != cp.child_bindings(publication["tools"])
+                    or binding.get("child_tools") != approvals.child_bindings(publication["tools"])
                     or binding.get("child_automations", {}) != publications.automation_bindings(publication)):
                 reason = "invalid_publication"
         except ValueError:
@@ -212,7 +212,7 @@ def decide(identity, status, note):
         if not view["approval"]["origin_valid"] or not permitted:
             raise OwnerError("not_reviewable", "This exact action cannot be approved from this view.")
     try:
-        record = cp.decide_request(identity, status, "gateway-owner", note, guard=guard)
+        record = approvals.decide_request(identity, status, "gateway-owner", note, guard=guard)
     except OwnerError:
         raise
     except ValueError:

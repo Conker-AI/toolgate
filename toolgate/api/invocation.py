@@ -6,7 +6,14 @@ from datetime import UTC, datetime
 
 from toolgate.api.deps import deny
 from toolgate.api.dispatch import _dispatch_tool, _render_template
-from toolgate.core import container_admission, control_plane, port_reviews, publications, spending
+from toolgate.core import (
+    approvals,
+    container_admission,
+    control_plane,
+    port_reviews,
+    publications,
+    spending,
+)
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control, mcp_http, port_control
 
@@ -170,7 +177,7 @@ def invoke_tool(
     needs_owner = authorization in {"owner_confirmation", "ai_review"} and not approval_granted
     if needs_owner and not approval_request_id:
         expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
-        request = control_plane.create_verification_request(
+        request = approvals.create_verification_request(
             f"Run {tool['name']}",
             (
                 "Replace the container using this exact inspected port change: "
@@ -216,7 +223,7 @@ def invoke_tool(
             )
         enforce_dispatch_usage_limits(conn, "tool", tool, "tool_executed")
         if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
-            approved, reason = control_plane.consume_verification_in_transaction(
+            approved, reason = approvals.consume_verification_in_transaction(
                 conn,
                 approval_request_id,
                 "tool",

@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
+from toolgate.core import approvals, mcp_imports, publications
 from toolgate.core import control_plane as cp
-from toolgate.core import mcp_imports, publications
 from toolgate.executors import mcp_http as mcp
 from toolgate.tests.mcp_peer import (
     ADMIN,
@@ -81,7 +81,7 @@ def approve(api):
     assert response.status_code == 200, response.text
     assert response.json()["code"] == "CONFIRMATION_REQUIRED"
     identity = response.json()["request_id"]
-    cp.decide_request(identity, "approved", "owner")
+    approvals.decide_request(identity, "approved", "owner")
     return identity
 
 

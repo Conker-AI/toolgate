@@ -5,9 +5,9 @@ from fastapi.testclient import TestClient
 
 from toolgate.api import invocation, models, server
 from toolgate.api.routes import automations as automations_routes
+from toolgate.core import approvals, publications
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import publications
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def test_revoked_actor_cannot_consume_previously_approved_request(flow, monkeypa
     cp.update_automation("flow", {**definition, "authorization": "owner_confirmation"})
     payload = models.V2Invoke(action_id="approved")
     pending = automations_routes.run_automation("flow", payload, agent)
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]
     cp.revoke_agent_key(agent["id"])
     calls = []

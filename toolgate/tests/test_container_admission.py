@@ -7,10 +7,10 @@ from fastapi import HTTPException
 from toolgate.api import invocation, models
 from toolgate.api.routes import system as system_routes
 from toolgate.api.routes import tools as tools_routes
+from toolgate.core import approvals, port_reviews
 from toolgate.core import container_admission as admission
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
-from toolgate.core import port_reviews
 from toolgate.executors import port_control
 from toolgate.tests.test_port_control_boundary import (
     setup as boundary_setup,  # noqa: F401
@@ -32,7 +32,7 @@ def ready(request):
     }
     for tool, payload in requests.items():
         pending = tools_routes.run_tool(tool, payload, agent)
-        cp.decide_request(pending["request_id"], "approved", "owner")
+        approvals.decide_request(pending["request_id"], "approved", "owner")
         payload.approval_request_id = pending["request_id"]
     return daemon, agent, rid, requests
 

@@ -13,8 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
+from toolgate.core import approvals, vault
 from toolgate.core import control_plane as cp
-from toolgate.core import vault
 from toolgate.tests.test_approval_boundary import TOOL, TOOL_ID
 
 
@@ -61,7 +61,7 @@ def mint(gate):
 
 def consume(gate, request_id):
     _, agent, _ = gate
-    return cp.consume_verification(
+    return approvals.consume_verification(
         request_id,
         "tool",
         TOOL_ID,
@@ -87,7 +87,7 @@ def test_execution_key_cannot_forge_approval_text_or_binding(gate):
                 "subject_type": "tool",
                 "subject_id": TOOL_ID,
                 "version": TOOL["version"],
-                "args_digest": cp.action_digest(
+                "args_digest": approvals.action_digest(
                     "tool", TOOL_ID, {"value": "real action"}, TOOL["version"]
                 ),
                 "nonce": "attacker-nonce",
@@ -110,7 +110,7 @@ def test_execution_key_cannot_forge_approval_text_or_binding(gate):
         headers={"X-ToolGate-Execution-Key": key},
     )
     assert response.status_code == 200
-    cp.decide_request(response.json()["id"], "approved", "admin")
+    approvals.decide_request(response.json()["id"], "approved", "admin")
     assert invoke(gate, response.json()["id"]).status_code == 409
     request_id = mint(gate)
     record = cp.get("request", request_id)
@@ -122,7 +122,7 @@ def test_execution_key_cannot_forge_approval_text_or_binding(gate):
         < expiry
         <= datetime.now(UTC) + timedelta(seconds=900)
     )
-    cp.decide_request(request_id, "approved", "admin")
+    approvals.decide_request(request_id, "approved", "admin")
     assert invoke(gate, request_id).json()["code"] == "OK"
 
 
@@ -159,7 +159,7 @@ def test_late_decision_cannot_restore_a_consumed_token(gate, monkeypatch):
 
     def late_decision():
         try:
-            cp.decide_request(request_id, "approved", "second owner interface")
+            approvals.decide_request(request_id, "approved", "second owner interface")
         except (ValueError, sqlite3.Error, AssertionError) as exc:
             errors.append(exc)
 
@@ -170,7 +170,7 @@ def test_late_decision_cannot_restore_a_consumed_token(gate, monkeypatch):
     try:
         assert read_pending.wait(5)
         try:
-            cp.decide_request(request_id, "approved", "first owner interface")
+            approvals.decide_request(request_id, "approved", "first owner interface")
             first = consume(gate, request_id)
         except sqlite3.OperationalError as exc:
             # The correct implementation owns the writer lock before reading pending.
@@ -194,7 +194,7 @@ def test_late_decision_cannot_restore_a_consumed_token(gate, monkeypatch):
 def test_generic_request_replacement_cannot_undo_consumption(gate):
     request_id = mint(gate)
     stale = cp.get("request", request_id)
-    cp.decide_request(request_id, "approved", "admin")
+    approvals.decide_request(request_id, "approved", "admin")
     assert consume(gate, request_id)[0]
     with pytest.raises(ValueError, match="cannot be replaced"):
         cp._put("request", request_id, stale)
@@ -248,14 +248,14 @@ def test_old_approvals_are_invalid_before_migration_and_cancelled_on_upgrade(gat
         cp._put("request", f"old-{status}", legacy)
         assert not consume(gate, f"old-{status}")[0]
     with pytest.raises(ValueError, match="not issued"):
-        cp.decide_request("old-pending", "approved", "admin")
-    assert cp.invalidate_legacy_verifications() == 2
-    assert cp.invalidate_legacy_verifications() == 0
+        approvals.decide_request("old-pending", "approved", "admin")
+    assert approvals.invalidate_legacy_verifications() == 2
+    assert approvals.invalidate_legacy_verifications() == 0
     for status in ("pending", "approved"):
         legacy = cp.get("request", f"old-{status}")
         assert legacy["status"] == "cancelled"
         assert legacy["title"] == "Unverifiable pre-upgrade text"
-    cp.decide_request(valid_id, "approved", "admin")
+    approvals.decide_request(valid_id, "approved", "admin")
     assert consume(gate, valid_id)[0]
 
 
@@ -273,7 +273,7 @@ def test_altered_issuance_cannot_be_approved_or_consumed(gate, field):
             (json.dumps(record), request_id),
         )
     with pytest.raises(ValueError, match="not issued"):
-        cp.decide_request(request_id, "approved", "admin")
+        approvals.decide_request(request_id, "approved", "admin")
 
 
 @pytest.mark.parametrize(
@@ -284,7 +284,7 @@ def test_audit_failure_rolls_back_the_request_transition(gate, phase):
     if phase != "request_created":
         request_id = mint(gate)
     if phase == "verification_consumed":
-        cp.decide_request(request_id, "approved", "admin")
+        approvals.decide_request(request_id, "approved", "admin")
     before = cp.list_objects("request")
     with cp._conn() as conn:
         conn.execute(f"""CREATE TRIGGER reject_audit BEFORE INSERT ON v2_events
@@ -293,7 +293,7 @@ def test_audit_failure_rolls_back_the_request_transition(gate, phase):
         if phase == "request_created":
             mint(gate)
         elif phase == "request_decided":
-            cp.decide_request(request_id, "approved", "admin")
+            approvals.decide_request(request_id, "approved", "admin")
         else:
             consume(gate, request_id)
     assert cp.list_objects("request") == before
@@ -358,7 +358,7 @@ def test_expired_requests_cannot_be_reported_as_approved(gate, monkeypatch):
         def now(cls, tz=None):
             return future
 
-    monkeypatch.setattr(cp, "datetime", Later)
+    monkeypatch.setattr(approvals, "datetime", Later)
     response = gate[0].post(
         f"/v2/requests/{request_id}/decision",
         json={"status": "approved"},

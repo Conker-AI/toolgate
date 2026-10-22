@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from toolgate.api import builtin_capabilities, definitions, invocation, models
 from toolgate.api.routes import tools as tools_routes
+from toolgate.core import approvals
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control
@@ -43,7 +44,7 @@ def payload(**changes):
 def approve(agent):
     pending = tools_routes.run_tool(TOOL, payload(), agent)
     assert pending["code"] == "CONFIRMATION_REQUIRED"
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     return pending["request_id"]
 
 

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from toolgate.api import deps, invocation, models, server
 from toolgate.api.routes import automations as automations_routes
 from toolgate.api.routes import tools as tools_routes
+from toolgate.core import approvals
 from toolgate.core import control_plane as cp
 from toolgate.core import execution_journal as journal
 from toolgate.core import owner_channel as owner
@@ -84,7 +85,7 @@ def test_confirmation_binds_publication_and_survives_definition_only_edits(publi
     pending = automations_routes.run_automation("flow", payload, agent)
     request = cp.get("request", pending["request_id"])
     assert request["payload"]["binding"]["publication_digest"] == pub.get("automation", "flow", 2, published=True)["digest"]
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]
     cp.update_tool("child", {**tool, "name": "Renamed after approval"})
     cp.update_automation("flow", {**flow, "name": "Renamed after approval"})
@@ -97,7 +98,7 @@ def test_live_approval_cannot_authorize_published_tool(published):
     tool = cp.update_tool("child", {**tool, "authorization": "owner_confirmation"})
     pub.publish("tool", "child", 2)
     pending = tools_routes.run_tool("child", models.V2Invoke(action_id="approve"), agent)
-    cp.decide_request(pending["request_id"], "approved", "owner")
+    approvals.decide_request(pending["request_id"], "approved", "owner")
     with pytest.raises(HTTPException) as error:
         tools_routes.run_tool("child", models.V2Invoke(action_id="approve", published_version=2,
                         approval_request_id=pending["request_id"]), agent)
@@ -142,7 +143,7 @@ def test_owner_published_review_projects_exact_target_and_rechecks_revocation(pu
     view = owner.get(pending["request_id"])
     assert view["reviewable"] and view["action"]["args"] == {"exact": "arguments"}
     assert view["action"]["publication"]["digest"] == publication["digest"]
-    assert view["action"]["publication"]["dependencies"] == cp.child_bindings({"child": tool})
+    assert view["action"]["publication"]["dependencies"] == approvals.child_bindings({"child": tool})
     cp.update_tool("child", {**tool, "authorization": "blocked"})
     assert owner.get(pending["request_id"])["unavailable_reason"] == "publication_unavailable"
     with pytest.raises(owner.OwnerError):
