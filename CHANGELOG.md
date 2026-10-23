@@ -8,6 +8,7 @@
   imports them, and their vendored copies had published advisories (wheel 0.45.1,
   jaraco.context 5.3.0) that the new image scan found. CI now checks that the built image
   still imports its app.
+- Compose pins SearXNG 2026.10.19, replacing a months-old digest the image scan flagged.
 
 ## 0.5.0
 
