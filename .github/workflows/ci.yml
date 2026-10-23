@@ -125,6 +125,16 @@ jobs:
       - name: Build
         run: docker build -t candidate:ci -f toolgate/Dockerfile .
 
+      - name: The image imports its app
+        # It carries no build tools (setuptools, wheel); prove the service needs none.
+        run: docker run --rm --entrypoint python candidate:ci -c "import toolgate.api.server"
+
+      - name: Scan the image
+        # Trivy, pinned by digest: HIGH or CRITICAL problems that already have a fix fail here,
+        # before the image can be published.
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \n            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa \n            image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \n            --exit-code 1 candidate:ci
+
       - name: Search it for anything secret
         run: |
           found=$(docker run --rm --entrypoint sh candidate:ci -c \
