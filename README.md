@@ -5,7 +5,7 @@ Typed tools, exact single-use approvals, spending limits and a receipt for every
 <p align="center">
   <a href="https://github.com/Conker-AI/toolgate/actions/workflows/ci.yml"><img src="https://github.com/Conker-AI/toolgate/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/python-3.12-3776AB" alt="Python 3.12" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="AGPL-3.0 license" /></a>
   <a href="https://github.com/Conker-AI/conker"><img src="https://img.shields.io/badge/part%20of-Conker-e36b2c" alt="Part of Conker" /></a>
 </p>
 
@@ -120,4 +120,4 @@ dashboard/           React owner dashboard
 
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0](LICENSE), version 3 only. Copyright (C) 2026 alexeybe1kin. Releases published before 24 October 2026 were under MIT and stay under MIT.
