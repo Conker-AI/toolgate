@@ -82,7 +82,7 @@ def test_scoped_catalogue_and_direct_call_cannot_escape(boundary):
     with pytest.raises(RuntimeError, match="unavailable"):
         call("secret.echo")
     # A client skipping discovery still meets the same server-side scope check.
-    with pytest.raises(RuntimeError, match="403"):
+    with pytest.raises(RuntimeError, match="404"):
         bridge._request(
             "POST", "/v2/tools/secret.echo/invoke", {"args": {"value": "hello"}}
         )

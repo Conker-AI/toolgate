@@ -1,0 +1,166 @@
+"""Owner access policy at the HTTP boundary: who may decide "run", the floor, tightening, no leaks."""
+
+import hashlib
+
+import pytest
+from fastapi.testclient import TestClient
+
+from toolgate.api import server
+from toolgate.core import access_policy
+from toolgate.core import control_plane as cp
+
+ADMIN = "access-policy-admin-key"
+OWNER = "access-policy-owner-key-" + "o" * 32
+
+
+def tool(tool_id, authorization="owner_confirmation", execution=None):
+    return {
+        "id": tool_id,
+        "name": tool_id,
+        "description": "Local echo for access policy tests.",
+        "category": "safe",
+        "inputs": [{"name": "value", "type": "string", "required": True}],
+        "outputs": [{"name": "proof", "type": "object"}],
+        "execution": execution or {"type": "local_echo"},
+        "policy": {"usage_limits": {"max_per_minute": 60, "max_per_hour": 600}},
+        "authorization": authorization,
+        "version": 1,
+        "status": "active",
+    }
+
+
+@pytest.fixture
+def api(tmp_path, monkeypatch):
+    monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
+    monkeypatch.setattr(server.vault, "get_control_key", lambda _: ADMIN)
+    monkeypatch.setenv("TOOLGATE_OWNER_KEY_SHA256", hashlib.sha256(OWNER.encode()).hexdigest())
+    for item in (
+        tool("echo.ask"),
+        tool("echo.auto", "auto"),
+        tool("echo.blocked", "blocked"),
+        tool("echo.hidden"),
+    ):
+        cp.create_tool(item)
+    pi, pi_key = cp.issue_agent_key("Pi", ["echo.ask", "echo.auto", "echo.blocked"])
+    _, other_key = cp.issue_agent_key("Other agent", ["echo.ask", "echo.auto"])
+    client = TestClient(server.app)
+    yield client, pi, pi_key, other_key
+    client.close()
+
+
+def owner(key=None):
+    return {"X-ToolGate-Owner-Key": OWNER, **({"X-ToolGate-Execution-Key": key} if key else {})}
+
+
+def invoke(client, key, tool_id, outcome=None, action="a1"):
+    body = {"args": {"value": "hi"}, "action_id": f"{action}-{tool_id}-{outcome}"}
+    if outcome:
+        body["decision"] = {"outcome": outcome, "decided_by": "chat", "reason": "Full access chat"}
+    return client.post(
+        f"/v2/tools/{tool_id}/invoke", json=body, headers={"X-ToolGate-Execution-Key": key}
+    )
+
+
+def delegate(client, key, enabled=True):
+    response = client.post(
+        "/v2/owner/access/delegate", json={"enabled": enabled}, headers=owner(key)
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"delegate": enabled}
+
+
+def asked(response):
+    return response.status_code == 200 and response.json().get("code") == "CONFIRMATION_REQUIRED"
+
+
+def ran(response):
+    return response.status_code == 200 and response.json().get("code") != "CONFIRMATION_REQUIRED"
+
+
+def test_run_is_ignored_until_the_owner_makes_the_key_a_delegate(api):
+    client, _, pi_key, _ = api
+    assert asked(invoke(client, pi_key, "echo.ask", "run"))
+    delegate(client, pi_key)
+    response = invoke(client, pi_key, "echo.ask", "run", action="a2")
+    assert ran(response), response.text
+    decided = cp.events(event_type="action_decided")
+    assert decided and decided[0]["payload"]["decided_by"] == "chat"
+    delegate(client, pi_key, enabled=False)
+    assert asked(invoke(client, pi_key, "echo.ask", "run", action="a3"))
+
+
+def test_another_key_cannot_decide_for_the_owner(api):
+    client, _, pi_key, other_key = api
+    delegate(client, pi_key)
+    assert asked(invoke(client, other_key, "echo.ask", "run"))
+
+
+def test_a_sensitive_tool_always_asks(api):
+    client, _, pi_key, _ = api
+    delegate(client, pi_key)
+    response = client.post(
+        "/v2/owner/tools/echo.ask/sensitive", json={"sensitive": True}, headers=owner()
+    )
+    assert response.status_code == 200 and response.json()["sensitive"] is True
+    assert asked(invoke(client, pi_key, "echo.ask", "run"))
+    listed = client.get("/v2/agent/tools", headers={"X-ToolGate-Execution-Key": pi_key}).json()
+    assert {item["id"]: item["sensitive"] for item in listed}["echo.ask"] is True
+    state = client.get("/v2/owner/access", headers=owner(pi_key)).json()
+    assert state["delegate"] is True and state["sensitive"] == ["echo.ask"]
+
+
+def test_system_controls_stay_on_the_floor(api):
+    for execution in access_policy.FLOOR_EXECUTIONS:
+        item = tool("system.x", execution={"type": execution})
+        decision = access_policy.Decision(outcome="run", decided_by="chat")
+        assert (
+            access_policy.resolve(item, "owner_confirmation", decision, {"id": "any"})
+            == "owner_confirmation"
+        )
+
+
+def test_anyone_may_tighten_and_blocked_stays_blocked(api):
+    client, _, pi_key, other_key = api
+    assert ran(invoke(client, other_key, "echo.auto"))
+    assert asked(invoke(client, other_key, "echo.auto", "ask"))
+    delegate(client, pi_key)
+    blocked = invoke(client, pi_key, "echo.blocked", "run")
+    assert blocked.status_code == 403 and blocked.json()["detail"]["code"] == "POLICY_DENIED"
+
+
+def test_out_of_scope_and_missing_tools_look_the_same(api):
+    client, _, pi_key, _ = api
+    hidden = invoke(client, pi_key, "echo.hidden")
+    missing = invoke(client, pi_key, "echo.nowhere")
+    assert hidden.status_code == missing.status_code == 404
+    assert (
+        hidden.json()["detail"]["message"] == missing.json()["detail"]["message"] == "No such tool"
+    )
+
+
+def test_owner_routes_need_the_owner_and_decisions_are_strict(api):
+    client, _, pi_key, _ = api
+    assert client.post(
+        "/v2/owner/access/delegate",
+        json={"enabled": True},
+        headers={"X-ToolGate-Execution-Key": pi_key},
+    ).status_code in (401, 403)
+    assert client.post(
+        "/v2/owner/tools/echo.ask/sensitive", json={"sensitive": True}
+    ).status_code in (401, 403)
+    assert (
+        client.post(
+            "/v2/owner/tools/echo.nowhere/sensitive", json={"sensitive": True}, headers=owner()
+        ).status_code
+        == 404
+    )
+    loose = client.post(
+        "/v2/tools/echo.ask/invoke",
+        json={
+            "args": {"value": "hi"},
+            "action_id": "strict-1",
+            "decision": {"outcome": "run", "decided_by": "chat", "approved": True},
+        },
+        headers={"X-ToolGate-Execution-Key": pi_key},
+    )
+    assert loose.status_code == 422
