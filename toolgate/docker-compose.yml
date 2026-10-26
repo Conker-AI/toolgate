@@ -7,6 +7,13 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8010:8010"
+    # The same lockdown as Conker's deployment: a read-only root, no capabilities, no privilege
+    # gain. Writable: the data and vault volumes and /tmp.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     volumes:
       - ./:/app/toolgate
       # The vault key lives on its own volume, never in the bind-mounted source

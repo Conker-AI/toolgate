@@ -12,6 +12,9 @@
   refuses sandbox-breaking commands before approval. New image `toolgate-sandbox`
   (`sandbox/Dockerfile`), published with each release. See docs/sandbox.md.
 
+- The compose service runs with a read-only root, every capability dropped and no-new-privileges
+  (`/tmp` is a tmpfs); CI's contract job runs it that way.
+
 - **Agent identities:** each agent acts under its own identity (`X-ToolGate-Agent`), scoped to its
   toolkit and capped by the key; tool lists, invocations and dispatch-time checks follow it. The
   owner can mint a key bound to one agent for its CLI or MCP (`/v2/owner/agents/{agent}/keys`),
