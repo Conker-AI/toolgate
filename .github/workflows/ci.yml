@@ -154,3 +154,31 @@ jobs:
             exit 1
           fi
           echo "clean: no .env, no database, no key material under /app"
+
+  sandbox:
+    # Every lockdown setting of the agent sandbox, asserted against the real Docker Engine:
+    # network, mounts, user, capabilities, read-only root, limits, the proxy allowlist and
+    # per-agent scoping. See sandbox/verify.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the images
+        run: |
+          docker build -t toolgate:verify -f toolgate/Dockerfile .
+          docker build -t toolgate-sandbox:verify sandbox
+      - name: Verify the sandbox
+        run: |
+          export SANDBOX_IMAGE=$(docker image inspect toolgate-sandbox:verify --format '{{.Id}}')
+          export DOCKER_GID=$(stat -c %g /var/run/docker.sock)
+          docker compose -f sandbox/verify/compose.yml --profile verify run --rm verifier
+      - name: Service logs
+        if: always()
+        run: docker compose -f sandbox/verify/compose.yml --profile verify logs --no-color || true
+      - name: Scan the sandbox image
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa \
+            image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+            --exit-code 1 toolgate-sandbox:verify
+      - if: always()
+        run: docker compose -f sandbox/verify/compose.yml --profile verify down -v
