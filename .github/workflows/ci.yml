@@ -173,7 +173,8 @@ jobs:
           docker compose -f sandbox/verify/compose.yml --profile verify run --rm verifier
       - name: Service logs
         if: always()
-        run: docker compose -f sandbox/verify/compose.yml --profile verify logs --no-color || true
+        # The compose file requires the image id; any value does for logs and teardown.
+        run: SANDBOX_IMAGE=none docker compose -f sandbox/verify/compose.yml --profile verify logs --no-color || true
       - name: Scan the sandbox image
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
@@ -181,4 +182,4 @@ jobs:
             image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
             --exit-code 1 toolgate-sandbox:verify
       - if: always()
-        run: docker compose -f sandbox/verify/compose.yml --profile verify down -v
+        run: SANDBOX_IMAGE=none docker compose -f sandbox/verify/compose.yml --profile verify down -v

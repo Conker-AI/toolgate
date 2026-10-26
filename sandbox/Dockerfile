@@ -16,6 +16,10 @@ RUN apt-get update \
         unzip zip xz-utils bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
+# The npm that ships with Node 22 bundles dependencies with published advisories. npm 12 fixes
+# them except its undici (6.29.0, CVE-2026-109869), which is replaced by the 6.29.1 patch release.
+RUN npm install --global npm@12.2.1     && cd /tmp && npm pack --silent undici@6.29.1 && mkdir undici && tar -xzf undici-6.29.1.tgz -C undici     && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici     && mv undici/package /usr/local/lib/node_modules/npm/node_modules/undici     && rm -rf /tmp/undici /tmp/undici-6.29.1.tgz /root/.npm && npm --version
+
 # Common libraries, pinned. Anything else goes through the install tool and the package proxy.
 RUN pip3 install --no-cache-dir --break-system-packages \
         numpy==2.4.6 pandas==3.1.0 requests==2.34.2 pyyaml==6.0.3 \
