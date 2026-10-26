@@ -13,6 +13,7 @@ from toolgate.api.builtin_capabilities import (
     ensure_builtin_research_capabilities,
     ensure_builtin_system_capabilities,
 )
+from toolgate.api.routes.access import router as _access_router
 from toolgate.api.routes.activity import router as _activity_router
 from toolgate.api.routes.agent import router as _agent_router
 from toolgate.api.routes.agent_keys import router as _agent_keys_router
@@ -173,3 +174,4 @@ app.include_router(_requests_router)
 app.include_router(_editor_router)
 app.include_router(_spending_router)
 app.include_router(_mcp_router)
+app.include_router(_access_router)

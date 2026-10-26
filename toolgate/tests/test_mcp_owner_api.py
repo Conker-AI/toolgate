@@ -113,7 +113,7 @@ def test_import_is_new_only_published_and_grants_nothing(api, peer):
     assert tool["version"] == 1
     assert publications.get("tool", tool["id"], 1, published=True)
     assert cp.authenticate_agent(key)["scopes"] == []
-    assert invoke(api).status_code == 403
+    assert invoke(api).status_code == 404  # out of scope looks like missing
     assert not peer.tool_calls
     assert (
         client.post("/v2/owner/mcp/import", json=import_body(), headers=owner_headers()).status_code
@@ -209,7 +209,7 @@ def test_state_is_revision_bound_and_revokes_published_tool(api):
     assert response.status_code == 200, response.text
     disabled = response.json()["tool"]
     assert disabled["version"] == 2 and disabled["status"] == "disabled"
-    assert invoke(api).status_code == 403
+    assert invoke(api).status_code == 404
     with cp._conn() as conn, pytest.raises(publications.PublicationInvalid):
         publications.for_execution(conn, "tool", tool["id"], 1)
     assert (

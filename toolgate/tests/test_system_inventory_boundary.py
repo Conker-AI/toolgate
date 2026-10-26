@@ -50,7 +50,7 @@ def test_actual_transport_requires_scope_and_replays_receipt(setup):
         client.post(
             route, json=body, headers={"X-ToolGate-Execution-Key": denied}
         ).status_code
-        == 403
+        == 404
     )
     assert setup == []
     headers = {"X-ToolGate-Execution-Key": raw}

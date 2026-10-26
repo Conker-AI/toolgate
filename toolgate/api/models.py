@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt
 
+from toolgate.core.access_policy import Decision
+
 
 class SecretCreate(BaseModel):
     name: str
@@ -91,6 +93,8 @@ class V2Invoke(BaseModel):
     job_id: str | None = None
     published_version: StrictInt | None = Field(default=None, ge=1)
     expected_publication_digest: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    # A policy delegate's resolution of the owner's access settings for this exact action.
+    decision: Decision | None = None
 
 
 class V2Publish(BaseModel):

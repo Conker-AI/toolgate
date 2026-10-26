@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Access policy:** an invocation may carry the owner's resolved `decision` (`run` or `ask`).
+  `ask` from any key tightens; `run` skips the owner's confirmation only for a key he made a
+  policy delegate, never for tools on the floor (marked sensitive, or the fixed system controls).
+  Decisions that changed the outcome are recorded as `action_decided` events. Owner routes:
+  `/v2/owner/access`, `/v2/owner/access/delegate`, `/v2/owner/tools/{id}/sensitive`. See
+  docs/access-policy.md.
+- Invoking a tool outside the key's scope now answers 404 "No such tool", the same as a missing
+  tool, so a key never learns what exists beyond its scope.
+
 ## 0.5.1
 
 - The image no longer carries the base image's setuptools and wheel. The service never

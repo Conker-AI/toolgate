@@ -60,15 +60,9 @@ def delete_tool(tool_id: str, _tier: str = Depends(require_admin)):
 def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agent)):
     publication = _requested_publication("tool", tool_id, payload)
     tool = publication["definition"] if publication else control_plane.get("tool", tool_id)
-    if not tool:
-        deny("TOOL_UNAVAILABLE", f"Tool '{tool_id}' was not found", 404, "Run `toolgate tool list`")
-    if tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):
-        deny(
-            "POLICY_DENIED",
-            "Your agent key is not allowed to use this tool",
-            403,
-            "Ask the owner for scope",
-        )
+    if not tool or tool.get("status") != "active" or not control_plane.is_scoped(agent, tool_id):
+        # One answer for missing and out of scope, so a key never learns what exists beyond it.
+        deny("TOOL_UNAVAILABLE", "No such tool", 404, "Run `toolgate tool list`")
     return invoke_tool(
         tool,
         payload.args,
@@ -79,4 +73,5 @@ def run_tool(tool_id: str, payload: V2Invoke, agent: dict = Depends(require_agen
         job_id=payload.job_id,
         publication=publication,
         authority_scope=tool_id,
+        decision=payload.decision,
     )

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from toolgate.api.deps import deny
 from toolgate.api.dispatch import _dispatch_tool, _render_template
 from toolgate.core import (
+    access_policy,
     approvals,
     container_admission,
     control_plane,
@@ -99,6 +100,7 @@ def invoke_tool(
     parent_action_id: str | None = None,
     publication: dict | None = None,
     authority_scope: str | tuple[str, ...] | None = None,
+    decision: access_policy.Decision | None = None,
 ) -> dict:
     identity = actor_id or actor
     publication_digest = publication["digest"] if publication else None
@@ -140,7 +142,24 @@ def invoke_tool(
             "validation_failed", "warning", "tool", tool["id"], actor, {"errors": errors}
         )
         deny("VALIDATION_ERROR", "; ".join(errors), 422, "Run `toolgate tool <name> info`")
-    authorization = tool.get("authorization", "auto")
+    authorization = access_policy.resolve(
+        tool, tool.get("authorization", "auto"), decision, {"id": identity}
+    )
+    if decision is not None and authorization != tool.get("authorization", "auto"):
+        # Who decided, so the owner can see every action that ran (or asked) by his policy.
+        control_plane.event(
+            "action_decided",
+            "info",
+            "tool",
+            tool["id"],
+            actor,
+            {
+                "outcome": decision.outcome,
+                "decided_by": decision.decided_by,
+                "reason": decision.reason,
+                "action_id": action_id,
+            },
+        )
     is_port = (
         tool.get("id") == "system.port-control"
         or tool.get("execution", {}).get("type") == "port_control"
