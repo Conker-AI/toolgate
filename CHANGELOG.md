@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Agent sandbox:** two built-in tools, Terminal (`sandbox.run`) and Install packages
+  (`sandbox.install`), default AI decides, registered once `TOOLGATE_SANDBOX_SOCKET` is set. Each
+  command runs in a fresh container started by the new sandbox runner
+  (`python -m toolgate.sandbox.runner`), the only holder of the Docker socket: no network, only
+  the calling agent's workspace folder, user 65533, no capabilities, no-new-privileges, read-only
+  root, limits on memory, CPU, processes, file size, workspace size and time. Installs reach PyPI
+  and npm only through the GET-only package proxy (`python -m toolgate.sandbox.proxy`). A guard
+  refuses sandbox-breaking commands before approval. New image `toolgate-sandbox`
+  (`sandbox/Dockerfile`), published with each release. See docs/sandbox.md.
+
 - **Agent identities:** each agent acts under its own identity (`X-ToolGate-Agent`), scoped to its
   toolkit and capped by the key; tool lists, invocations and dispatch-time checks follow it. The
   owner can mint a key bound to one agent for its CLI or MCP (`/v2/owner/agents/{agent}/keys`),

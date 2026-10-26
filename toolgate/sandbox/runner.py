@@ -48,24 +48,37 @@ def peer_uid(connection: socket.socket) -> int:
 def workspace(config: spec.Config, agent: str) -> str:
     """The agent's folder, created on first use. A symlink or non-folder in its place is refused."""
     path = os.path.join(config.workspaces_path, agent)
-    try:
-        os.mkdir(path, 0o2770)
-        os.chmod(path, 0o2770)
-    except FileExistsError:
-        pass
+    # No chmod: it would clear the setgid bit inherited from the workspaces folder (the runner is
+    # not in the owner's group), and that bit is what gives the owner the agent's files.
+    with contextlib.suppress(FileExistsError):
+        os.mkdir(path, 0o770)
     info = os.lstat(path)
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
         raise Failure("workspace_invalid", "The agent's workspace folder is not usable.")
     return path
 
 
+def _scan(folder: str):
+    try:
+        return os.scandir(folder)
+    except PermissionError:
+        # A folder the agent closed to everyone (chmod 000) still counts. The runner runs as the
+        # sandbox user, so it owns the folder and may open it again.
+        try:
+            os.chmod(folder, os.lstat(folder).st_mode & 0o7777 | 0o700)
+            return os.scandir(folder)
+        except OSError:
+            return None
+    except OSError:
+        return None
+
+
 def usage(path: str, file_cap: int) -> tuple[int, int]:
     """Allocated bytes and entries under `path`, without following links; stops past `file_cap`."""
     total, entries, stack = 0, 0, [path]
     while stack:
-        try:
-            iterator = os.scandir(stack.pop())
-        except OSError:
+        iterator = _scan(stack.pop())
+        if iterator is None:
             continue
         with iterator:
             for entry in iterator:
@@ -280,6 +293,8 @@ def _clients(raw: str) -> set[int]:
 
 
 def serve() -> int:
+    # New agent folders: rwx for the sandbox user and the owner's group, nothing for others.
+    os.umask(0o007)
     config = spec.Config.from_env()
     clients = _clients(os.environ.get("SANDBOX_CLIENT_UIDS", ""))
     runner = Runner(config, Docker(os.environ.get("SANDBOX_DOCKER_SOCKET", "/var/run/docker.sock")))
