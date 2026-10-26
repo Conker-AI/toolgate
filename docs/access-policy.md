@@ -32,7 +32,8 @@ these. Agent tool listings (`GET /v2/agent/tools`) include `"sensitive": true|fa
 
 Only the owner makes a key a delegate: `POST /v2/owner/access/delegate` with `{"enabled": true}`,
 presenting the owner key and the execution key to change. `GET /v2/owner/access` shows the presented
-key's state, the sensitive tools and the fixed floor executors.
+key's state, the sensitive tools and the fixed floor executors. A key reads its own state from `GET /v2/agent/status`
+(`policyDelegate`), so a caller can skip resolving decisions that would be ignored.
 
 ## No existence leak
 

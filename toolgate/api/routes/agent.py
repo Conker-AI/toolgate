@@ -32,6 +32,8 @@ def agent_status(agent: dict = Depends(require_agent)):
         "agent": agent["name"],
         "scopes": agent.get("scopes", []),
         "lockdown": control_plane.settings().get("lockdown", False),
+        # Whether the owner lets this key's "run" decisions skip his confirmation (off the floor).
+        "policyDelegate": access_policy.is_delegate(agent),
     }
 
 

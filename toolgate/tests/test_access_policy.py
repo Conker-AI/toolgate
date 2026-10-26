@@ -89,6 +89,16 @@ def test_run_is_ignored_until_the_owner_makes_the_key_a_delegate(api):
     assert asked(invoke(client, pi_key, "echo.ask", "run", action="a3"))
 
 
+def test_status_tells_a_key_whether_it_decides(api):
+    client, _, pi_key, _ = api
+    status = lambda: client.get(  # noqa: E731
+        "/v2/agent/status", headers={"X-ToolGate-Execution-Key": pi_key}
+    ).json()["policyDelegate"]
+    assert status() is False
+    delegate(client, pi_key)
+    assert status() is True
+
+
 def test_another_key_cannot_decide_for_the_owner(api):
     client, _, pi_key, other_key = api
     delegate(client, pi_key)
