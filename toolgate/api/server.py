@@ -42,6 +42,7 @@ from toolgate.core import (
 )
 from toolgate.core import execution_journal as journal
 from toolgate.executors import mcp_http
+from toolgate.sandbox.tools import ensure_builtin_sandbox_capabilities
 
 app = FastAPI(title="ToolGate", version=SERVICE_VERSION)
 
@@ -157,6 +158,7 @@ def startup():
         control_plane.ensure_bootstrap_agent_key(bootstrap_key, scopes)
     ensure_builtin_research_capabilities()
     ensure_builtin_system_capabilities()
+    ensure_builtin_sandbox_capabilities()
 
 
 # Registration order is dispatch order (first match wins); append new routers at the end.

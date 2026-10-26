@@ -103,6 +103,18 @@ def for_actor(conn, actor_id: str | None) -> dict | None:
     return _effective(conn, key, agent or None) if key else None
 
 
+def agent_for(actor_id: str | None) -> str | None:
+    """The agent an action runs as, for per-agent resources such as its sandbox workspace: its
+    identity, or the companion for a key acting as itself. None when the key is gone."""
+    if not actor_id:
+        return COMPANION
+    with control_plane._conn() as conn:
+        actor = for_actor(conn, actor_id)
+    if actor is None:
+        return None
+    return actor.get("identity") or COMPANION
+
+
 def define(key: dict, agent_id: str, scopes: list[str]) -> dict:
     """Set one agent's toolkit under the presenting key. Only narrows: the key stays the ceiling."""
     if key.get("bound") or key.get("identity"):

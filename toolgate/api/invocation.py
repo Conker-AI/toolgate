@@ -17,7 +17,7 @@ from toolgate.core import (
     spending,
 )
 from toolgate.core import execution_journal as journal
-from toolgate.executors import container_control, mcp_http, port_control
+from toolgate.executors import container_control, mcp_http, port_control, sandbox
 
 
 def enforce_usage_limits(subject_type: str, subject: dict, event_type: str):
@@ -136,6 +136,13 @@ def invoke_tool(
             errors.append(str(exc))
         if tool.get("authorization") != "owner_confirmation":
             deny("POLICY_DENIED", "External MCP tools require owner confirmation", 403)
+    sandboxed = tool.get("execution", {}).get("type") in sandbox.EXECUTIONS
+    if sandboxed:
+        kind = tool["execution"]["type"]
+        if tool.get("id") != sandbox.EXECUTIONS[kind] or tool["execution"] != {"type": kind}:
+            deny("POLICY_DENIED", "Sandbox tools run only from their reserved definitions", 403)
+        # Before any approval is asked for: the guard refuses sandbox-breaking commands here.
+        errors.extend(sandbox.check(tool, args))
     if errors:
         control_plane.event(
             "validation_failed", "warning", "tool", tool["id"], actor, {"errors": errors}
@@ -315,6 +322,14 @@ def invoke_tool(
                 }
             except container_control.ControlError as exc:
                 result = {"ok": False, "error": str(exc), "error_code": exc.code}
+        elif sandboxed:
+            # The workspace follows the caller's identity, never an argument.
+            agent = identities.agent_for(actor_id)
+            if agent is None:
+                result = {"ok": False, "error": "The agent key is no longer active.",
+                          "error_code": "agent_revoked"}
+            else:
+                result = sandbox.execute(tool, args, agent, action_id)
         else:
             result = _dispatch_tool(tool, args)
     except Exception:
