@@ -2,22 +2,31 @@
 
 import time
 
-from conftest import as_uid, install, logs, proxy_request, run, unique_agent, while_running
+from conftest import (
+    as_uid,
+    install,
+    labelled,
+    logs,
+    proxy_request,
+    run,
+    unique_agent,
+    while_running,
+)
 
 
 def test_pip_install_through_proxy():
     agent = unique_agent()
-    answer = install(agent, "pip", ["six==1.17.0"])
+    answer = install(agent, "pip", ["tomli-w==1.2.0"])
     assert answer["ok"] and answer["exit_code"] == 0, answer
 
     # Check import works in later run
-    check = run(agent, "python3 -c 'import six; print(six.__version__)'")
-    assert check["stdout"].strip() == "1.17.0", check
+    check = run(agent, "python3 -c 'import tomli_w; print(tomli_w.__name__)'")
+    assert check["stdout"].strip() == "tomli_w", check
 
     # Check proxy logs
     proxy_log = logs("package-proxy")
     assert "package_fetch" in proxy_log, "Expected package_fetch in proxy logs"
-    assert "/pypi/simple/six/" in proxy_log, "Expected six simple fetch in logs"
+    assert "/pypi/simple/tomli-w/" in proxy_log, "Expected the tomli-w index fetch in logs"
     assert "/pypi/files/packages/" in proxy_log, "Expected package file fetch in logs"
 
 
@@ -56,7 +65,7 @@ def test_install_container_shape(docker):
 
     # Check proxy mount is read-only
     proxy_mount = next(m for m in mounts if m["Destination"] == "/run/conker-proxy")
-    assert proxy_mount["ReadOnly"] is True
+    assert proxy_mount["RW"] is False
 
     # Check user
     assert inspect["Config"]["User"] == "65533:65533"
@@ -161,5 +170,5 @@ def test_refused_specs_no_container(docker):
 
     # Check no container appeared
     time.sleep(1)
-    containers = docker.find_by_label("conker.sandbox.agent", agent)
+    containers = labelled(docker, "conker.sandbox.agent", agent)
     assert len(containers) == 0, f"Container should not be created for refused spec: {containers}"

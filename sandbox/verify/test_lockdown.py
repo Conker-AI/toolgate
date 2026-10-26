@@ -1,8 +1,11 @@
 """Lockdown tests: network, mounts, user, capabilities, read-only root, secrets, namespaces."""
 
+import os
 import time
 
-from conftest import as_uid, run, service, unique_agent, while_running
+from conftest import as_uid, labelled, run, service, unique_agent, while_running
+
+from toolgate.sandbox.spec import environment
 
 
 def test_network_none_mode_and_loopback_only(docker):
@@ -10,7 +13,7 @@ def test_network_none_mode_and_loopback_only(docker):
     inspect, answer = while_running(docker, agent)
     assert answer["ok"], answer
     assert inspect["HostConfig"]["NetworkMode"] == "none"
-    assert list(inspect["NetworkSettings"]["Networks"].keys()) == ["none"]
+    assert list(inspect["NetworkSettings"]["Networks"] or {}) in ([], ["none"])
 
     # Inside container: only lo interface
     net_check = run(agent, "ls /sys/class/net")
@@ -93,13 +96,9 @@ def test_capabilities_dropped_all(docker):
     status = run(agent, "cat /proc/self/status")
     status_lines = status["stdout"].split('\n')
 
-    cap_fields = ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"]
-    for field in cap_fields:
-        for line in status_lines:
-            if line.startswith(field):
-                value = line.split('\t')[1]
-                assert value == "0000000000000000", f"{field} should be all zeros, got {value}"
-                break
+    fields = dict(line.split(":\t", 1) for line in status_lines if ":\t" in line)
+    for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"):
+        assert fields[field] == "0000000000000000", f"{field} should be all zeros: {fields[field]}"
 
     # Check NoNewPrivs and Seccomp
     assert "NoNewPrivs:\t1" in status_lines, "NoNewPrivs should be 1"
@@ -152,8 +151,10 @@ def test_no_secrets_in_environment(docker):
     # Check Config.Env is subset of image env plus sandbox env
     container_env = set(inspect["Config"]["Env"])
 
-    # Get image env (this would require the actual image ID)
-    # For now, just check it contains expected sandbox variables
+    # Nothing beyond the image's own ENV and what the runner adds.
+    image = docker.client.get(f"/v1.45/images/{os.environ['SANDBOX_IMAGE']}/json").json()
+    allowed = set(image["Config"]["Env"]) | set(environment())
+    assert container_env <= allowed, container_env - allowed
     expected_sandbox_vars = [
         "PATH=/workspace/.venv/bin:/workspace/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "HOME=/tmp",
@@ -201,7 +202,7 @@ def test_container_removed_after_run(docker):
 
     # Check no container with this agent label remains
     time.sleep(1)  # Give Docker time to clean up
-    remaining = docker.find_by_label("conker.sandbox.agent", agent)
+    remaining = labelled(docker, "conker.sandbox.agent", agent)
     assert len(remaining) == 0, f"Container still exists for agent {agent}"
 
 
@@ -219,9 +220,11 @@ def test_runner_service_lockdown():
     runner_mounts = runner_inspect["Mounts"]
     mount_destinations = [m["Destination"] for m in runner_mounts]
 
-    expected_mounts = ["/var/run/docker.sock", "/run/conker-sandbox", "/workspaces"]
-    for expected in expected_mounts:
-        assert expected in mount_destinations, f"Expected mount {expected} not found in runner"
+    assert sorted(mount_destinations) == [
+        "/run/conker-sandbox",
+        "/var/run/docker.sock",
+        "/workspaces",
+    ]
 
 
 def test_proxy_service_lockdown():

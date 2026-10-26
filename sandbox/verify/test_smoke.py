@@ -21,7 +21,8 @@ def test_the_container_has_no_network_and_one_mount(docker):
 
 def test_pip_install_goes_through_the_proxy():
     agent = unique_agent()
-    answer = install(agent, "pip", ["six==1.17.0"])
+    # Not in the image, so the install has to fetch it through the proxy.
+    answer = install(agent, "pip", ["tomli-w==1.2.0"])
     assert answer["ok"] and answer["exit_code"] == 0, answer
-    check = run(agent, "python -c 'import six; print(six.__version__)'")
-    assert check["stdout"].strip() == "1.17.0", check
+    check = run(agent, "python -c 'import tomli_w; print(tomli_w.dumps({\"a\": 1}))'")
+    assert check["stdout"].strip() == "a = 1", check

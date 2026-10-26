@@ -2,7 +2,7 @@
 
 import time
 
-from conftest import run, unique_agent, while_running
+from conftest import labelled, run, unique_agent, while_running
 
 
 def test_memory_limit_oom(docker):
@@ -64,16 +64,16 @@ def test_time_limit(docker):
 
     # Check no container remains
     time.sleep(1)
-    remaining = docker.find_by_label("conker.sandbox.agent", agent)
+    remaining = labelled(docker, "conker.sandbox.agent", agent)
     assert len(remaining) == 0, f"Container still exists after timeout for agent {agent}"
 
 
 def test_file_size_limit():
     agent = unique_agent()
     # Try to write 80MB (limit is 64MB)
-    result = run(agent, "dd if=/dev/zero of=big.bin bs=1M count=80 2>/dev/null; echo OK")
-    assert result["exit_code"] != 0, "Should fail when writing file larger than limit"
-    assert "OK" not in result["stdout"], "Should not complete successfully"
+    result = run(agent, "head -c 80M /dev/zero > big.bin")
+    # SIGXFSZ: the shell reports 128 + 25.
+    assert result["exit_code"] == 153, result
 
     # Check file size is at most 64MB if it exists
     size_check = run(agent, "test -f big.bin && stat -c %s big.bin || echo 0")
@@ -84,10 +84,9 @@ def test_file_size_limit():
 def test_tmp_size_limit():
     agent = unique_agent()
     # Try to write 40MB to /tmp (limit is 32MB)
-    result = run(agent, "dd if=/dev/zero of=/tmp/x bs=1M count=40 2>/dev/null; echo OK")
-    assert result["exit_code"] != 0, "Should fail when /tmp is full"
-    assert "OK" not in result["stdout"], "Should not complete successfully"
-    assert "No space left on device" in result["stderr"], "Expected no space error"
+    result = run(agent, "head -c 40M /dev/zero > /tmp/x")
+    assert result["exit_code"] != 0, result
+    assert "No space left on device" in result["stderr"], result
 
 
 def test_open_files_limit():
@@ -149,12 +148,12 @@ def test_concurrency_per_agent():
 
     # Either they run sequentially (>= 9s total) or second gets busy error
     if len(results) == 2:
-        if all(r[1].get("ok") for _, r, _ in results):
+        if all(r.get("ok") for _, r, _ in results):
             # Both succeeded, check they ran sequentially
             assert total_time >= 9000, f"Expected sequential execution (>=9s), got {total_time}ms"
         else:
             # At least one got busy error
-            busy_found = any(r[1].get("code") == "busy" for _, r, _ in results)
+            busy_found = any(r.get("code") == "busy" for _, r, _ in results)
             assert busy_found, f"Expected busy error for concurrent execution, got results: {results}"
     else:
         raise AssertionError(f"Expected 2 results, got {len(results)}")

@@ -21,17 +21,6 @@ import pytest
 
 from toolgate.sandbox.docker_api import Docker
 
-
-# Extend Docker class to support finding containers by specific labels
-def _find_by_label(self, label: str, value: str) -> list[str]:
-    """Find containers by a specific label value."""
-    filters = json.dumps({"label": [f"{label}={value}"]})
-    response = self._call("GET", "/containers/json", params={"all": "1", "filters": filters})
-    return [item["Id"] for item in response.json()]
-
-# Monkey patch the method onto the Docker class
-Docker.find_by_label = _find_by_label
-
 SOCKET = os.environ.get("TOOLGATE_SANDBOX_SOCKET", "/run/conker-sandbox/runner.sock")
 
 
@@ -95,6 +84,16 @@ def while_running(docker: Docker, agent: str, command: str = "sleep 6", install_
     thread.join(timeout=180)
     assert inspect is not None, f"no live sandbox container seen for {agent}: {answer}"
     return inspect, answer
+
+
+def labelled(docker: Docker, label: str, value: str) -> list[str]:
+    """Ids of every container (running or not) whose `label` equals `value`."""
+    filters = json.dumps({"label": [f"{label}={value}"]})
+    response = docker.client.get(
+        "/v1.45/containers/json", params={"all": "1", "filters": filters}
+    )
+    response.raise_for_status()
+    return [item["Id"] for item in response.json()]
 
 
 def as_uid(uid: int, fn):
@@ -162,7 +161,7 @@ def proxy_request(method: str, path: str, headers=None) -> tuple[str, bytes]:
 def service(name: str) -> dict:
     """Get Docker inspect of the compose service container."""
     docker = Docker("/var/run/docker.sock")
-    containers = docker.find_by_label("com.docker.compose.service", name)
+    containers = labelled(docker, "com.docker.compose.service", name)
     if containers:
         return docker.inspect(containers[0])
     raise ValueError(f"Service {name} not found")
@@ -171,7 +170,7 @@ def service(name: str) -> dict:
 def logs(name: str) -> str:
     """Get the service's stdout as text."""
     docker = Docker("/var/run/docker.sock")
-    containers = docker.find_by_label("com.docker.compose.service", name)
+    containers = labelled(docker, "com.docker.compose.service", name)
     if not containers:
         raise ValueError(f"Service {name} not found")
 

@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 
 from toolgate.api.deps import deny
-from toolgate.api.dispatch import _dispatch_tool, _render_template
+from toolgate.api.dispatch import _dispatch_tool, _render_template, _shape_tool_result
 from toolgate.core import (
     access_policy,
     approvals,
@@ -329,7 +329,7 @@ def invoke_tool(
                 result = {"ok": False, "error": "The agent key is no longer active.",
                           "error_code": "agent_revoked"}
             else:
-                result = sandbox.execute(tool, args, agent, action_id)
+                result = _shape_tool_result(tool, sandbox.execute(tool, args, agent, action_id))
         else:
             result = _dispatch_tool(tool, args)
     except Exception:
