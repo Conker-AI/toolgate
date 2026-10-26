@@ -7,6 +7,16 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8010:8010"
+    # Conker's deployment runs ToolGate with a read-only root and no capabilities at all. This
+    # development file keeps DAC_OVERRIDE only because its data lives in the bind-mounted source
+    # folder, which belongs to the developer, not to root. Writable: that folder, the vault
+    # volume and /tmp.
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     volumes:
       - ./:/app/toolgate
       # The vault key lives on its own volume, never in the bind-mounted source

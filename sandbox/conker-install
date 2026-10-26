@@ -1,0 +1,85 @@
+#!/usr/bin/python3
+"""Install packages into the agent's workspace through the package proxy.
+
+The container has no network, only loopback. The runner mounts the package proxy's Unix socket
+read-only for this one command; this script forwards 127.0.0.1:<port> to it, so pip and npm
+reach the official registries through the proxy and nowhere else. Python packages go into the
+workspace's virtual environment (/workspace/.venv), npm packages into /workspace/node_modules.
+Usage: conker-install pip|npm -- PACKAGE...
+"""
+
+import os
+import socket
+import subprocess
+import sys
+import threading
+
+VENV = "/workspace/.venv"
+
+
+def _pipe(source, target):
+    try:
+        while chunk := source.recv(65536):
+            target.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        for end in (source, target):
+            try:
+                end.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
+def _forward(listener, path):
+    while True:
+        client, _ = listener.accept()
+        upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            upstream.connect(path)
+        except OSError:
+            client.close()
+            upstream.close()
+            continue
+        threading.Thread(target=_pipe, args=(client, upstream), daemon=True).start()
+        threading.Thread(target=_pipe, args=(upstream, client), daemon=True).start()
+
+
+def main(argv):
+    if len(argv) < 4 or argv[1] not in ("pip", "npm") or argv[2] != "--":
+        print("usage: conker-install pip|npm -- PACKAGE...", file=sys.stderr)
+        return 2
+    manager, packages = argv[1], argv[3:]
+    path = os.environ["CONKER_PROXY_SOCKET"]
+    port = int(os.environ.get("CONKER_PROXY_PORT", "3128"))
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", port))
+    listener.listen(64)
+    threading.Thread(target=_forward, args=(listener, path), daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    os.umask(0o007)
+    if manager == "pip":
+        if not os.path.exists(f"{VENV}/bin/python"):
+            # The image's libraries stay visible; installs land in the workspace.
+            subprocess.run(
+                [sys.executable, "-m", "venv", "--system-site-packages", VENV], check=True
+            )
+        command = [
+            f"{VENV}/bin/python", "-m", "pip", "install",
+            "--no-input", "--disable-pip-version-check", "--no-warn-script-location",
+            "--progress-bar", "off",
+            "--index-url", f"{base}/pypi/simple/", "--trusted-host", "127.0.0.1",
+            "--", *packages,
+        ]
+    else:
+        command = [
+            "npm", "install", "--prefix", "/workspace",
+            "--no-audit", "--no-fund", "--no-update-notifier",
+            "--registry", f"{base}/npm/",
+            "--", *packages,
+        ]
+    return subprocess.run(command, cwd="/workspace").returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

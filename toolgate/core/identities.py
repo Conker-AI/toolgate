@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import uuid
@@ -69,19 +70,21 @@ def _effective(conn, key: dict, requested: str | None) -> dict | None:
         return {
             **key,
             "key_id": key["id"],
+            "root_key_id": binding["parent_key_id"],
             "identity": binding["agent_id"],
             "scopes": _scopes(conn, parent["id"], binding["agent_id"]),
             "ceiling": parent["scopes"],
             "bound": True,
         }
     if requested is None:
-        return {**key, "key_id": key["id"], "identity": None}
+        return {**key, "key_id": key["id"], "root_key_id": key["id"], "identity": None}
     if not AGENT.fullmatch(requested):
         return None
     return {
         **key,
         "id": f"{key['id']}#{requested}",
         "key_id": key["id"],
+        "root_key_id": key["id"],
         "identity": requested,
         "scopes": _scopes(conn, key["id"], requested),
         "ceiling": key["scopes"],
@@ -101,6 +104,38 @@ def for_actor(conn, actor_id: str | None) -> dict | None:
     key_id, _, agent = actor_id.partition("#")
     key = _active(conn, key_id)
     return _effective(conn, key, agent or None) if key else None
+
+
+def workspace_for(actor_id: str | None) -> str | None:
+    """The sandbox workspace folder an action uses, from the caller's identity alone.
+
+    Under the deployment's own key (Pi's, seeded from TOOLGATE_BOOTSTRAP_EXECUTION_KEY) it is the
+    agent's name, or `companion` for the key acting as itself and for the owner. Any other key's
+    agents get folders prefixed with that key, so two keys never share one. None when the key
+    is gone."""
+    if not actor_id:
+        return COMPANION
+    with control_plane._conn() as conn:
+        actor = for_actor(conn, actor_id)
+        if actor is None:
+            return None
+        raw = os.environ.get("TOOLGATE_BOOTSTRAP_EXECUTION_KEY", "").strip()
+        deployment = (
+            conn.execute(
+                "SELECT id FROM v2_agent_keys WHERE key_hash=?",
+                (hashlib.sha256(raw.encode()).hexdigest(),),
+            ).fetchone()
+            if raw
+            else None
+        )
+    agent = actor.get("identity") or COMPANION
+    root = actor.get("root_key_id") or actor.get("key_id") or actor["id"]
+    if deployment is not None and root == deployment["id"]:
+        return agent
+    prefix = "k" + re.sub(r"[^a-z0-9]", "", root.lower())[:12] + "_"
+    if len(prefix) + len(agent) > 64:
+        agent = hashlib.sha256(agent.encode()).hexdigest()[:16]
+    return prefix + agent
 
 
 def define(key: dict, agent_id: str, scopes: list[str]) -> dict:

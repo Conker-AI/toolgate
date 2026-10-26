@@ -1,0 +1,105 @@
+# The agent sandbox, assembled the way Conker deploys it, plus a verifier that proves every
+# lockdown setting against the real Docker Engine. Used by CI (.github/workflows/ci.yml, job
+# `sandbox`) and runnable on any machine with Docker 26+:
+#
+#   docker build -t toolgate:verify -f toolgate/Dockerfile .
+#   docker build -t toolgate-sandbox:verify sandbox
+#   SANDBOX_IMAGE=$(docker image inspect toolgate-sandbox:verify --format '{{.Id}}') \
+#     docker compose -f sandbox/verify/compose.yml run --rm verifier
+#   docker compose -f sandbox/verify/compose.yml down -v
+#
+# The verifier runs as UID 0 like ToolGate's own container, so it is the runner's one admitted
+# client; it also holds the Docker socket and the workspaces volume, only to inspect from outside.
+name: conker-sandbox-verify
+
+x-locked: &locked
+  image: ${TOOLGATE_IMAGE:-toolgate:verify}
+  restart: "no"
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 64
+
+services:
+  sandbox-runner:
+    <<: *locked
+    command: ["python", "-m", "toolgate.sandbox.runner", "serve"]
+    user: "65533:65533"
+    # The Docker socket's group on this host (0 on Docker Desktop; the docker group on Linux).
+    group_add: ["${DOCKER_GID:-0}"]
+    network_mode: none
+    mem_limit: 128m
+    environment:
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:?build toolgate-sandbox:verify and pass its image id}
+      SANDBOX_CLIENT_UIDS: "0"
+      SANDBOX_WORKSPACES_VOLUME: conker_verify_workspaces
+      SANDBOX_PROXY_VOLUME: conker_verify_proxy
+      SANDBOX_MEMORY_MB: "256"
+      SANDBOX_INSTALL_MEMORY_MB: "768"
+      SANDBOX_PIDS: "64"
+      SANDBOX_TMP_MB: "32"
+      SANDBOX_FILE_MB: "64"
+      SANDBOX_WORKSPACE_MB: "256"
+      SANDBOX_WORKSPACE_FILES: "20000"
+      SANDBOX_MAX_SECONDS: "120"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - control:/run/conker-sandbox
+      - workspaces:/workspaces
+    healthcheck:
+      test: ["CMD", "python", "-m", "toolgate.sandbox.runner", "health"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  package-proxy:
+    <<: *locked
+    command: ["python", "-m", "toolgate.sandbox.proxy", "serve"]
+    user: "65532:65532"
+    networks: [egress]
+    mem_limit: 256m
+    environment:
+      PROXY_CLIENT_UIDS: "65533"
+    volumes:
+      - proxy:/run/conker-proxy
+    healthcheck:
+      test: ["CMD", "python", "-m", "toolgate.sandbox.proxy", "health"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  verifier:
+    image: ${TOOLGATE_IMAGE:-toolgate:verify}
+    profiles: [verify]
+    user: "0:0"
+    networks: [egress]
+    working_dir: /verify
+    entrypoint: ["sh", "-c"]
+    command:
+      - pip install --quiet --no-cache-dir pytest==9.1.1 && python -m pytest -q -p no:cacheprovider sandbox/verify
+    environment:
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:?}
+      TOOLGATE_SANDBOX_SOCKET: /run/conker-sandbox/runner.sock
+      VERIFY_WORKSPACES_VOLUME: conker_verify_workspaces
+      VERIFY_PROXY_VOLUME: conker_verify_proxy
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ../..:/verify:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - control:/run/conker-sandbox
+      - workspaces:/workspaces
+      - proxy:/run/conker-proxy:ro
+    depends_on:
+      sandbox-runner: {condition: service_healthy}
+      package-proxy: {condition: service_healthy}
+
+volumes:
+  control: {}
+  workspaces:
+    name: conker_verify_workspaces
+  proxy:
+    name: conker_verify_proxy
+
+networks:
+  egress: {}

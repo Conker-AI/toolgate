@@ -354,6 +354,12 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
             "error": "Managed service control requires its fixed executor and owner confirmation.",
             "error_code": "invalid_process_definition",
         }
+    if executor_type in ("sandbox_run", "sandbox_install"):
+        return {
+            "ok": False,
+            "error": "Sandbox tools run only through an invocation that carries the agent.",
+            "error_code": "invalid_sandbox_dispatch",
+        }
     if executor_type == "echo":
         result = {"ok": True, "result": args}
     elif executor_type == "local_echo":
