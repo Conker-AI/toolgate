@@ -4,7 +4,7 @@ import secrets
 
 from fastapi import Header, HTTPException
 
-from toolgate.core import control_plane, owner_channel, vault
+from toolgate.core import control_plane, identities, owner_channel, vault
 
 
 def require_admin(x_toolgate_key: str | None = Header(None, alias="X-ToolGate-Key")) -> str:
@@ -16,11 +16,16 @@ def require_admin(x_toolgate_key: str | None = Header(None, alias="X-ToolGate-Ke
 
 def require_agent(
     x_toolgate_execution_key: str | None = Header(None, alias="X-ToolGate-Execution-Key"),
+    x_toolgate_agent: str | None = Header(None, alias="X-ToolGate-Agent"),
 ) -> dict:
     agent = control_plane.authenticate_agent(x_toolgate_execution_key)
     if not agent:
         raise HTTPException(401, "missing or invalid X-ToolGate-Execution-Key")
-    return agent
+    # The agent this key acts as, capped by the key; a bound key is always its own agent.
+    effective = identities.resolve(agent, x_toolgate_agent)
+    if effective is None:
+        raise HTTPException(403, "This key cannot act as that agent")
+    return effective
 
 
 def require_owner(x_toolgate_owner_key: str | None = Header(None, alias="X-ToolGate-Owner-Key")):

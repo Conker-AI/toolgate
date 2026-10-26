@@ -196,6 +196,9 @@ def access(identity, agent, payload: State | None = None):
         if not tool or tool.get("execution", {}).get("type") != "mcp_http":
             raise OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
         digest = publications.digest(tool)
+        if agent.get("identity"):
+            # Grants belong to the chat's own key, never to one agent or a bound key.
+            raise OwnerError("execution_unavailable", "Grant access on the chat's own key.", 403)
         caller = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (agent["id"],)).fetchone()
         if not caller or caller["status"] != "active":
             raise OwnerError(

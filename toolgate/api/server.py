@@ -20,6 +20,7 @@ from toolgate.api.routes.agent_keys import router as _agent_keys_router
 from toolgate.api.routes.automations import router as _automations_router
 from toolgate.api.routes.editor import router as _editor_router
 from toolgate.api.routes.health import router as _health_router
+from toolgate.api.routes.identities import router as _identities_router
 from toolgate.api.routes.mcp import router as _mcp_router
 from toolgate.api.routes.publications import router as _publications_router
 from toolgate.api.routes.requests import router as _requests_router
@@ -175,3 +176,4 @@ app.include_router(_editor_router)
 app.include_router(_spending_router)
 app.include_router(_mcp_router)
 app.include_router(_access_router)
+app.include_router(_identities_router)

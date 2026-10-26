@@ -337,7 +337,13 @@ def revoke_agent_key(key_id: str, actor: str = "admin") -> bool:
 
 
 def is_scoped(agent: dict, capability: str) -> bool:
-    scopes = agent.get("scopes", [])
+    # An agent identity is always capped by the key that presents it.
+    if "ceiling" in agent and not _scoped(agent["ceiling"], capability):
+        return False
+    return _scoped(agent.get("scopes", []), capability)
+
+
+def _scoped(scopes: list, capability: str) -> bool:
     if "*" in scopes or capability in scopes:
         return True
     if any(isinstance(scope, str) and scope.endswith("*") and capability.startswith(scope[:-1]) for scope in scopes):
