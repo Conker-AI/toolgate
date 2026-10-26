@@ -7,8 +7,11 @@ tests can assert the exact settings a command ran under. `docker` talks to the s
 
 from __future__ import annotations
 
+import contextlib
+import http.client
 import json
 import os
+import pickle
 import socket
 import threading
 import time
@@ -17,6 +20,17 @@ import uuid
 import pytest
 
 from toolgate.sandbox.docker_api import Docker
+
+
+# Extend Docker class to support finding containers by specific labels
+def _find_by_label(self, label: str, value: str) -> list[str]:
+    """Find containers by a specific label value."""
+    filters = json.dumps({"label": [f"{label}={value}"]})
+    response = self._call("GET", "/containers/json", params={"all": "1", "filters": filters})
+    return [item["Id"] for item in response.json()]
+
+# Monkey patch the method onto the Docker class
+Docker.find_by_label = _find_by_label
 
 SOCKET = os.environ.get("TOOLGATE_SANDBOX_SOCKET", "/run/conker-sandbox/runner.sock")
 
@@ -81,3 +95,86 @@ def while_running(docker: Docker, agent: str, command: str = "sleep 6", install_
     thread.join(timeout=180)
     assert inspect is not None, f"no live sandbox container seen for {agent}: {answer}"
     return inspect, answer
+
+
+def as_uid(uid: int, fn):
+    """Run `fn()` in a forked child with the given UID/GID and return its result through a pipe."""
+    import os
+
+    parent_pipe, child_pipe = os.pipe()
+
+    child_pid = os.fork()
+    if child_pid == 0:
+        # Child process
+        try:
+            os.setgroups([])
+            os.setgid(uid)
+            os.setuid(uid)
+            result = fn()
+            os.write(child_pipe, pickle.dumps(result))
+            os._exit(0)
+        except Exception as e:
+            os.write(child_pipe, pickle.dumps(e))
+            os._exit(1)
+
+    # Parent process
+    os.close(child_pipe)
+    try:
+        data = os.read(parent_pipe, 1024 * 1024)
+        result = pickle.loads(data)
+        if isinstance(result, Exception):
+            raise result
+        return result
+    finally:
+        os.close(parent_pipe)
+        # Reap child
+        with contextlib.suppress(BaseException):
+            os.waitpid(child_pid, 0)
+
+
+class ProxyHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection that connects to the proxy Unix socket."""
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.connect("/run/conker-proxy/proxy.sock")
+
+
+def proxy_request(method: str, path: str, headers=None) -> tuple[str, bytes]:
+    """Send a request to the proxy as UID 65533 and return (status, body_bytes)."""
+    def _request():
+        conn = ProxyHTTPConnection("localhost")
+        try:
+            conn.request(method, path, headers=headers or {})
+            resp = conn.getresponse()
+            return resp.status, resp.read()
+        finally:
+            conn.close()
+
+    try:
+        return as_uid(65533, _request)
+    except Exception as e:
+        if "Connection refused" in str(e) or "closed" in str(e).lower():
+            return "closed", b""
+        raise
+
+
+def service(name: str) -> dict:
+    """Get Docker inspect of the compose service container."""
+    docker = Docker("/var/run/docker.sock")
+    containers = docker.find_by_label("com.docker.compose.service", name)
+    if containers:
+        return docker.inspect(containers[0])
+    raise ValueError(f"Service {name} not found")
+
+
+def logs(name: str) -> str:
+    """Get the service's stdout as text."""
+    docker = Docker("/var/run/docker.sock")
+    containers = docker.find_by_label("com.docker.compose.service", name)
+    if not containers:
+        raise ValueError(f"Service {name} not found")
+
+    # Use Docker.logs to get container logs (keep last 1MB)
+    stdout, stderr, _, _ = docker.logs(containers[0], keep=1024*1024)
+    return (stdout + stderr).decode('utf-8', errors='replace')
