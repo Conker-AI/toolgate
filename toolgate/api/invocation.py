@@ -324,7 +324,7 @@ def invoke_tool(
                 result = {"ok": False, "error": str(exc), "error_code": exc.code}
         elif sandboxed:
             # The workspace follows the caller's identity, never an argument.
-            agent = identities.agent_for(actor_id)
+            agent = identities.workspace_for(actor_id)
             if agent is None:
                 result = {"ok": False, "error": "The agent key is no longer active.",
                           "error_code": "agent_revoked"}

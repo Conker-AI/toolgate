@@ -17,11 +17,13 @@ agent > tool default, the floor, Handled; see access-policy.md) and agent identi
 1. ToolGate validates the arguments before any approval is asked for. The guard refuses commands
    that would break the sandbox itself: deleting the root filesystem or the whole workspace,
    killing every process, shutdown or reboot, fork bombs, formatting or writing devices. Package
-   names are names and versions only: no URLs, paths, VCS links or options.
+   names are names and versions only: no URLs, paths, archive file names, VCS links or options.
 2. After the access decision, ToolGate sends one JSON request to the **sandbox runner** over the
    Unix socket at `TOOLGATE_SANDBOX_SOCKET`. The agent in the request is the caller's identity
    (`X-ToolGate-Agent`, or the agent a bound key belongs to; a key acting as itself is
-   `companion`). No argument can name another agent or folder.
+   `companion`). Under the deployment's own key (Pi's, `TOOLGATE_BOOTSTRAP_EXECUTION_KEY`) the
+   folder is the agent's name; any other key's folders carry that key's id as a prefix
+   (`k<id>_<agent>`), so two keys never share one. No argument can name another folder.
 3. The runner, the only process that talks to Docker for this, admits the connection only if the
    kernel reports a UID in `SANDBOX_CLIENT_UIDS` (`SO_PEERCRED`), validates the request again,
    creates the agent's folder on first use and starts **one fresh container** for the command.

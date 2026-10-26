@@ -29,6 +29,8 @@ NPM_SPEC = re.compile(
     r"(?:@[A-Za-z0-9.^~<>=*|+ -]{1,60})?"
 )
 MANAGERS = ("pip", "npm")
+# pip and npm read a name with an archive suffix as a local file in the workspace, not a package.
+ARCHIVE = re.compile(r".*\.(?:whl|zip|tgz|tar|gz|bz2|xz|egg)(?:@.*)?\Z", re.IGNORECASE)
 
 
 class Refused(ValueError):
@@ -67,7 +69,12 @@ def packages(manager, values) -> list[str]:
     pattern = PIP_SPEC if manager == "pip" else NPM_SPEC
     cleaned = []
     for value in values:
-        if not isinstance(value, str) or not pattern.fullmatch(value) or value.startswith("-"):
+        if (
+            not isinstance(value, str)
+            or not pattern.fullmatch(value)
+            or value.startswith("-")
+            or ARCHIVE.match(value.split("==")[0].split("[")[0])
+        ):
             raise Refused(
                 "invalid_packages",
                 "Name registry packages only, optionally with a version: no URLs, paths or options.",

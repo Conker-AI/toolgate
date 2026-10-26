@@ -58,40 +58,71 @@ def workspace(config: spec.Config, agent: str) -> str:
     return path
 
 
-def _scan(folder: str):
+# Linux flags; getattr keeps the module importable elsewhere (the runner itself is Linux-only).
+_O = {name: getattr(os, name, 0) for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC", "O_PATH")}
+DIRECTORY = os.O_RDONLY | _O["O_DIRECTORY"] | _O["O_NOFOLLOW"] | _O["O_CLOEXEC"]
+
+
+def _open_folder(name: str, parent: int | None) -> int | None:
+    """A folder opened relative to its parent's descriptor, never through a symlink, so an agent
+    swapping a folder for a link mid-command cannot point the scan outside its workspace."""
     try:
-        return os.scandir(folder)
+        return os.open(name, DIRECTORY, dir_fd=parent)
     except PermissionError:
-        # A folder the agent closed to everyone (chmod 000) still counts. The runner runs as the
-        # sandbox user, so it owns the folder and may open it again.
-        try:
-            os.chmod(folder, os.lstat(folder).st_mode & 0o7777 | 0o700)
-            return os.scandir(folder)
-        except OSError:
-            return None
+        pass
     except OSError:
         return None
+    # A folder the agent closed to everyone (chmod 000) still counts. The runner is the sandbox
+    # user and owns it: reopen it by descriptor (O_PATH needs no permission) and grant itself rwx.
+    try:
+        handle = os.open(name, _O["O_PATH"] | _O["O_DIRECTORY"] | _O["O_NOFOLLOW"], dir_fd=parent)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(handle)
+        if info.st_uid != os.getuid():
+            return None
+        alias = f"/proc/self/fd/{handle}"
+        os.chmod(alias, stat.S_IMODE(info.st_mode) | 0o700)
+        return os.open(alias, os.O_RDONLY | _O["O_DIRECTORY"] | _O["O_CLOEXEC"])
+    except OSError:
+        return None
+    finally:
+        os.close(handle)
 
 
 def usage(path: str, file_cap: int) -> tuple[int, int]:
     """Allocated bytes and entries under `path`, without following links; stops past `file_cap`."""
-    total, entries, stack = 0, 0, [path]
-    while stack:
-        iterator = _scan(stack.pop())
-        if iterator is None:
-            continue
-        with iterator:
-            for entry in iterator:
-                entries += 1
-                if entries > file_cap:
-                    return total, entries
-                try:
-                    info = entry.stat(follow_symlinks=False)
-                except OSError:
-                    continue
-                total += getattr(info, "st_blocks", 0) * 512 or info.st_size
-                if stat.S_ISDIR(info.st_mode):
-                    stack.append(entry.path)
+    total = entries = 0
+    root = _open_folder(path, None)
+    if root is None:
+        return total, entries
+    stack = [(root, os.scandir(root))]
+    try:
+        while stack:
+            folder, iterator = stack[-1]
+            entry = next(iterator, None)
+            if entry is None:
+                iterator.close()
+                os.close(folder)
+                stack.pop()
+                continue
+            entries += 1
+            if entries > file_cap:
+                break
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            total += getattr(info, "st_blocks", 0) * 512 or info.st_size
+            if stat.S_ISDIR(info.st_mode):
+                child = _open_folder(entry.name, folder)
+                if child is not None:
+                    stack.append((child, os.scandir(child)))
+    finally:
+        for folder, iterator in stack:
+            iterator.close()
+            os.close(folder)
     return total, entries
 
 
