@@ -155,10 +155,11 @@ class Runner:
         if not isinstance(request_id, str) or len(request_id) > 100:
             raise Failure("invalid_request", "request_id must be a short string.")
         lock = self._lock(agent)
-        if not lock.acquire(timeout=30):
+        # Short waits: ToolGate's own deadline is the time limit plus one minute.
+        if not lock.acquire(timeout=10):
             raise Failure("busy", "This agent's previous command is still running.")
         try:
-            if not self.slots.acquire(timeout=30):
+            if not self.slots.acquire(timeout=10):
                 raise Failure("busy", "The sandbox is busy; try again shortly.")
             try:
                 return self._execute(agent, argv, op == "install", timeout, request_id)
@@ -180,7 +181,13 @@ class Runner:
         started = time.monotonic()
         timed_out = exceeded = False
         try:
-            self.docker.start(container)
+            try:
+                self.docker.start(container)
+            except DockerError as exc:
+                # Docker answered: the container did not start. No answer: it may have.
+                if str(exc).startswith("docker_unreachable"):
+                    raise Failure("outcome_unknown", "The command may have started.") from None
+                raise Failure("start_failed", f"The sandbox could not start ({exc}).") from None
             try:
                 state, timed_out, exceeded = self._watch(
                     container, path, started + timeout, byte_ceiling, file_ceiling
