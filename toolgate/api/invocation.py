@@ -11,6 +11,7 @@ from toolgate.core import (
     approvals,
     container_admission,
     control_plane,
+    identities,
     port_reviews,
     publications,
     spending,
@@ -76,14 +77,12 @@ def require_current_dispatch_authority(
     if settings and control_plane._row(settings).get("lockdown"):
         deny("LOCKED_DOWN", "ToolGate is in lockdown mode", 423)
     if capability is not None:
-        row = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (actor_id,)).fetchone()
-        if not row or row["status"] != "active":
+        # The actor as it stands now: its key, and the agent identity it acted as.
+        actor = identities.for_actor(conn, actor_id)
+        if actor is None:
             deny("AGENT_REVOKED", "The originating agent key is no longer active", 403)
         required = (capability,) if isinstance(capability, str) else capability
-        if not all(
-            control_plane.is_scoped(control_plane.public_agent_key(row), scope)
-            for scope in required
-        ):
+        if not all(control_plane.is_scoped(actor, scope) for scope in required):
             deny("POLICY_DENIED", "The originating agent no longer has the required scope", 403)
 
 

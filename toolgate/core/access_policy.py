@@ -76,11 +76,16 @@ def set_sensitive(tool_id: str, sensitive: bool, actor: str = "owner") -> bool:
     return sensitive
 
 
+def _key(agent: dict) -> str:
+    # Delegation belongs to the key, whichever agent identity it acts as.
+    return agent.get("key_id") or agent["id"].partition("#")[0]
+
+
 def is_delegate(agent: dict) -> bool:
     with control_plane._conn() as conn:
         _tables(conn)
         row = conn.execute(
-            "SELECT 1 FROM v2_policy_delegates WHERE key_id=?", (agent["id"],)
+            "SELECT 1 FROM v2_policy_delegates WHERE key_id=?", (_key(agent),)
         ).fetchone()
     return row is not None
 
@@ -91,12 +96,12 @@ def set_delegate(agent: dict, enabled: bool, actor: str = "owner") -> bool:
         if enabled:
             conn.execute(
                 "INSERT OR IGNORE INTO v2_policy_delegates VALUES (?, ?)",
-                (agent["id"], control_plane._now()),
+                (_key(agent), control_plane._now()),
             )
         else:
-            conn.execute("DELETE FROM v2_policy_delegates WHERE key_id=?", (agent["id"],))
+            conn.execute("DELETE FROM v2_policy_delegates WHERE key_id=?", (_key(agent),))
     control_plane.event(
-        "policy_delegate_changed", "warning", "agent_key", agent["id"], actor, {"enabled": enabled}
+        "policy_delegate_changed", "warning", "agent_key", _key(agent), actor, {"enabled": enabled}
     )
     return enabled
 

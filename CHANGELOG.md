@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Agent identities:** each agent acts under its own identity (`X-ToolGate-Agent`), scoped to its
+  toolkit and capped by the key; tool lists, invocations and dispatch-time checks follow it. The
+  owner can mint a key bound to one agent for its CLI or MCP (`/v2/owner/agents/{agent}/keys`),
+  which only ever sees that agent's tools. See docs/agent-access.md.
+
 - **Access policy:** an invocation may carry the owner's resolved `decision` (`run` or `ask`).
   `ask` from any key tightens; `run` skips the owner's confirmation only for a key he made a
   policy delegate, never for tools on the floor (marked sensitive, or the fixed system controls).

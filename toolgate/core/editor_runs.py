@@ -73,6 +73,9 @@ def access(identity, payload: Target, agent, *, enabled=None):
         if enabled is not None:
             conn.execute("BEGIN IMMEDIATE")
         publication = target(conn, identity, payload.version, payload.digest, available=enabled is True)
+        if agent.get("identity"):
+            # Grants belong to the chat's own key, never to one agent or a bound key.
+            raise OwnerError("execution_unavailable", "Grant access on the chat's own key.", 403)
         row = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (agent["id"],)).fetchone()
         if not row or row["status"] != "active":
             raise OwnerError("execution_unavailable", "Execution credential is no longer active.", 403)

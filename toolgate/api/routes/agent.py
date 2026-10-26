@@ -31,6 +31,8 @@ def agent_status(agent: dict = Depends(require_agent)):
         "id": agent["id"],
         "agent": agent["name"],
         "scopes": agent.get("scopes", []),
+        # The agent this key acts as (an identity or a bound key), or None for the key itself.
+        "identity": agent.get("identity"),
         "lockdown": control_plane.settings().get("lockdown", False),
         # Whether the owner lets this key's "run" decisions skip his confirmation (off the floor).
         "policyDelegate": access_policy.is_delegate(agent),
