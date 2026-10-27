@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0
+
 - **Owner tool access:** `GET`/`POST /v2/owner/tools/{id}/access` lets the owner switch any tool on
   or off for the chat's own key (`tool:<id>`), checked against the tool's exact digest; the MCP
   route uses the same code. A fresh key could otherwise use nothing until scopes were edited by
