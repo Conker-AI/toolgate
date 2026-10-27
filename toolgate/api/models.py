@@ -117,10 +117,15 @@ class PortReviewRequest(BaseModel):
     original: PortMapping | None = None
 
 
+# The owner may be on a phone, not watching the screen: a request waits the longest window
+# approvals allow (approvals.create_verification_request caps it at 900 seconds).
+DEFAULT_CONFIRMATION_EXPIRY_SECONDS = 900
+
+
 class V2Settings(BaseModel):
     generation_model: str = "qwen3:4b"
     event_retention_days: int = 90
-    default_confirmation_expiry_seconds: int = 60
+    default_confirmation_expiry_seconds: int = DEFAULT_CONFIRMATION_EXPIRY_SECONDS
     producthunt_commercial_use_approved: bool = False
 
 

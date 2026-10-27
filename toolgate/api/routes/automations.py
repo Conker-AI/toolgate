@@ -10,7 +10,7 @@ from toolgate.api.invocation import (
     enforce_dispatch_usage_limits,
     require_current_dispatch_authority,
 )
-from toolgate.api.models import V2Automation, V2Invoke
+from toolgate.api.models import DEFAULT_CONFIRMATION_EXPIRY_SECONDS, V2Automation, V2Invoke
 from toolgate.api.routes.publications import _requested_publication
 from toolgate.api.workflows import _automation_input_errors, _run_workflow_steps
 from toolgate.core import approvals, control_plane, publications
@@ -139,7 +139,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
     approval_granted = False
     tool_snapshot = {}
     if authorization != "auto" and not payload.approval_request_id:
-        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
+        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", DEFAULT_CONFIRMATION_EXPIRY_SECONDS))
         request = approvals.create_verification_request(
             f"Run {automation['name']}",
             "Owner confirmation is required for this exact immutable automation run.",

@@ -126,6 +126,13 @@ def test_execution_key_cannot_forge_approval_text_or_binding(gate):
     assert invoke(gate, request_id).json()["code"] == "OK"
 
 
+def test_a_request_waits_fifteen_minutes_by_default(gate):
+    """The owner may be on a phone, not at the screen; a minute was too short to catch it."""
+    record = cp.get("request", mint(gate))
+    left = datetime.fromisoformat(record["payload"]["binding"]["expires_at"]) - datetime.now(UTC)
+    assert timedelta(minutes=14) < left <= timedelta(minutes=15)
+
+
 def test_late_decision_cannot_restore_a_consumed_token(gate, monkeypatch):
     request_id = mint(gate)
     read_pending = threading.Event()
