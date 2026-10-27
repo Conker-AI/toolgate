@@ -10,7 +10,12 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from toolgate.api.deps import deny, require_admin
-from toolgate.api.models import V2Settings, VerificationCallback, VerificationMethodCreate
+from toolgate.api.models import (
+    DEFAULT_CONFIRMATION_EXPIRY_SECONDS,
+    V2Settings,
+    VerificationCallback,
+    VerificationMethodCreate,
+)
 from toolgate.core import approvals, control_plane, legacy_archive, vault
 
 router = APIRouter()
@@ -38,7 +43,7 @@ def get_settings(_tier: str = Depends(require_admin)):
     return {
         "generation_model": "qwen3:4b",
         "event_retention_days": 90,
-        "default_confirmation_expiry_seconds": 60,
+        "default_confirmation_expiry_seconds": DEFAULT_CONFIRMATION_EXPIRY_SECONDS,
         "producthunt_commercial_use_approved": False,
         **control_plane.settings(),
     }
