@@ -35,6 +35,16 @@ presenting the owner key and the execution key to change. `GET /v2/owner/access`
 key's state, the sensitive tools and the fixed floor executors. A key reads its own state from `GET /v2/agent/status`
 (`policyDelegate`), so a caller can skip resolving decisions that would be ignored.
 
+## Which tools a key may use
+
+A key uses only the tools in its scopes; a fresh deployment key has none unless its deployment seeds
+some. The owner switches one tool on or off for the chat's own key with `POST
+/v2/owner/tools/{id}/access` (`{"enabled": true|false, "expected_digest": "<the tool's digest>"}`),
+presenting the owner key and that execution key; `GET` on the same path shows the state and the
+digest. A grant adds `tool:<id>`; a revoke removes it, and is refused while a broader grant (such as
+`tool:*`) still covers the tool. An agent identity or a key bound to one agent cannot change the
+key: agents only narrow it. Imported MCP tools keep their own route, `/v2/owner/mcp/tools/{id}/access`.
+
 ## No existence leak
 
 Invoking a tool that does not exist and one outside the key's scope give the same answer: 404

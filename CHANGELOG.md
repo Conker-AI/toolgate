@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Owner tool access:** `GET`/`POST /v2/owner/tools/{id}/access` lets the owner switch any tool on
+  or off for the chat's own key (`tool:<id>`), checked against the tool's exact digest; the MCP
+  route uses the same code. A fresh key could otherwise use nothing until scopes were edited by
+  hand. See docs/access-policy.md.
+
 ## 0.6.0
 
 - **Agent sandbox:** two built-in tools, Terminal (`sandbox.run`) and Install packages
