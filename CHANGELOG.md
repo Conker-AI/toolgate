@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.0
+
 - **Requests wait for the owner.** An owner confirmation request no longer expires by default
   (`expires_at: null`); it waits until he answers, since he may look once or twice a day. His
   approval opens a 15-minute window for the exact action to run once. Setting
