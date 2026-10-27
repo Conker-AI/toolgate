@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.1
+
 - The Terminal's description now says to write the command as typed in bash and never wrap it in
   quotes as a whole. The earlier wording made a small model quote the entire command
   (`'echo hi'`), which bash then could not find. ToolGate's earlier texts are refreshed on start.
