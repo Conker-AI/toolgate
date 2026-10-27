@@ -174,3 +174,47 @@ def test_owner_routes_need_the_owner_and_decisions_are_strict(api):
         headers={"X-ToolGate-Execution-Key": pi_key},
     )
     assert loose.status_code == 422
+
+
+def tool_access(client, key, tool_id, enabled=None, digest=None):
+    path = f"/v2/owner/tools/{tool_id}/access"
+    if enabled is None:
+        return client.get(path, headers=owner(key))
+    return client.post(path, json={"enabled": enabled, "expected_digest": digest}, headers=owner(key))
+
+
+def test_the_owner_lets_the_chat_key_use_a_tool_and_takes_it_back(api):
+    """A fresh install's key can use nothing; the owner's switch is the only way in."""
+    client, _, pi_key, _ = api
+    assert invoke(client, pi_key, "echo.hidden").status_code == 404
+    state = tool_access(client, pi_key, "echo.hidden").json()
+    assert (state["enabled"], state["requiredScope"]) == (False, "tool:echo.hidden")
+
+    granted = tool_access(client, pi_key, "echo.hidden", True, state["digest"])
+    assert granted.status_code == 200 and granted.json()["enabled"] is True
+    assert asked(invoke(client, pi_key, "echo.hidden"))
+
+    revoked = tool_access(client, pi_key, "echo.hidden", False, state["digest"])
+    assert revoked.status_code == 200 and revoked.json()["enabled"] is False
+    assert invoke(client, pi_key, "echo.hidden", action="a2").status_code == 404
+
+
+def test_tool_access_is_the_owners_and_checks_the_exact_tool(api):
+    client, _, pi_key, _ = api
+    digest = tool_access(client, pi_key, "echo.hidden").json()["digest"]
+    # The key alone cannot grant itself anything.
+    assert client.post(
+        "/v2/owner/tools/echo.hidden/access",
+        json={"enabled": True, "expected_digest": digest},
+        headers={"X-ToolGate-Execution-Key": pi_key},
+    ).status_code in (401, 403)
+    # A stale screen cannot change a tool that was edited since.
+    assert tool_access(client, pi_key, "echo.hidden", True, "0" * 64).status_code == 409
+    assert tool_access(client, pi_key, "echo.nowhere").status_code == 404
+    # An agent acting under the key cannot widen the key.
+    as_agent = client.post(
+        "/v2/owner/tools/echo.hidden/access",
+        json={"enabled": True, "expected_digest": digest},
+        headers={**owner(pi_key), "X-ToolGate-Agent": "companion"},
+    )
+    assert as_agent.status_code == 403

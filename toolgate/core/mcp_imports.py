@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from toolgate.executors import mcp_http
 
 from . import control_plane as cp
-from . import publications
+from . import publications, tool_access
 from .owner_channel import OwnerError
 
 
@@ -185,68 +185,16 @@ def set_state(identity, payload: State, validate):
 
 
 def access(identity, agent, payload: State | None = None):
+    def not_found():
+        return OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
+
     if not re.fullmatch(r"mcp[.][a-z0-9][a-z0-9.-]{1,74}", identity):
-        raise OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
-    with cp._conn() as conn:
-        conn.execute("BEGIN IMMEDIATE" if payload else "BEGIN")
-        row = conn.execute(
-            "SELECT * FROM v2_objects WHERE kind='tool' AND id=?", (identity,)
-        ).fetchone()
-        tool = cp._row(row) if row else None
-        if not tool or tool.get("execution", {}).get("type") != "mcp_http":
-            raise OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
-        digest = publications.digest(tool)
-        if agent.get("identity"):
-            # Grants belong to the chat's own key, never to one agent or a bound key.
-            raise OwnerError("execution_unavailable", "Grant access on the chat's own key.", 403)
-        caller = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (agent["id"],)).fetchone()
-        if not caller or caller["status"] != "active":
-            raise OwnerError(
-                "execution_unavailable", "The execution credential is no longer active.", 403
-            )
-        caller = cp.public_agent_key(caller)
-        scope = "tool:" + identity
-        if payload:
-            if payload.expected_digest != digest:
-                raise OwnerError(
-                    "definition_conflict",
-                    "The MCP tool changed; reload before changing access.",
-                    409,
-                )
-            if payload.enabled and tool["status"] != "active":
-                raise OwnerError(
-                    "tool_disabled", "Enable the MCP tool before granting access.", 409
-                )
-            updated = (
-                list(dict.fromkeys([*caller["scopes"], scope]))
-                if payload.enabled
-                else [item for item in caller["scopes"] if item != scope]
-            )
-            if not payload.enabled and cp.is_scoped({**caller, "scopes": updated}, identity):
-                raise OwnerError(
-                    "broad_execution_grant",
-                    "A broader host-managed grant still covers this tool.",
-                    409,
-                )
-            conn.execute(
-                "UPDATE v2_agent_keys SET scopes=? WHERE id=?", (json.dumps(updated), caller["id"])
-            )
-            caller["scopes"] = updated
-    if payload:
-        cp.event(
-            "mcp_access_granted" if payload.enabled else "mcp_access_revoked",
-            "warning",
-            "tool",
-            identity,
-            "owner",
-            {"actor_id": caller["id"]},
-        )
-    return {
-        "schemaVersion": 1,
-        "toolId": identity,
-        "actorId": caller["id"],
-        "actorName": caller["name"],
-        "enabled": cp.is_scoped(caller, identity),
-        "requiredScope": scope,
-        "digest": digest,
-    }
+        raise not_found()
+    return tool_access.access(
+        identity,
+        agent,
+        payload,
+        accept=lambda tool: tool.get("execution", {}).get("type") == "mcp_http",
+        not_found=not_found,
+        event_prefix="mcp_access",
+    )
