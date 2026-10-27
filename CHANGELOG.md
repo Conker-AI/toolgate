@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Requests wait for the owner.** An owner confirmation request no longer expires by default
+  (`expires_at: null`); it waits until he answers, since he may look once or twice a day. His
+  approval opens a 15-minute window for the exact action to run once. Setting
+  `default_confirmation_expiry_seconds` (15-900) still bounds the wait. See
+  docs/APPROVAL_INTEGRITY.md.
+
 ## 0.7.0
 
 - The Terminal's description tells the model to quote with single quotes inside the command (it

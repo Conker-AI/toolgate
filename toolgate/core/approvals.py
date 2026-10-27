@@ -139,18 +139,29 @@ def child_bindings(tools: dict) -> dict:
         for key, tool in tools.items()}
 
 
+# Once the owner approves a request that waited for him, the action has this long to run.
+EXECUTION_WINDOW = timedelta(minutes=15)
+
+
 def create_verification_request(title: str, details: str, actor: str, subject_type: str,
                                 subject_id: str, args: dict, version: int | None,
                                 expiry_seconds: int = 60, actor_id: str | None = None, *,
                                 publication_digest: str | None = None) -> dict:
-    expiry = datetime.now(UTC) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
+    """A request for the owner's decision on one exact action. A positive expiry bounds the wait
+    (15 to 900 seconds); 0 means it waits until he answers, and the action then has
+    EXECUTION_WINDOW from his approval to run."""
+    expiry = (
+        datetime.now(UTC) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
+        if expiry_seconds > 0
+        else None
+    )
     binding = {
         "subject_type": subject_type,
         "subject_id": subject_id,
         "version": version,
         "args_digest": action_digest(subject_type, subject_id, args, version),
         "nonce": secrets.token_urlsafe(24),
-        "expires_at": expiry.isoformat(),
+        "expires_at": expiry.isoformat() if expiry else None,
         "consumed_at": None,
     }
     with _conn() as conn:
@@ -205,13 +216,10 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
         return False, "Approval request belongs to a different originating agent"
     if binding.get("consumed_at"):
         return False, "Approval request has already been consumed"
-    try:
-        expires_at = datetime.fromisoformat(binding["expires_at"])
-    except (KeyError, TypeError, ValueError):
+    deadline = _execution_deadline(record, binding)
+    if deadline is None:
         return False, "Approval request has an invalid expiry"
-    if expires_at.tzinfo is None:
-        return False, "Approval request has an invalid expiry"
-    if expires_at <= now:
+    if deadline <= now:
         return False, "Approval request has expired"
     expected = action_digest(subject_type, subject_id, args, version)
     if not secrets.compare_digest(str(binding.get("args_digest", "")), expected):
@@ -244,6 +252,30 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
     return True, "approved"
 
 
+def _execution_deadline(record: dict, binding: dict) -> datetime | None:
+    """When an approved action stops being runnable; None when the record is malformed.
+
+    A bounded request ends at its own expiry. One that waited for the owner (no expiry) ends
+    EXECUTION_WINDOW after his approval, which is recorded outside the immutable binding."""
+    if "expires_at" not in binding:
+        return None
+    raw = binding["expires_at"]
+    if raw is None:
+        raw = (record.get("decision") or {}).get("at")
+        if not isinstance(raw, str):
+            return None
+        try:
+            decided = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        return decided + EXECUTION_WINDOW if decided.tzinfo is not None else None
+    try:
+        expires_at = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None
+    return expires_at if expires_at.tzinfo is not None else None
+
+
 def decide_request(request_id: str, status: str, actor: str, note: str = "", *, guard=None) -> dict | None:
     if status not in {"approved", "rejected", "dismissed"}:
         raise ValueError("Decision must be approved, rejected, or dismissed")
@@ -261,12 +293,16 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
             if not _verification_origin_valid(conn, record):
                 raise ValueError("Approval was not issued intact by ToolGate; request fresh confirmation")
             if status == "approved":
-                try:
-                    expires_at = datetime.fromisoformat(record["payload"]["binding"]["expires_at"])
-                except (KeyError, TypeError, ValueError) as exc:
-                    raise ValueError("Approval expiry is invalid; request fresh confirmation") from exc
-                if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
-                    raise ValueError("Approval has expired; request fresh confirmation")
+                binding = record.get("payload", {}).get("binding", {})
+                if "expires_at" not in binding:
+                    raise ValueError("Approval expiry is invalid; request fresh confirmation")
+                if binding["expires_at"] is not None:
+                    try:
+                        expires_at = datetime.fromisoformat(binding["expires_at"])
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("Approval expiry is invalid; request fresh confirmation") from exc
+                    if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
+                        raise ValueError("Approval has expired; request fresh confirmation")
         record["status"] = status
         record["decision"] = {"actor": actor, "note": note, "at": _now()}
         _save_request(conn, record)

@@ -20,6 +20,12 @@ transaction as the creation event. The fingerprint covers immutable text, actor,
 arguments, binding, expiry, and caller identity; only decision and consumption
 state are excluded. Neither public request endpoint can write issuance provenance.
 
+By default a request has no expiry (`expires_at: null`): it waits until the owner answers,
+however long that takes. His approval opens a 15-minute window (`EXECUTION_WINDOW`, measured
+from the recorded decision time, outside the fingerprint) in which the exact action may run once;
+after that the approval is spent. `default_confirmation_expiry_seconds` set to 15-900 bounds the
+wait instead, and such a request cannot be approved once it has run out.
+
 Both decision and consumption verify this provenance. A forged or subsequently
 altered verification cannot be authorized, even if the database contains an
 otherwise plausible digest. The origin table is in the existing SQLite database
