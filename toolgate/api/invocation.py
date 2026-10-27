@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from toolgate.api.deps import deny
 from toolgate.api.dispatch import _dispatch_tool, _render_template, _shape_tool_result
+from toolgate.api.models import DEFAULT_CONFIRMATION_EXPIRY_SECONDS
 from toolgate.core import (
     access_policy,
     approvals,
@@ -201,7 +202,7 @@ def invoke_tool(
         deny("POLICY_DENIED", "This tool is permanently blocked by its owner policy")
     needs_owner = authorization in {"owner_confirmation", "ai_review"} and not approval_granted
     if needs_owner and not approval_request_id:
-        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", 60))
+        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", DEFAULT_CONFIRMATION_EXPIRY_SECONDS))
         request = approvals.create_verification_request(
             f"Run {tool['name']}",
             (

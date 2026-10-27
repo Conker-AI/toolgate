@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Owner tool access:** `GET`/`POST /v2/owner/tools/{id}/access` lets the owner switch any tool on
+  or off for the chat's own key (`tool:<id>`), checked against the tool's exact digest; the MCP
+  route uses the same code. A fresh key could otherwise use nothing until scopes were edited by
+  hand. See docs/access-policy.md.
+
+- An owner confirmation request now waits 15 minutes (the longest approvals allow) instead of
+  one minute, so the owner can answer from a phone. `default_confirmation_expiry_seconds`
+  still overrides it.
+
 - Terminal and Install packages accept `/workspace` (and paths under it) as the working folder:
   it is where the workspace is mounted inside the sandbox, and models name it that way. Any
   other absolute path, and `..`, are still refused.

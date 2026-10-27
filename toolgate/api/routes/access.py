@@ -1,10 +1,11 @@
-"""Owner routes for access: let Pi decide by his policy, and mark tools that always ask him."""
+"""Owner routes for access: let Pi decide by his policy, mark tools that always ask him, and
+choose which tools the chat's key may use at all."""
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from toolgate.api.deps import deny, require_agent, require_owner
-from toolgate.core import access_policy, control_plane
+from toolgate.core import access_policy, control_plane, tool_access
 
 router = APIRouter()
 
@@ -34,3 +35,19 @@ def owner_set_sensitive(tool_id: str, payload: access_policy.Sensitivity):
     if control_plane.get("tool", tool_id) is None:
         deny("TOOL_UNAVAILABLE", "No such tool", 404)
     return {"id": tool_id, "sensitive": access_policy.set_sensitive(tool_id, payload.sensitive)}
+
+
+@router.get("/v2/owner/tools/{tool_id}/access", dependencies=[Depends(require_owner)])
+def owner_tool_access(tool_id: str, agent: dict = Depends(require_agent)):
+    """Whether the presented key may use this tool."""
+    return JSONResponse(tool_access.access(tool_id, agent), headers={"Cache-Control": "no-store"})
+
+
+@router.post("/v2/owner/tools/{tool_id}/access", dependencies=[Depends(require_owner)])
+def owner_set_tool_access(
+    tool_id: str, payload: tool_access.State, agent: dict = Depends(require_agent)
+):
+    """Grant or revoke the presented key's use of this tool (never an agent's or a bound key's)."""
+    return JSONResponse(
+        tool_access.access(tool_id, agent, payload), headers={"Cache-Control": "no-store"}
+    )
