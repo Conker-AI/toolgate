@@ -7,8 +7,9 @@ from toolgate.core import control_plane
 TERMINAL_DESCRIPTION = (
     "Run a shell command in this agent's own sandbox: a fresh Linux container with Python, Node "
     "and git, no network, only the agent's workspace folder at /workspace (shared with the "
-    "owner), and limits on CPU, memory, processes, disk and time. The command travels inside a "
-    "JSON string: quote with single quotes inside it, for example python3 -c 'print(1)'."
+    "owner), and limits on CPU, memory, processes, disk and time. Write the command exactly as "
+    "you would type it in bash, never wrapped in quotes as a whole: echo hello, or "
+    "python3 -c 'print(1)'. Inside the command, quote with single quotes."
 )
 # Descriptions ToolGate itself once registered. Only these are refreshed on start; an owner's
 # own edit to the description is never overwritten.
@@ -17,6 +18,13 @@ PREVIOUS_TERMINAL_DESCRIPTIONS = (
         "Run a shell command in this agent's own sandbox: a fresh Linux container with Python, "
         "Node and git, no network, only the agent's workspace folder at /workspace (shared with "
         "the owner), and limits on CPU, memory, processes, disk and time."
+    ),
+    (
+        "Run a shell command in this agent's own sandbox: a fresh Linux container with Python, "
+        "Node and git, no network, only the agent's workspace folder at /workspace (shared with "
+        "the owner), and limits on CPU, memory, processes, disk and time. The command travels "
+        "inside a JSON string: quote with single quotes inside it, for example python3 -c "
+        "'print(1)'."
     ),
 )
 
