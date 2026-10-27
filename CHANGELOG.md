@@ -7,6 +7,10 @@
   route uses the same code. A fresh key could otherwise use nothing until scopes were edited by
   hand. See docs/access-policy.md.
 
+- An owner confirmation request now waits 15 minutes (the longest approvals allow) instead of
+  one minute, so the owner can answer from a phone. `default_confirmation_expiry_seconds`
+  still overrides it.
+
 ## 0.6.0
 
 - **Agent sandbox:** two built-in tools, Terminal (`sandbox.run`) and Install packages
