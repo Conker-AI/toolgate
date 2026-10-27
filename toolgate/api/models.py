@@ -117,9 +117,9 @@ class PortReviewRequest(BaseModel):
     original: PortMapping | None = None
 
 
-# The owner may be on a phone, not watching the screen: a request waits the longest window
-# approvals allow (approvals.create_verification_request caps it at 900 seconds).
-DEFAULT_CONFIRMATION_EXPIRY_SECONDS = 900
+# 0: a request waits until the owner answers; he may look once or twice a day. A positive value
+# bounds the wait instead (approvals.create_verification_request keeps it within 15 to 900 seconds).
+DEFAULT_CONFIRMATION_EXPIRY_SECONDS = 0
 
 
 class V2Settings(BaseModel):

@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
-from toolgate.core import approvals, vault
+from toolgate.core import approvals, owner_channel, vault
 from toolgate.core import control_plane as cp
 from toolgate.tests.test_approval_boundary import TOOL, TOOL_ID
 
@@ -116,21 +116,40 @@ def test_execution_key_cannot_forge_approval_text_or_binding(gate):
     record = cp.get("request", request_id)
     assert record["title"] == f"Run {TOOL['name']}"
     assert record["payload"]["binding"]["nonce"] != "attacker-nonce"
-    expiry = datetime.fromisoformat(record["payload"]["binding"]["expires_at"])
-    assert (
-        datetime.now(UTC)
-        < expiry
-        <= datetime.now(UTC) + timedelta(seconds=900)
-    )
+    # By default the request waits for the owner; the run window starts at his approval.
+    assert record["payload"]["binding"]["expires_at"] is None
     approvals.decide_request(request_id, "approved", "admin")
     assert invoke(gate, request_id).json()["code"] == "OK"
 
 
-def test_a_request_waits_fifteen_minutes_by_default(gate):
-    """The owner may be on a phone, not at the screen; a minute was too short to catch it."""
-    record = cp.get("request", mint(gate))
-    left = datetime.fromisoformat(record["payload"]["binding"]["expires_at"]) - datetime.now(UTC)
-    assert timedelta(minutes=14) < left <= timedelta(minutes=15)
+def _age(request_id, **delta):
+    """Move a request's recorded decision into the past, as if he had approved it earlier."""
+    record = cp.get("request", request_id)
+    decided = datetime.fromisoformat(record["decision"]["at"]) - timedelta(**delta)
+    record["decision"]["at"] = decided.isoformat()
+    with cp._conn() as conn:
+        approvals._save_request(conn, record)
+
+
+def test_a_request_waits_until_the_owner_answers(gate):
+    """He looks at the Inbox once or twice a day; a request must still be there when he does."""
+    request_id = mint(gate)
+    record = cp.get("request", request_id)
+    assert record["payload"]["binding"]["expires_at"] is None
+    with cp._conn() as conn:
+        view = owner_channel.project(conn, record)
+    assert view["reviewable"] and view["unavailable_reason"] is None
+    # Days later he approves; the action runs in the window that his approval opens.
+    approvals.decide_request(request_id, "approved", "admin")
+    assert invoke(gate, request_id).json()["code"] == "OK"
+
+
+def test_an_approval_that_was_never_used_runs_out(gate):
+    """Approval opens a short window to run; it is not a standing permission."""
+    request_id = mint(gate)
+    approvals.decide_request(request_id, "approved", "admin")
+    _age(request_id, minutes=16)
+    assert consume(gate, request_id) == (False, "Approval request has expired")
 
 
 def test_late_decision_cannot_restore_a_consumed_token(gate, monkeypatch):
@@ -357,6 +376,8 @@ def test_competing_signed_callbacks_return_conflict_without_rewriting(
 
 
 def test_expired_requests_cannot_be_reported_as_approved(gate, monkeypatch):
+    """An owner who sets a time limit gets one: past it, the request cannot be approved."""
+    cp.update_settings({"default_confirmation_expiry_seconds": 60}, "admin")
     request_id = mint(gate)
     future = datetime.now(UTC) + timedelta(seconds=901)
 

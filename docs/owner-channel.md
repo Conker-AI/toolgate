@@ -73,8 +73,9 @@ cannot become approved between the read and write. Decision actor is
 binding and one-time consumption remain enforced when the execution channel later
 invokes the tool. A decision does not invoke anything.
 
-Historical expiry semantics remain unchanged: a pending record can be expired
-without its stored status changing. `reviewable=false` and reason `expired` make
+A request with `expires_at: null` waits for the owner and never shows `expired` while pending;
+after approval it may run within 15 minutes of his decision. A bounded request keeps the
+historical semantics: a pending record can be expired without its stored status changing. `reviewable=false` and reason `expired` make
 that explicit. Do not infer approval eligibility from `status` alone.
 
 ## Recovery and integration

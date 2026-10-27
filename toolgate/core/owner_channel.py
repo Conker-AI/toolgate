@@ -113,7 +113,8 @@ def project(db, record):
     reason = None
     if not origin_valid:
         reason = "invalid_origin"
-    elif (not subject_type or not subject_id or version is None or not expires or
+    elif (not subject_type or not subject_id or version is None
+          or "expires_at" not in binding or (binding.get("expires_at") is not None and not expires) or
           payload.get("subject_type") != subject_type or payload.get("subject_id") != subject_id):
         reason = "invalid_action"
     elif args is None:
@@ -122,7 +123,8 @@ def project(db, record):
         reason = "unsupported_subject"
     elif binding.get("consumed_at"):
         reason = "consumed"
-    elif datetime.fromisoformat(expires) <= datetime.now(UTC):
+    elif expires and datetime.fromisoformat(expires) <= datetime.now(UTC):
+        # A request with no expiry waits for the owner; only a bounded one runs out.
         reason = "expired"
     elif record.get("status") != "pending":
         reason = "already_decided"
