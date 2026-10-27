@@ -132,6 +132,16 @@ class TestCwd:
             validation.cwd("/abs")
         assert exc.value.code == "invalid_cwd"
 
+    def test_cwd_accepts_the_mounted_workspace_path(self):
+        """Models name the folder as the container sees it; that is the same workspace."""
+        assert validation.cwd("/workspace") == ""
+        assert validation.cwd("/workspace/") == ""
+        assert validation.cwd("/workspace/src/app") == "src/app"
+        for escape in ("/workspace/../etc", "/workspaces", "/workspace2/x", "/etc", "/"):
+            with pytest.raises(validation.Refused) as exc:
+                validation.cwd(escape)
+            assert exc.value.code == "invalid_cwd", escape
+
     def test_cwd_refuses_traversal_components(self):
         with pytest.raises(validation.Refused) as exc:
             validation.cwd("a/../b")
