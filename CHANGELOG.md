@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Terminal and Install packages accept `/workspace` (and paths under it) as the working folder:
+  it is where the workspace is mounted inside the sandbox, and models name it that way. Any
+  other absolute path, and `..`, are still refused.
+
 ## 0.6.0
 
 - **Agent sandbox:** two built-in tools, Terminal (`sandbox.run`) and Install packages

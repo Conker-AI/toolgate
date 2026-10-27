@@ -15,6 +15,8 @@ import shlex
 AGENT = re.compile(r"[a-z][a-z0-9_]{0,63}")
 MAX_COMMAND = 8000
 MAX_CWD = 255
+# Where the agent's workspace is mounted inside every sandbox container.
+WORKSPACE = "/workspace"
 CWD_PART = re.compile(r"[A-Za-z0-9._@+-][A-Za-z0-9._@+ -]{0,99}")
 MAX_PACKAGES = 20
 # Names and version constraints only: no URLs, paths, options, direct references or VCS links.
@@ -48,11 +50,16 @@ def agent(value) -> str:
 
 
 def cwd(value) -> str:
-    """A folder inside the workspace, relative, without `..`: '' is the workspace itself."""
+    """A folder inside the workspace, relative, without `..`: '' is the workspace itself.
+
+    Inside the sandbox the workspace is mounted at /workspace and models name it that way, so
+    /workspace and paths under it mean the same folders; any other absolute path is refused."""
     if value is None or value == "":
         return ""
     if not isinstance(value, str) or len(value) > MAX_CWD or "\x00" in value:
         raise Refused("invalid_cwd", "The working folder must be a short relative path.")
+    if value == WORKSPACE or value.startswith(WORKSPACE + "/"):
+        value = value[len(WORKSPACE) :].lstrip("/") or "."
     parts = [part for part in value.strip("/").split("/") if part not in ("", ".")]
     if value.startswith("/") or any(part == ".." or not CWD_PART.fullmatch(part) for part in parts):
         raise Refused(
