@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0
+
 - The Terminal's description tells the model to quote with single quotes inside the command (it
   travels in a JSON string). Small local models broke the JSON on nested double quotes, and the
   request was refused unrun. An existing Terminal still carrying ToolGate's earlier text gets the
