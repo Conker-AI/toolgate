@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0
+
 - **Agent sandbox:** two built-in tools, Terminal (`sandbox.run`) and Install packages
   (`sandbox.install`), default AI decides, registered once `TOOLGATE_SANDBOX_SOCKET` is set. Each
   command runs in a fresh container started by the new sandbox runner
