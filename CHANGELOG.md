@@ -7,6 +7,10 @@
   request was refused unrun. An existing Terminal still carrying ToolGate's earlier text gets the
   new text on start; an owner's own edit is kept.
 
+- The sandbox runner waits up to a second for Docker's out-of-memory label after a command is
+  killed with SIGKILL that the runner did not send; the label can land just after the exit, and
+  an out-of-memory kill was sometimes reported as a plain kill.
+
 - **Owner tool access:** `GET`/`POST /v2/owner/tools/{id}/access` lets the owner switch any tool on
   or off for the chat's own key (`tool:<id>`), checked against the tool's exact digest; the MCP
   route uses the same code. A fresh key could otherwise use nothing until scopes were edited by
