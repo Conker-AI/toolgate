@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Terminal's description tells the model to quote with single quotes inside the command (it
+  travels in a JSON string). Small local models broke the JSON on nested double quotes, and the
+  request was refused unrun. An existing Terminal still carrying ToolGate's earlier text gets the
+  new text on start; an owner's own edit is kept.
+
 - **Owner tool access:** `GET`/`POST /v2/owner/tools/{id}/access` lets the owner switch any tool on
   or off for the chat's own key (`tool:<id>`), checked against the tool's exact digest; the MCP
   route uses the same code. A fresh key could otherwise use nothing until scopes were edited by

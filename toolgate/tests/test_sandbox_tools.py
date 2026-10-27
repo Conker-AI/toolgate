@@ -97,6 +97,25 @@ def test_registered_only_with_a_runner_and_owner_choices_survive(tmp_path, monke
     assert cp.get("tool", "sandbox.run")["authorization"] == "auto"
 
 
+def test_the_old_terminal_text_is_refreshed_and_an_owner_edit_is_kept(tmp_path, monkeypatch):
+    """Small local models broke the JSON on nested double quotes; the new text says how to quote.
+    Only ToolGate's own earlier wording is replaced, and nothing but the description changes."""
+    from toolgate.sandbox import tools as sandbox_tools
+
+    monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
+    monkeypatch.setenv("TOOLGATE_SANDBOX_SOCKET", "/run/x.sock")
+    ensure_builtin_sandbox_capabilities()
+    old = sandbox_tools.PREVIOUS_TERMINAL_DESCRIPTIONS[0]
+    cp.update_tool("sandbox.run", {**cp.get("tool", "sandbox.run"), "description": old, "authorization": "auto"})
+    ensure_builtin_sandbox_capabilities()
+    refreshed = cp.get("tool", "sandbox.run")
+    assert refreshed["description"] == sandbox_tools.TERMINAL_DESCRIPTION
+    assert "single quotes" in refreshed["description"] and refreshed["authorization"] == "auto"
+    cp.update_tool("sandbox.run", {**refreshed, "description": "The owner's own words."})
+    ensure_builtin_sandbox_capabilities()
+    assert cp.get("tool", "sandbox.run")["description"] == "The owner's own words."
+
+
 def test_the_callers_identity_picks_the_workspace(gate):
     client, key, calls, _ = gate
     auto("sandbox.run")
