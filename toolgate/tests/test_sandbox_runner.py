@@ -276,3 +276,28 @@ def test_only_the_configured_peer_uid_may_run(make, tmp_path, admitted):
         assert oversized["code"] == "invalid_request"
     else:
         assert answer == {**answer, "ok": False, "code": "not_permitted"} and docker.calls == []
+
+
+def test_an_out_of_memory_label_that_lands_after_the_exit_is_kept(make, monkeypatch):
+    """Docker records the OOM kill from a separate event that can arrive just after the exit."""
+    sandbox, docker, _ = make()
+    states = iter(
+        [
+            {"Running": False, "ExitCode": 137, "OOMKilled": False},
+            {"Running": False, "ExitCode": 137, "OOMKilled": True},
+        ]
+    )
+    docker.inspect = lambda container: {"State": next(states)}
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    answer = sandbox.handle(run_request())
+    assert (answer["exit_code"], answer["oom_killed"]) == (137, True)
+
+
+def test_a_plain_kill_is_not_reported_as_out_of_memory(make, monkeypatch):
+    sandbox, docker, _ = make()
+    docker.inspect = lambda container: {
+        "State": {"Running": False, "ExitCode": 137, "OOMKilled": False}
+    }
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    answer = sandbox.handle(run_request())
+    assert (answer["exit_code"], answer["oom_killed"]) == (137, False)

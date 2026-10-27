@@ -27,6 +27,7 @@ from toolgate.sandbox.docker_api import Docker, DockerError
 MAX_REQUEST = 64 * 1024
 KEEP_OUTPUT = 64 * 1024
 DEFAULT_SOCKET = "/run/conker-sandbox/runner.sock"
+OOM_SETTLE_CHECKS = 10  # tenths of a second to wait for Docker's out-of-memory label
 RUN_KEYS = {"v", "op", "agent", "command", "cwd", "timeout", "request_id"}
 INSTALL_KEYS = {"v", "op", "agent", "manager", "packages", "timeout", "request_id"}
 
@@ -256,6 +257,13 @@ class Runner:
         while True:
             state = self.docker.inspect(container)["State"]
             if not state.get("Running"):
+                # Docker records an out-of-memory kill from a separate event that can land just
+                # after the exit code. A SIGKILL we did not send gets a moment to be labelled.
+                for _ in range(OOM_SETTLE_CHECKS):
+                    if killed or state.get("ExitCode") != 137 or state.get("OOMKilled"):
+                        break
+                    time.sleep(0.1)
+                    state = self.docker.inspect(container)["State"]
                 return state, timed_out, exceeded
             now = time.monotonic()
             if not killed and now > deadline:
