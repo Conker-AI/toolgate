@@ -4,18 +4,41 @@ import os
 
 from toolgate.core import control_plane
 
+TERMINAL_DESCRIPTION = (
+    "Run a shell command in this agent's own sandbox: a fresh Linux container with Python, Node "
+    "and git, no network, only the agent's workspace folder at /workspace (shared with the "
+    "owner), and limits on CPU, memory, processes, disk and time. The command travels inside a "
+    "JSON string: quote with single quotes inside it, for example python3 -c 'print(1)'."
+)
+# Descriptions ToolGate itself once registered. Only these are refreshed on start; an owner's
+# own edit to the description is never overwritten.
+PREVIOUS_TERMINAL_DESCRIPTIONS = (
+    (
+        "Run a shell command in this agent's own sandbox: a fresh Linux container with Python, "
+        "Node and git, no network, only the agent's workspace folder at /workspace (shared with "
+        "the owner), and limits on CPU, memory, processes, disk and time."
+    ),
+)
+
 
 def ensure_builtin_sandbox_capabilities() -> None:
     """The terminal and install tools, once a sandbox runner is configured. Registered only when
     absent, so the owner's access choices survive restarts. Default: AI decides."""
     if not os.environ.get("TOOLGATE_SANDBOX_SOCKET"):
         return
+    existing = control_plane.get("tool", "sandbox.run")
+    if existing and existing.get("description") in PREVIOUS_TERMINAL_DESCRIPTIONS:
+        # Small local models broke the JSON on nested double quotes; the new text tells them how.
+        control_plane.update_tool(
+            "sandbox.run",
+            {**existing, "description": TERMINAL_DESCRIPTION, "expected_version": existing.get("version", 1)},
+        )
     if not control_plane.get("tool", "sandbox.run"):
         control_plane.create_tool(
             {
                 "id": "sandbox.run",
                 "name": "Terminal",
-                "description": "Run a shell command in this agent's own sandbox: a fresh Linux container with Python, Node and git, no network, only the agent's workspace folder at /workspace (shared with the owner), and limits on CPU, memory, processes, disk and time.",
+                "description": TERMINAL_DESCRIPTION,
                 "category": "controlled",
                 "authorization": "ai_review",
                 "status": "active",

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Terminal's description tells the model to quote with single quotes inside the command (it
+  travels in a JSON string). Small local models broke the JSON on nested double quotes, and the
+  request was refused unrun. An existing Terminal still carrying ToolGate's earlier text gets the
+  new text on start; an owner's own edit is kept.
+
 - The sandbox runner waits up to a second for Docker's out-of-memory label after a command is
   killed with SIGKILL that the runner did not send; the label can land just after the exit, and
   an out-of-memory kill was sometimes reported as a plain kill.
