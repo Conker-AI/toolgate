@@ -146,10 +146,11 @@ EXECUTION_WINDOW = timedelta(minutes=15)
 def create_verification_request(title: str, details: str, actor: str, subject_type: str,
                                 subject_id: str, args: dict, version: int | None,
                                 expiry_seconds: int = 60, actor_id: str | None = None, *,
-                                publication_digest: str | None = None) -> dict:
+                                publication_digest: str | None = None, card: str = "do") -> dict:
     """A request for the owner's decision on one exact action. A positive expiry bounds the wait
     (15 to 900 seconds); 0 means it waits until he answers, and the action then has
-    EXECUTION_WINDOW from his approval to run."""
+    EXECUTION_WINDOW from his approval to run. `card` is the tool's button template, copied now
+    so the Inbox shows the buttons he chose when he was asked."""
     expiry = (
         datetime.now(UTC) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
         if expiry_seconds > 0
@@ -179,7 +180,8 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
         record = _insert_request(conn, {
             "kind": "verification", "title": title, "details": details, "actor": actor,
             "payload": {"subject_type": subject_type, "subject_id": subject_id,
-                        "args": args, "binding": binding, "created_by_agent_key": actor_id},
+                        "args": args, "binding": binding, "created_by_agent_key": actor_id,
+                        "card": card},
             "severity": "warning",
         })
         conn.execute("INSERT INTO v2_verification_origins(request_id,fingerprint) VALUES(?,?)",

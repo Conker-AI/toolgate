@@ -28,6 +28,18 @@ A tool is on the floor when the owner marked it sensitive (`POST /v2/owner/tools
 review (`port_control`, `container_control`, `process_control`). No decision skips the owner for
 these. Agent tool listings (`GET /v2/agent/tools`) include `"sensitive": true|false`.
 
+## Inbox buttons
+
+The owner picks which buttons his Inbox shows when a tool asks him: `POST
+/v2/owner/tools/{id}/card` with `{"template": "do" | "send" | "publish" | "ship" | "run" | "delete" |
+"pay" | "save"}` (Do it / Don't, Send it / Don't send, Publish / Not yet, Ship it / Not yet, Run it /
+Don't run, Delete / Keep it, Pay / Don't pay, Save / Don't save). The list is fixed so that no tool,
+and no AI drafting one, can label the approve button with something else. It is an owner setting
+kept beside the floor, not part of the tool, so the tool's version and bound approvals do not change.
+Each request copies the template when it is made (`card` in the owner channel's projection); `GET
+/v2/owner/access` lists every template that is not `do` as `cards`. The Terminal (`sandbox.run`)
+starts with `run`.
+
 ## Delegates
 
 Only the owner makes a key a delegate: `POST /v2/owner/access/delegate` with `{"enabled": true}`,

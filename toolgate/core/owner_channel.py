@@ -9,7 +9,7 @@ import re
 import secrets
 from datetime import UTC, datetime
 
-from . import approvals, vault
+from . import approvals, ask_cards, vault
 from . import control_plane as cp
 
 OWNER_HASH = "TOOLGATE_OWNER_KEY_SHA256"
@@ -158,6 +158,8 @@ def project(db, record):
                    "version": version, "args": args,
                    **({"publication": publication_view} if publication_view else {})},
         "approval": {"expires_at": expires, "consumed_at": consumed, "origin_valid": origin_valid},
+        # The buttons he chose for this tool when he was asked; labels only.
+        "card": ask_cards.valid(payload.get("card")),
         "reviewable": reason is None, "unavailable_reason": reason,
     }
 

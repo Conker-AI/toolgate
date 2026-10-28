@@ -10,6 +10,7 @@ from toolgate.api.models import DEFAULT_CONFIRMATION_EXPIRY_SECONDS
 from toolgate.core import (
     access_policy,
     approvals,
+    ask_cards,
     container_admission,
     control_plane,
     identities,
@@ -219,6 +220,7 @@ def invoke_tool(
             expiry,
             actor_id,
             publication_digest=publication_digest,
+            card=ask_cards.card_for(tool["id"]),
         )
         return {
             "code": "CONFIRMATION_REQUIRED",
