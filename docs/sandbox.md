@@ -4,7 +4,7 @@ Two built-in tools give every agent a terminal without giving it the host:
 
 | Tool | What it does | Default access |
 |---|---|---|
-| `sandbox.run` (Terminal) | Runs one shell command (`command`, optional `cwd` inside the workspace, `timeout_seconds` 1-100, default 30) | AI decides (`ai_review`) |
+| `sandbox.run` (Terminal) | Runs one shell command (`command`, optional `cwd` inside the workspace, where `/` and `/workspace` both mean the workspace itself, `timeout_seconds` 1-100, default 30 when absent or null) | AI decides (`ai_review`) |
 | `sandbox.install` (Install packages) | Installs `packages` (1-20 names, optional versions) with `manager` `pip` or `npm` | AI decides (`ai_review`) |
 
 They are registered on startup once `TOOLGATE_SANDBOX_SOCKET` is set, and only when absent, so

@@ -18,6 +18,7 @@ from toolgate.sandbox import validation
 
 EXECUTIONS = {"sandbox_run": "sandbox.run", "sandbox_install": "sandbox.install"}
 MAX_RUN_SECONDS = 100
+DEFAULT_RUN_SECONDS = 30
 MAX_ANSWER = 1024 * 1024
 KEEP = 16000
 # Terminal control sequences and other control characters, except newline and tab.
@@ -39,6 +40,16 @@ class OutcomeUnknown(RuntimeError):
         super().__init__("The command may have run; check the workspace before running it again.")
 
 
+def _seconds(args: dict) -> int:
+    """The time limit; absent or null means the default, as models often send null."""
+    seconds = args.get("timeout_seconds")
+    if seconds is None:
+        return DEFAULT_RUN_SECONDS
+    if type(seconds) is not int or not 1 <= seconds <= MAX_RUN_SECONDS:
+        raise validation.Refused("invalid_timeout", "timeout_seconds is 1 to 100.")
+    return seconds
+
+
 def check(tool: dict, args: dict) -> list[str]:
     """Argument problems, before any approval is asked for. The guard runs here."""
     try:
@@ -47,6 +58,7 @@ def check(tool: dict, args: dict) -> list[str]:
                 return ["Provide only command, cwd and timeout_seconds."]
             validation.command(args.get("command"))
             validation.cwd(args.get("cwd", ""))
+            _seconds(args)
         else:
             if set(args) - {"manager", "packages"}:
                 return ["Provide only manager and packages."]
@@ -100,9 +112,7 @@ def execute(tool: dict, args: dict, agent: str, action_id: str) -> dict:
     try:
         agent = validation.agent(agent)
         if kind == "sandbox_run":
-            seconds = args.get("timeout_seconds", 30)
-            if type(seconds) is not int or not 1 <= seconds <= MAX_RUN_SECONDS:
-                raise validation.Refused("invalid_timeout", "timeout_seconds is 1 to 100.")
+            seconds = _seconds(args)
             request = {
                 "v": 1,
                 "op": "run",

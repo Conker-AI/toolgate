@@ -186,6 +186,23 @@ def test_results_are_shaped_cleaned_and_bounded(gate):
     assert len(run["stdout"]) == 16000 and run["stdout"].endswith("!") and run["truncated"] is True
 
 
+def test_small_model_arguments_run_in_the_workspace_with_the_default_time(gate):
+    client, _, calls, _ = gate
+    auto("sandbox.run")
+    args = {"command": "ls", "cwd": "/", "timeout_seconds": None}
+    body = invoke(client, args, action="n1").json()
+    assert body["code"] == "OK"
+    assert (calls[-1]["cwd"], calls[-1]["timeout"]) == ("", 30)
+
+
+def test_a_bad_time_limit_is_refused_before_any_approval(gate):
+    client, _, calls, _ = gate
+    refused = invoke(client, {"command": "ls", "timeout_seconds": 500}, action="t1")
+    assert refused.status_code == 422
+    assert "timeout_seconds is 1 to 100" in refused.json()["detail"]["message"]
+    assert calls == []
+
+
 def test_a_lost_answer_is_unknown_and_never_sent_twice(gate):
     client, _, calls, answer = gate
     auto("sandbox.run")
