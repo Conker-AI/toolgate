@@ -4,6 +4,7 @@
 Typed tools, exact single-use approvals, spending limits and a receipt for everything.</p>
 <p align="center">
   <a href="https://github.com/Conker-AI/toolgate/actions/workflows/ci.yml"><img src="https://github.com/Conker-AI/toolgate/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/Conker-AI/toolgate/tags"><img src="https://img.shields.io/github/v/tag/Conker-AI/toolgate?sort=semver&label=release" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/python-3.12-3776AB" alt="Python 3.12" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="AGPL-3.0 license" /></a>
   <a href="https://github.com/Conker-AI/conker"><img src="https://img.shields.io/badge/part%20of-Conker-e36b2c" alt="Part of Conker" /></a>
@@ -39,21 +40,29 @@ flowchart LR
 | **Automation** | A versioned, deterministic workflow of tools and bounded control blocks. |
 | **Request** | Something waiting for the owner: a verification, warning, proposal or update. |
 
-- **Approvals are exact.** An approval binds the object, version, argument digest, nonce and expiry.
-  It is consumed once; a replay or changed argument fails closed.
+- **Approvals are exact.** An approval binds the object, version, argument digest and nonce. A
+  request waits for the owner as long as it takes; their yes opens a 15-minute window for that exact
+  action to run once. A replay or a changed argument fails closed.
+  ([details](docs/APPROVAL_INTEGRITY.md))
+- **Access follows the owner.** Who may decide each action comes from the owner's settings (the
+  chat, the agent, the tool). A floor of actions always asks the owner, and each agent sees and runs only
+  its own toolkit. ([details](docs/access-policy.md))
 - **Secrets stay put.** Vault values are write-only and encrypted at rest. No API returns one.
 - **Money has ceilings.** Paid routes stay off until prices, limits and a job are configured.
   An interrupted call is held as `outcome_unknown`, never retried blindly.
   ([details](docs/DURABLE_EXECUTION_AND_SPENDING.md))
 - **Health is real.** `/health` probes every dependency and says `degraded` when one fails.
-- **No arbitrary code.** Executors are a fixed set: HTTP JSON, research search and fetch,
-  MemoryGate reads and bounded model calls.
+- **No code on the host.** Executors are a fixed set: HTTP JSON, research search and fetch,
+  MemoryGate reads and bounded model calls. The agent's Terminal runs each command in a fresh,
+  locked-down container with no network; package installs reach PyPI and npm only through a
+  read-only proxy. ([details](docs/sandbox.md))
 
 ![ToolGate command center](docs/screenshots/dashboard-command-center.png)
 
 ## Quick start
 
-Requires Docker with Compose.
+Requires Docker with Compose. Published images: `ghcr.io/conker-ai/toolgate` and
+`ghcr.io/conker-ai/toolgate-sandbox`.
 
 ```bash
 cp toolgate/.env.example toolgate/.env
@@ -97,9 +106,9 @@ python toolgate/scripts/mutation_check.py     # proves the tests catch broken be
 More, including the live boundary verifier: [testing](docs/testing.md).
 
 ```text
-toolgate/api/        FastAPI owner and agent API, executors, automation runtime
+toolgate/api/        FastAPI app; one router per area in api/routes, automation runtime
 toolgate/core/       SQLite control plane, policy, vault
-toolgate/executors/  Research search and fetch adapters
+toolgate/executors/  Research, sandbox, system and container adapters
 toolgate/cli/        Standard-library agent CLI
 toolgate/mcp/        Opt-in authenticated MCP bridge
 dashboard/           React owner dashboard
@@ -107,15 +116,40 @@ dashboard/           React owner dashboard
 
 ## Documentation
 
+**Using it**
+
 | | |
 |---|---|
 | [Security model](docs/security.md) | Scopes, vault, approvals, research boundary, callbacks |
+| [Access policy](docs/access-policy.md) | Who may decide each action, and the floor that always asks |
+| [Agent access](docs/agent-access.md) | Agent identities, the CLI and the MCP bridge |
+| [Agent sandbox](docs/sandbox.md) | Terminal and Install packages in locked-down containers |
 | [Automations](docs/automations.md) | Workflows, revisions, publication, nested runs |
-| [Agent access](docs/agent-access.md) | CLI and MCP bridge |
-| [Deployment](docs/deployment.md) | Compose, vault key, health, upgrades |
+| [Owner channel](docs/owner-channel.md) | The browser gateway's own bounded credential |
+| [Authenticated MCP](docs/AUTHENTICATED_MCP.md) | The opt-in MCP transport |
+
+**Money and outcomes**
+
+| | |
+|---|---|
 | [Durable execution and spending](docs/DURABLE_EXECUTION_AND_SPENDING.md) | Action IDs, budgets, unknown outcomes |
-| [Approval integrity](docs/APPROVAL_INTEGRITY.md) | How approvals are bound and consumed |
+| [Recurring spending](docs/recurring-spending.md) | Finite allowances for scheduled work |
+| [Approval integrity](docs/APPROVAL_INTEGRITY.md) | How approvals are issued, bound and consumed |
+
+**The machine**
+
+| | |
+|---|---|
+| [System inventory](docs/system-inventory.md) · [Filesystem](docs/filesystem-inventory.md) | Read-only views of the host |
+| [Containers](docs/container-control.md) · [Services](docs/process-control.md) · [Ports](docs/port-reconfiguration.md) | Managed lifecycle actions, each behind approval |
+
+**Running it**
+
+| | |
+|---|---|
+| [Deployment](docs/deployment.md) | Compose, vault key, health, upgrades |
 | [Testing](docs/testing.md) | Suites, mutation check, live verifier |
+| [Recovery journal](docs/recovery-journal.md) · [Retiring cognition](docs/AI_RETIREMENT.md) | Restore and upgrade notes |
 | [API (OpenAPI)](docs/openapi.json) | Full route reference |
 
 ## License
