@@ -1,11 +1,11 @@
-"""Owner routes for access: let Pi decide by his policy, mark tools that always ask him, and
-choose which tools the chat's key may use at all."""
+"""Owner routes for access: let Pi decide by his policy, mark tools that always ask him, pick the
+buttons his Inbox shows for a tool, and choose which tools the chat's key may use at all."""
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from toolgate.api.deps import deny, require_agent, require_owner
-from toolgate.core import access_policy, control_plane, tool_access
+from toolgate.core import access_policy, ask_cards, control_plane, tool_access
 
 router = APIRouter()
 
@@ -18,6 +18,8 @@ def owner_access(agent: dict = Depends(require_agent)):
             "delegate": access_policy.is_delegate(agent),
             "sensitive": sorted(access_policy.sensitive_ids()),
             "floorExecutions": sorted(access_policy.FLOOR_EXECUTIONS),
+            # Button templates that differ from "do", by tool.
+            "cards": ask_cards.chosen(),
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -35,6 +37,15 @@ def owner_set_sensitive(tool_id: str, payload: access_policy.Sensitivity):
     if control_plane.get("tool", tool_id) is None:
         deny("TOOL_UNAVAILABLE", "No such tool", 404)
     return {"id": tool_id, "sensitive": access_policy.set_sensitive(tool_id, payload.sensitive)}
+
+
+@router.post("/v2/owner/tools/{tool_id}/card", dependencies=[Depends(require_owner)])
+def owner_set_card(tool_id: str, payload: ask_cards.Card):
+    """The buttons his Inbox shows when this tool asks him; approving still approves only the
+    exact action."""
+    if control_plane.get("tool", tool_id) is None:
+        deny("TOOL_UNAVAILABLE", "No such tool", 404)
+    return {"id": tool_id, "template": ask_cards.set_card(tool_id, payload.template)}
 
 
 @router.get("/v2/owner/tools/{tool_id}/access", dependencies=[Depends(require_owner)])

@@ -44,8 +44,13 @@ approval: {expires_at, consumed_at, origin_valid},
 reviewable: boolean,
 unavailable_reason: null | "invalid_origin" | "invalid_action" |
   "arguments_unavailable" | "unsupported_subject" | "expired" |
-  "consumed" | "already_decided"
+  "consumed" | "already_decided",
+card: "do" | "send" | "publish" | "ship" | "run" | "delete" | "pay" | "save"
 ```
+
+`card` is the button template the tool had when the request was made (see
+docs/access-policy.md, Inbox buttons). It only names the buttons; approving still
+approves only this exact action.
 
 Dates are timezone-aware ISO strings, or null when unavailable. Action identity,
 version and args may be null for malformed/history-only records. Display labels

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Inbox buttons per tool.** The owner picks a button template for each tool (`POST
+  /v2/owner/tools/{id}/card`): do, send, publish, ship, run, delete, pay or save (Send it / Don't
+  send, Publish / Not yet, ...). Each request copies it (`card` in the owner channel) so the Inbox
+  shows his buttons; `GET /v2/owner/access` lists them. A fixed list, kept beside the floor and
+  outside the tool definition. The Terminal starts with Run it / Don't run.
+
 ## 0.8.1
 
 - The Terminal's description now says to write the command as typed in bash and never wrap it in
