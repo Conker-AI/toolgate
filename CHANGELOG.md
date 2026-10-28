@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.0
+
 - **Inbox buttons per tool.** The owner picks a button template for each tool (`POST
   /v2/owner/tools/{id}/card`): do, send, publish, ship, run, delete, pay or save (Send it / Don't
   send, Publish / Not yet, ...). Each request copies it (`card` in the owner channel) so the Inbox
