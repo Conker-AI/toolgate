@@ -53,8 +53,10 @@ def cwd(value) -> str:
     """A folder inside the workspace, relative, without `..`: '' is the workspace itself.
 
     Inside the sandbox the workspace is mounted at /workspace and models name it that way, so
-    /workspace and paths under it mean the same folders; any other absolute path is refused."""
-    if value is None or value == "":
+    /workspace and paths under it mean the same folders. Small models send "/" when they mean
+    "wherever the command starts", which is the workspace too. Any other absolute path is
+    refused."""
+    if value is None or value == "" or value == "/":
         return ""
     if not isinstance(value, str) or len(value) > MAX_CWD or "\x00" in value:
         raise Refused("invalid_cwd", "The working folder must be a short relative path.")
