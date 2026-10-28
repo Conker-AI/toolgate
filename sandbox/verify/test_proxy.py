@@ -150,7 +150,9 @@ def test_proxy_peer_check_verifier_uid():
             sock.connect("/run/conker-proxy/proxy.sock")
             sock.send(b"GET / HTTP/1.0\r\n\r\n")
             response = sock.recv(1024)
-            return response.decode('utf-8', errors='ignore')
+            # The proxy hangs up without answering; depending on timing that is an empty read
+            # or a reset, and both mean nothing was served.
+            return response.decode('utf-8', errors='ignore') or "closed"
         except Exception:
             return "closed"
         finally:
