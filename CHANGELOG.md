@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.1
+
 - The Terminal accepts the arguments small local models actually send: a working folder of `/`
   means the workspace itself (like `/workspace`), and a null `timeout_seconds` means the default
   30 seconds. A time limit outside 1-100 is now refused before any approval is asked, not after.
