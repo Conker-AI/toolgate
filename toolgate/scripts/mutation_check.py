@@ -338,6 +338,7 @@ def main() -> int:
         return 1
     with tempfile.TemporaryDirectory(prefix="toolgate-mutations-") as directory:
         root = Path(directory) / "source"
+        (root.parent / "runs").mkdir()  # pytest creates --basetemp itself, but not its parent
         for source in (ROOT / "toolgate").rglob("*.py"):
             destination = root / source.relative_to(ROOT)
             destination.parent.mkdir(parents=True, exist_ok=True)
