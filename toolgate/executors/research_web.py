@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from toolgate.core import control_plane, vault
+from toolgate.core import control_plane, tool_settings, vault
 from toolgate.executors.research_base import (
     _PROVIDER_COOLDOWNS,
     GENERAL_EXCLUDED_DOMAINS,
@@ -88,7 +88,8 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
     base_url = control_plane.settings().get("research_searxng_url", "http://toolgate-searxng:8080").rstrip("/")
     response = httpx.get(
         f"{base_url}/search",
-        params={"q": scoped_query, "format": "json", "language": "en", "safesearch": 1, "categories": "general",
+        params={"q": scoped_query, "format": "json", "language": tool_settings.search_language(),
+                "safesearch": tool_settings.safe_search(), "categories": "general",
                 **({"time_range": "day" if recency_days <= 1 else "month"} if recency_days <= 45 else {})},
         headers={"Accept": "application/json", "X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"},
         timeout=timeout,

@@ -18,6 +18,7 @@ from toolgate.core import (
     editor_execution,
     editor_publication,
     publications,
+    tool_settings,
 )
 from toolgate.core import execution_journal as journal
 
@@ -386,7 +387,9 @@ def _invoke_nested_automation(
         "ancestors": (state, *state.get("ancestors", ())),
         "max_steps": int(limits.get("max_steps", 100)),
         "started_at": time.monotonic(),
-        "runtime_ceiling": min(int(limits.get("max_runtime_seconds", 30) or 30), 120),
+        "runtime_ceiling": tool_settings.seconds(
+            min(int(limits.get("max_runtime_seconds", 30) or 30), 120)
+        ),
     }
     if state.get("graph_budget"):
         nested["graph_budget"] = state["graph_budget"]

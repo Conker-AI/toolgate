@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **The owner's tool settings.** `GET /v2/owner/settings` and `PUT /v2/owner/settings` (owner key
+  only; the body is `{"expected_revision", "settings"}` and a stale revision is refused with 409
+  `settings_revision_conflict`). Each value has a hard ceiling at today's limit, so a setting can
+  make tools stricter or put them back, never give them more; a number left null keeps today's
+  limit. `tool_seconds` (5-180) lowers every time limit ToolGate sets for one call: web, MCP,
+  MemoryGate and AI requests, research searches, fetches and bundles, workflow runs, Terminal
+  commands and installs. `terminal_seconds` (5-100), `terminal_memory_mb` (64-512),
+  `terminal_cpus` (0.1-1) and `terminal_workspace_mb` (16-2048) shape Terminal commands from the
+  next one, with no restart: the runner takes them as `limits` and keeps its own limit when that is
+  lower. `web_safe_search` (off, moderate, strict; moderate as before) and `web_region` (a
+  two-letter country code; empty as before) reach SearXNG. `web_skip_sites` (up to 50) are never
+  used as sources and their pages are not fetched. `web_page_characters` (1000-20000) is the most
+  text one fetched page gives the model.
 - **Check a workflow document without saving it.** `POST /v2/editor/check` (execution key or owner
   key) answers `{"valid", "issues": [{"code", "message", "nodeId"}]}` by the rules publishing
   applies: the document's shape, the graph, that every `tool_call` names an active tool and every

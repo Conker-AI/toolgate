@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from toolgate.core import research_cache
+from toolgate.core import research_cache, tool_settings
 from toolgate.executors.research_base import (
     SOURCE_DOMAINS,
     ResearchError,
@@ -40,7 +40,8 @@ from toolgate.executors.research_text import (
 from toolgate.executors.research_web import _searx, _tavily
 
 
-def search(query: str, source: str, limit: int, recency_days: int) -> dict:
+def search(query: str, source: str, limit: int, recency_days: int, until: float | None = None) -> dict:
+    """One source's results. `until` is a shared deadline (time.monotonic) from a bundle."""
     if source not in SOURCE_DOMAINS:
         raise ResearchError(f"unsupported research source: {source}")
     clean_query = clean_text(query, 240)
@@ -75,7 +76,10 @@ def search(query: str, source: str, limit: int, recency_days: int) -> dict:
     rows: list[dict] = []
     provider_used = None
     completed_providers = []
-    deadline = time.monotonic() + 24.0
+    deadline = time.monotonic() + tool_settings.seconds(24.0)
+    if until is not None:
+        deadline = min(deadline, until)
+    skip_sites = tool_settings.skip_sites()
     for provider_name, provider in providers:
         remaining = deadline - time.monotonic()
         if remaining < 0.5:
@@ -83,6 +87,8 @@ def search(query: str, source: str, limit: int, recency_days: int) -> dict:
             break
         try:
             rows = provider(clean_query, source, limit, recency_days, min(8.0, remaining))
+            # Sites the owner skips are never sources, whichever provider found them.
+            rows = [row for row in rows if not tool_settings.skipped(row.get("url"), skip_sites)]
             completed_providers.append(provider_name)
             if rows:
                 provider_used = provider_name
@@ -132,9 +138,15 @@ def search_bundle(query: str, sources: list[str], limit_per_source: int, recency
     reports = []
     combined = []
     seen_urls = set()
+    # The owner's limit for one tool call covers the whole bundle, not each source.
+    most = tool_settings.call_seconds()
+    until = time.monotonic() + most if most is not None else None
     for source in ordered_sources:
+        if until is not None and until - time.monotonic() < 0.5:
+            reports.append({"source": source, "status": "failed", "result_count": 0, "error": "the tool time limit was reached"})
+            continue
         try:
-            result = search(query, source, limit_per_source, recency_days)
+            result = search(query, source, limit_per_source, recency_days, until=until)
         except ResearchError as exc:
             reports.append({"source": source, "status": "failed", "result_count": 0, "error": str(exc)[:300]})
             continue

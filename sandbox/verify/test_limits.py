@@ -117,6 +117,39 @@ def test_workspace_quota():
     assert result.get("workspace_exceeded") is False, "Quota should be reset after cleanup"
 
 
+def test_the_owners_lower_limits_reach_the_container(docker):
+    """ToolGate sends the owner's lower limits with each command; the runner never raises one."""
+    agent = unique_agent()
+    lower = {"memory_mb": 128, "cpus_milli": 500}
+    inspect, answer = while_running(docker, agent, limits=lower)
+    assert answer["ok"], answer
+    assert inspect["HostConfig"]["Memory"] == 128 * 1024 * 1024
+    assert inspect["HostConfig"]["MemorySwap"] == 128 * 1024 * 1024
+    assert inspect["HostConfig"]["NanoCpus"] == 500_000_000
+    cpu = run(agent, "cat /sys/fs/cgroup/cpu.max", limits=lower)
+    assert cpu["stdout"].strip() == "50000 100000", cpu
+    memory = run(agent, "python3 -c 'b=bytearray(200*1024*1024)'", limits=lower)
+    assert memory["oom_killed"] is True, memory
+
+    # Higher than the runner's own limits (256 MB, one CPU): the runner keeps its own.
+    inspect, answer = while_running(docker, agent, limits={"memory_mb": 4096, "cpus_milli": 8000})
+    assert answer["ok"], answer
+    assert inspect["HostConfig"]["Memory"] == 256 * 1024 * 1024
+    assert inspect["HostConfig"]["NanoCpus"] == 1_000_000_000
+
+    refused = run(agent, "true", limits={"memory_mb": "4096"})
+    assert (refused["ok"], refused["code"]) == (False, "invalid_limits"), refused
+
+
+def test_a_lower_workspace_size_stops_growth():
+    agent = unique_agent()
+    write = "dd if=/dev/zero of=big.bin bs=1M count=40 2>/dev/null; echo DONE"
+    assert run(agent, write, limits={"workspace_mb": 32})["workspace_exceeded"] is True
+    run(agent, "rm -f big.bin")
+    # Without the owner's limit the runner's own 256 MB applies.
+    assert run(agent, write)["workspace_exceeded"] is False
+
+
 def test_concurrency_per_agent():
     agent = unique_agent()
 

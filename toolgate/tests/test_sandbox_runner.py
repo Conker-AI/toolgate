@@ -144,6 +144,10 @@ def test_an_install_adds_only_the_proxy_socket(make):
         ({"timeout": 0}, "invalid_timeout"),
         ({"timeout": "5"}, "invalid_timeout"),
         ({"timeout": 601}, "invalid_timeout"),
+        ({"limits": {"memory_mb": "128"}}, "invalid_limits"),
+        ({"limits": {"memory_mb": 32}}, "invalid_limits"),
+        ({"limits": {"pids": 4096}}, "invalid_limits"),
+        ({"limits": "max"}, "invalid_limits"),
     ],
 )
 def test_refused_requests_never_create_a_container(make, request_, code):
@@ -152,6 +156,32 @@ def test_refused_requests_never_create_a_container(make, request_, code):
         sandbox.handle(run_request(**request_))
     assert refused.value.code == code
     assert docker.calls == []
+
+
+def test_the_owners_lower_limits_shape_the_container_and_never_raise_it(make):
+    sandbox, docker, config = make()
+    sandbox.handle(run_request(limits={"memory_mb": 128, "cpus_milli": 500}))
+    host = docker.bodies[0]["HostConfig"]
+    assert (host["Memory"], host["MemorySwap"]) == (128 * 1024 * 1024, 128 * 1024 * 1024)
+    assert host["NanoCpus"] == 500_000_000
+    sandbox.handle(run_request(limits={"memory_mb": 65536, "cpus_milli": 64000}))
+    assert docker.bodies[1] == spec.container(
+        config, "companion", spec.run_argv("ls", ""), install=False, request_id=""
+    )
+
+
+def test_a_lower_workspace_size_stops_the_command(make, tmp_path):
+    sandbox, docker, _ = make()
+    docker.running = 10**6
+
+    def grow():
+        big = tmp_path / "companion" / "big.bin"
+        if not big.exists():
+            big.write_bytes(os.urandom(20 * 1024 * 1024))
+
+    docker.on_inspect = grow
+    answer = sandbox.handle(run_request(timeout=30, limits={"workspace_mb": 16}))
+    assert answer["workspace_exceeded"] is True and "kill" in names(docker)
 
 
 def test_refused_packages_never_create_a_container(make):

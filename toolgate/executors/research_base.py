@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from toolgate.core import control_plane, research_cache
+from toolgate.core import control_plane, research_cache, tool_settings
 from toolgate.core.public_https import public_client, public_url
 from toolgate.executors.research_text import (
     clean_text,
@@ -146,7 +146,7 @@ def _requested_site_domain(query: str) -> str | None:
     return domain
 
 
-def fetch(result_id: str, max_chars: int = 12000) -> dict:
+def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
     record = research_cache.get_research_result(result_id)
     if not record:
         raise ResearchError("research result handle was not found")
@@ -155,10 +155,15 @@ def fetch(result_id: str, max_chars: int = 12000) -> dict:
             raise ResearchError("research result handle has expired")
     except (KeyError, ValueError, TypeError) as exc:
         raise ResearchError("research result handle is invalid") from exc
+    skip_sites = tool_settings.skip_sites()
+    if tool_settings.skipped(record.get("url"), skip_sites):
+        raise ResearchError("this result is on a site the owner skips")
+    # The owner's page size, never more than ToolGate's own cap.
+    page_limit = tool_settings.page_characters()
 
     snapshot = record.get("document")
     if snapshot:
-        limit = min(max(int(max_chars), 1000), 20000)
+        limit = min(max(int(max_chars), 1000), page_limit)
         text = (
             extract_html_text(snapshot, limit)
             if re.search(r"<[a-z][^>]*>", str(snapshot), re.I)
@@ -186,7 +191,7 @@ def fetch(result_id: str, max_chars: int = 12000) -> dict:
     content_type = ""
     body = bytearray()
     try:
-        with public_client(timeout=15, headers=headers) as client:
+        with public_client(timeout=tool_settings.seconds(timeout), headers=headers) as client:
             current_url = url
             for redirect_count in range(4):
                 with client.stream("GET", current_url) as response:
@@ -196,6 +201,8 @@ def fetch(result_id: str, max_chars: int = 12000) -> dict:
                         target = urljoin(str(response.url), response.headers.get("location", ""))
                         if not _public_https_url(target):
                             raise ResearchError("upstream redirect left the safe public HTTPS boundary")
+                        if tool_settings.skipped(target, skip_sites):
+                            raise ResearchError("upstream redirect went to a site the owner skips")
                         current_url = target
                         continue
                     response.raise_for_status()
@@ -216,9 +223,9 @@ def fetch(result_id: str, max_chars: int = 12000) -> dict:
     if content_type == "text/html" and not published_at:
         published_at, recency_provenance = extract_published_metadata(raw)
     if content_type == "text/html":
-        text = extract_html_text(raw, min(max(int(max_chars), 1000), 20000))
+        text = extract_html_text(raw, min(max(int(max_chars), 1000), page_limit))
     else:
-        text = clean_text(raw, min(max(int(max_chars), 1000), 20000))
+        text = clean_text(raw, min(max(int(max_chars), 1000), page_limit))
     inspection = inspect_text(text)
     if inspection["risk"] == "high":
         control_plane.event("research_content_blocked", "warning", "research_result", result_id, "research_fetch", inspection)
@@ -247,9 +254,15 @@ def fetch_batch(result_ids: list[str], max_chars: int = 3500) -> dict:
     if not isinstance(result_ids, list) or not 1 <= len(result_ids) <= 8:
         raise ResearchError("research batch must contain 1 to 8 result handles")
     documents = []
+    # The owner's limit for one tool call covers the whole batch, not each page.
+    most = tool_settings.call_seconds()
+    until = time.monotonic() + most if most is not None else None
     for result_id in result_ids:
         try:
-            documents.append(fetch(result_id, max_chars))
+            remaining = 15.0 if until is None else until - time.monotonic()
+            if remaining < 0.5:
+                raise ResearchError("the tool time limit was reached")
+            documents.append(fetch(result_id, max_chars, min(15.0, remaining)))
         except ResearchError as exc:
             documents.append({
                 "result_id": result_id,

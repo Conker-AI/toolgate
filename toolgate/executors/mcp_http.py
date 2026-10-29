@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from toolgate.core import vault
+from toolgate.core import tool_settings, vault
 from toolgate.core.public_https import public_client, public_url
 from toolgate.executors.mcp_schema import (
     MCPError,
@@ -112,7 +112,7 @@ def validate_execution(execution):
 
 
 class Session:
-    def __init__(self, url, secret_ref=None):
+    def __init__(self, url, secret_ref=None, seconds=MAX_SECONDS):
         self.url = destination(url)
         reference(secret_ref)
         self.secret = None
@@ -127,7 +127,7 @@ class Session:
                 or any(ord(c) < 33 or ord(c) > 126 for c in self.secret)
             ):
                 _error("invalid_secret", "The MCP bearer credential must be bounded ASCII text.")
-        self.deadline = time.monotonic() + MAX_SECONDS
+        self.deadline = time.monotonic() + min(seconds, MAX_SECONDS)
         self.total = 0
         self.session_id = None
         self.version = MODERN_VERSION
@@ -479,7 +479,10 @@ def execute(execution, args):
         if not isinstance(args, dict) or set(args) != {"arguments"}:
             _error("invalid_arguments", "Provide only the arguments object.")
         validate_arguments(execution["input_schema"], args["arguments"])
-        with Session(execution["url"], execution.get("secret_ref")) as session:
+        # A tool call runs within the owner's tool time limit; discovery keeps MCP's own.
+        with Session(
+            execution["url"], execution.get("secret_ref"), tool_settings.seconds(MAX_SECONDS)
+        ) as session:
             require_match(session.tools(), execution, session.unsupported_tools)
             try:
                 result = session.rpc(

@@ -29,7 +29,9 @@ def configured() -> tuple[str, str] | None:
     return (url, key) if url and key else None
 
 
-def generate(url: str, key: str, prompt: str, max_tokens: int) -> str:
+def generate(
+    url: str, key: str, prompt: str, max_tokens: int, timeout: float = TIMEOUT_SECONDS
+) -> str:
     body = {
         "role": ROLE,
         "system": "",
@@ -43,7 +45,7 @@ def generate(url: str, key: str, prompt: str, max_tokens: int) -> str:
             f"{url}/inference",
             json=body,
             headers={"X-Pi-Service-Key": key},
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except httpx.TimeoutException as exc:
         raise PiUnavailable("Pi did not answer in time") from exc
