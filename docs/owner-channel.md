@@ -37,6 +37,13 @@ All routes require the dedicated header:
   `{status: "approved" | "rejected" | "dismissed", note?: string}`. Note is at most
   2,000 characters; unknown fields are rejected. Returns the current projection. A
   withdrawn request answers 404.
+- `GET /v2/owner/lockdown` returns `{lockdown: boolean, reason: string, changed_by: null |
+  "owner" | "admin" | "system"}`; `POST /v2/owner/lockdown` accepts only `{enabled: boolean}`
+  and returns the same. This is ToolGate's one lockdown (the operator's
+  `POST /v2/settings/lockdown` sets the same switch; ToolGate sets it itself after repeated bad
+  verification callbacks). In lockdown no tool or workflow runs, read-only ones included, and no
+  agent can file a request. Both directions need this header; the gateway in front adds the
+  owner's password for turning it off only, since turning it on only takes power away.
 
 The agent that asked may withdraw a request while it is still pending (`POST
 /v2/agent/requests/{id}/withdraw`, see docs/APPROVAL_INTEGRITY.md). It then leaves this channel:
@@ -86,7 +93,10 @@ binding and one-time consumption remain enforced when the execution channel late
 invokes the tool. A decision does not invoke anything.
 
 A request with `expires_at: null` waits for the owner and never shows `expired` while pending;
-after approval it may run within 15 minutes of his decision. A bounded request keeps the
+after approval it may run within the owner's run window of the decision: 15 minutes, or less when
+the owner chose a shorter `run_window_minutes` (`/v2/owner/settings`). The window in force at the
+decision is recorded with it (`decision.run_window_minutes`, not shown in this projection), so a
+later change never moves an approval already given. A bounded request keeps the
 historical semantics: a pending record can be expired without its stored status changing. `reviewable=false` and reason `expired` make
 that explicit. Do not infer approval eligibility from `status` alone.
 

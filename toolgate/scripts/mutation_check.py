@@ -321,6 +321,32 @@ MUTANTS.extend([
      WITHDRAW + "test_the_asking_key_withdraws_its_waiting_request_and_the_owner_no_longer_sees_it"),
 ])
 
+WINDOW = "toolgate/tests/test_run_window.py::"
+LOCKDOWN = "toolgate/tests/test_owner_lockdown.py::"
+MUTANTS.extend([
+    ("run window setting past 15 minutes", "toolgate/core/tool_settings.py",
+     "run_window_minutes: Annotated[int, Field(ge=1, le=RUN_WINDOW_MINUTES)] | None = None",
+     "run_window_minutes: Annotated[int, Field(ge=1)] | None = None",
+     WINDOW + "test_a_window_longer_than_fifteen_minutes_is_refused[16]"),
+    ("recorded run window past 15 minutes", "toolgate/core/approvals.py",
+     "if type(minutes) is not int or not 1 <= minutes <= MAX_RUN_WINDOW_MINUTES:",
+     "if type(minutes) is not int or not 1 <= minutes:",
+     WINDOW + "test_a_recorded_window_past_its_ceiling_or_malformed_never_runs[60]"),
+    ("owner's shorter run window ignored", "toolgate/core/approvals.py",
+     'decision["run_window_minutes"] = tool_settings.run_window(conn)',
+     'decision["run_window_minutes"] = MAX_RUN_WINDOW_MINUTES',
+     WINDOW + "test_a_shorter_window_runs_out_sooner"),
+    ("run window read when the action starts", "toolgate/core/approvals.py",
+     'minutes = decision.get("run_window_minutes", MAX_RUN_WINDOW_MINUTES)',
+     ('minutes = __import__("toolgate.core.tool_settings", fromlist=["current"])'
+      '.current().run_window_minutes or MAX_RUN_WINDOW_MINUTES'),
+     WINDOW + "test_an_approval_keeps_the_window_it_was_decided_under"),
+    ("lockdown switch without the owner key", "toolgate/api/routes/settings.py",
+     '@router.post("/v2/owner/lockdown", dependencies=[Depends(require_owner)])',
+     '@router.post("/v2/owner/lockdown")',
+     LOCKDOWN + "test_only_the_owner_key_reads_or_turns_it"),
+])
+
 
 def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}

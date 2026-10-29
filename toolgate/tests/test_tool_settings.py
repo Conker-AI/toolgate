@@ -28,6 +28,7 @@ TODAY = {
     "web_region": "",
     "web_skip_sites": [],
     "web_page_characters": None,
+    "run_window_minutes": None,  # covered in test_run_window.py
 }
 CEILINGS = {
     "tool_seconds": 180,
@@ -36,6 +37,7 @@ CEILINGS = {
     "terminal_cpus": 1,
     "terminal_workspace_mb": 2048,
     "web_page_characters": 20000,
+    "run_window_minutes": 15,
 }
 
 

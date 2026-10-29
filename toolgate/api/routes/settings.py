@@ -1,5 +1,5 @@
-"""Gateway status, lockdown, settings, the owner's tool settings, verification methods and the AI
-archive export."""
+"""Gateway status, lockdown (also the owner's switch), settings, the owner's tool settings,
+verification methods and the AI archive export."""
 
 import hashlib
 import hmac
@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from toolgate.api.deps import deny, require_admin, require_owner
 from toolgate.api.models import (
     DEFAULT_CONFIRMATION_EXPIRY_SECONDS,
+    OwnerLockdown,
     V2Settings,
     VerificationCallback,
     VerificationMethodCreate,
@@ -40,6 +41,33 @@ def set_lockdown(enabled: bool, reason: str = "", _tier: str = Depends(require_a
     return control_plane.set_lockdown(enabled, "admin", reason)
 
 
+def _lockdown_view() -> JSONResponse:
+    state = control_plane.settings()
+    view = {
+        "lockdown": bool(state.get("lockdown", False)),  # as enforcement reads it
+        "reason": str(state.get("reason") or ""),
+        "changed_by": state.get("changed_by"),
+    }
+    return JSONResponse(view, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/v2/owner/lockdown", dependencies=[Depends(require_owner)])
+def owner_lockdown():
+    """Whether ToolGate is in lockdown (no tool or workflow runs, read-only ones included, and no
+    agent can file a request), why, and who set it: the owner, the operator ("admin") or ToolGate
+    itself ("system", after repeated bad verification callbacks)."""
+    return _lockdown_view()
+
+
+@router.post("/v2/owner/lockdown", dependencies=[Depends(require_owner)])
+def owner_set_lockdown(payload: OwnerLockdown):
+    """Turn lockdown on or off with the owner key. On only takes power away, so Pi's gateway asks no
+    password for it; off gives the power back, so the gateway sends it only with the owner's
+    password proof."""
+    control_plane.set_lockdown(payload.enabled, "owner")
+    return _lockdown_view()
+
+
 @router.get("/v2/settings")
 def get_settings(_tier: str = Depends(require_admin)):
     return {
@@ -58,8 +86,8 @@ def update_settings(payload: V2Settings, _tier: str = Depends(require_admin)):
 
 @router.get("/v2/owner/settings", dependencies=[Depends(require_owner)])
 def owner_settings():
-    """How tools run (time limits, the Terminal's resources, web search) and the revision a save
-    must name. Null numbers keep today's limits."""
+    """How tools run (time limits, the Terminal's resources, web search, the run window after an
+    approval) and the revision a save must name. Null numbers keep today's limits."""
     return JSONResponse(tool_settings.load(), headers={"Cache-Control": "no-store"})
 
 
