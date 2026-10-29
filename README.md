@@ -125,6 +125,7 @@ dashboard/           React owner dashboard
 | [Agent access](docs/agent-access.md) | Agent identities, the CLI and the MCP bridge |
 | [Agent sandbox](docs/sandbox.md) | Terminal and Install packages in locked-down containers |
 | [Automations](docs/automations.md) | Workflows, revisions, publication, nested runs |
+| [Workflow editor](docs/workflow-editor.md) | Checking a document, publishing with Conker's access |
 | [Owner channel](docs/owner-channel.md) | The browser gateway's own bounded credential |
 | [Authenticated MCP](docs/AUTHENTICATED_MCP.md) | The opt-in MCP transport |
 

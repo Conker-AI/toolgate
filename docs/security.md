@@ -68,7 +68,7 @@ Tool definitions can use these first-class executors:
 - `local_echo`: returns a digest and length only, for proving the approval path without touching the network or the filesystem.
 - `http_json`: bounded GET or owner-confirmed POST requests to exact public HTTPS hosts; redirects and private destinations are denied.
 - `memorygate`: fixed-host, read-only `context` or `ask` operations using a vault-held MemoryGate credential.
-- `ollama_generate`: bounded generation through the internal Ollama service with declared prompt inputs and no secret access.
+- `ollama_generate`: bounded generation with declared prompt inputs and no secret access, through Pi's `tool-text` model role when `TOOLGATE_PI_URL` and `TOOLGATE_PI_SERVICE_KEY` are set, otherwise directly through the internal Ollama service (the fallback). See [AI tools through Pi](deployment.md#ai-tools-through-pi).
 - `gemini_generate`: bounded generation through an allowlisted hosted Gemini model, with the key injected as a header from the vault.
 - `research_search`: one bounded provider search returning short-lived provenance handles.
 - `research_bundle`: a reusable multi-source research profile that preserves per-source reports and failures.

@@ -5,6 +5,11 @@ from . import control_plane as cp
 from . import publications
 
 
+def workflow_tool_id(publication):
+    """The id an agent's catalogue shows for one exact publication."""
+    return f"workflow:{publication['id']}:{publication['version']}:{publication['digest']}"
+
+
 def agent_workflows(agent):
     """Only executable immutable workflows; never expose graph or credential config."""
     items = []
@@ -24,7 +29,7 @@ def agent_workflows(agent):
             if any(step.get('type') == 'editor_graph' and not step['document'].get('agentVisible', False)
                    for step in definition.get('workflow', [])):
                 continue
-            items.append({'id': f"workflow:{row['id']}:{row['version']}:{publication['digest']}",
+            items.append({'id': workflow_tool_id(publication),
                 'name': str(definition.get('name') or row['id'])[:160],
                 'description': str(definition.get('description', ''))[:800],
                 'inputs': [{key: field[key] for key in ('name', 'type', 'required', 'description') if key in field}
