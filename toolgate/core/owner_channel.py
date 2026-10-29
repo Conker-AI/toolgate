@@ -177,10 +177,18 @@ def _row(db, identity):
     return row
 
 
+def _gone(record):
+    # The agent that asked took it back: it left the owner's view; its history stays in the events.
+    if record.get("status") == approvals.WITHDRAWN:
+        raise OwnerError("not_found", "Owner request not found.", 404)
+
+
 def get(identity):
     with cp._conn() as db:
         db.execute("BEGIN")
-        return project(db, _record(_row(db, identity)))
+        record = _record(_row(db, identity))
+        _gone(record)
+        return project(db, record)
 
 
 def list_requests(limit=50, cursor=None):
@@ -192,8 +200,10 @@ def list_requests(limit=50, cursor=None):
             before = " AND (created_at,id)<(?,?)"
             values = [row["created_at"], row["id"]]
         rows = db.execute("SELECT * FROM v2_objects WHERE kind='request' "
-                          "AND json_extract(body,'$.kind')='verification'" + before +
-                          " ORDER BY created_at DESC,id DESC LIMIT ?", (*values, limit + 1)).fetchall()
+                          "AND json_extract(body,'$.kind')='verification' "
+                          "AND json_extract(body,'$.status') IS NOT ?" + before +
+                          " ORDER BY created_at DESC,id DESC LIMIT ?",
+                          (approvals.WITHDRAWN, *values, limit + 1)).fetchall()
         results, size = [], 0
         for row in rows[:limit]:
             value = project(db, _record(row))
@@ -210,6 +220,7 @@ def decide(identity, status, note):
     def guard(db, record):
         if record.get("kind") != "verification":
             raise OwnerError("not_found", "Owner request not found.", 404)
+        _gone(record)
         view = project(db, record)
         permitted = (view["reviewable"] if status == "approved" else
                      view["unavailable_reason"] in {None, "expired", "unsupported_subject", "publication_unavailable"})

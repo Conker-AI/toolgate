@@ -64,6 +64,36 @@ crash. It is not refunded or retried automatically: once dispatch may have happe
 refunding can repeat an external action. Durable dispatch/reconciliation remains
 separate work. Auxiliary callback telemetry is not the authoritative decision event.
 
+## Withdrawing a request
+
+A request with no expiry waits for the owner as long as it takes. When the chat that asked is
+forgotten, nobody is waiting for the answer any more, so the agent that asked takes it back:
+
+```text
+POST /v2/agent/requests/{id}/withdraw
+X-ToolGate-Execution-Key: <the key that invoked>
+X-ToolGate-Agent: <the same agent, when the invocation presented one>
+(no body)
+```
+
+- 200: the request as `GET /v2/agent/requests/{id}` shows it, now
+  `{"status": "withdrawn", "decision": {"actor": <agent name>, "note": "Withdrawn by the agent
+  that asked", "at": <time>}, ...}`. Withdrawing again gives the same answer and records nothing new.
+- 404 `request not found`: no such request, a request another key or another agent of the same key
+  made, an informational request, or one whose issuance is not intact. One answer for all, so a
+  key learns nothing about requests that are not its own.
+- 409 `REQUEST_NOT_PENDING`: the owner (or the system) already answered it; only a request still
+  waiting for the owner can be withdrawn.
+
+The caller must be exactly the actor that invoked (`created_by_agent_key`, the same check as
+consumption), and the request must be an intact ToolGate-issued verification. The transition and
+its `request_withdrawn` event commit together under the writer lock, like every other transition.
+It is allowed in lockdown, because it only removes authority.
+
+`withdrawn` is terminal. The owner channel no longer lists it, and its detail and decision routes
+answer 404; the admin and callback decisions answer 409; an invocation that presents it as its
+`approval_request_id` fails with `APPROVAL_INVALID`. The record and its events stay in history.
+
 ## Bootstrap and compose
 
 Bootstrap inserts a key only when its hash does not exist. Repeated startup returns

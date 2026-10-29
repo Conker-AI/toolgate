@@ -2,8 +2,9 @@
 
 Pi resolves each action's level from the owner's own settings (chat, agent, tool default) and may
 tell ToolGate "run" or "ask". ToolGate accepts "run" only from an execution key the owner marked
-as a policy delegate, and never for a tool on the floor: one he marked sensitive, or the system
-controls that already carry their own exact review. "Ask" (tightening) is accepted from any key.
+as a policy delegate, and never for a tool on the floor: one the owner marked sensitive, the
+system controls that already carry their own exact review, or a tool on an external MCP server,
+which always asks the owner. "Ask" (tightening) is accepted from any key.
 """
 
 from __future__ import annotations
@@ -14,8 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from toolgate.core import control_plane
 
-# Fixed executors with their own exact owner review; never decided by a delegate.
-FLOOR_EXECUTIONS = frozenset({"port_control", "container_control", "process_control"})
+# Never decided by a delegate: the fixed executors with their own exact owner review, and tools
+# on external MCP servers (imported tools always ask the owner; there is no per-tool opt-out).
+FLOOR_EXECUTIONS = frozenset({"port_control", "container_control", "process_control", "mcp_http"})
 DECIDERS = ("tool_default", "agent", "chat", "ai_reviewer", "owner_request")
 
 

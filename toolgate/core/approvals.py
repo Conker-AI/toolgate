@@ -311,3 +311,34 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
         _request_event(conn, "request_decided", "info" if status == "approved" else "warning",
                        request_id, actor, {"status": status})
     return record
+
+
+WITHDRAWN = "withdrawn"
+
+
+def withdraw_request(request_id: str, actor_id: str, actor: str) -> dict | None:
+    """The agent that asked takes its approval request back while the owner has not answered, so
+    a forgotten chat leaves nothing in the owner's Inbox. Terminal: it can never be approved or run.
+
+    None when the request is unknown, not an intact verification, or not this exact caller's (one
+    answer, so a key learns nothing about other requests). One already withdrawn comes back as
+    it is; any other answered request raises ValueError."""
+    with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
+        record = _row(row) if row else None
+        if (not record or not actor_id or record.get("kind") != "verification"
+                or record.get("payload", {}).get("created_by_agent_key") != actor_id
+                or not _verification_origin_valid(conn, record)):
+            return None
+        if record.get("status") == WITHDRAWN:
+            return record
+        if record.get("status") != "pending":
+            raise ValueError(f"request is already {record.get('status')}")
+        record["status"] = WITHDRAWN
+        record["decision"] = {"actor": actor, "note": "Withdrawn by the agent that asked", "at": _now()}
+        _save_request(conn, record)
+        _request_event(conn, "request_withdrawn", "info", request_id, actor,
+                       {"subject_type": record["payload"].get("subject_type"),
+                        "subject_id": record["payload"].get("subject_id")})
+    return record

@@ -298,6 +298,30 @@ MUTANTS.extend([
 ])
 
 
+FLOOR = "toolgate/tests/test_mcp_floor.py::"
+WITHDRAW = "toolgate/tests/test_request_withdraw.py::"
+MUTANTS.extend([
+    ("MCP tools lifted off the floor", "toolgate/core/access_policy.py",
+     '"process_control", "mcp_http"})', '"process_control"})',
+     FLOOR + "test_an_mcp_invocation_with_a_delegate_run_still_parks_for_the_owner"),
+    ("delegate run skips the floor", "toolgate/core/access_policy.py",
+     "if on_floor(tool) or not is_delegate(agent):", "if not is_delegate(agent):",
+     FLOOR + "test_a_delegate_run_never_lifts_an_mcp_tool_off_the_floor"),
+    ("another key withdraws a request", "toolgate/core/approvals.py",
+     'or record.get("payload", {}).get("created_by_agent_key") != actor_id', "or False",
+     WITHDRAW + "test_another_key_another_agent_or_an_unknown_id_cannot_withdraw"),
+    ("withdraw overrides the owner's answer", "toolgate/core/approvals.py",
+     """        if record.get("status") != "pending":
+            raise ValueError(f"request is already {record.get('status')}")
+        record["status"] = WITHDRAWN""",
+     '        record["status"] = WITHDRAWN',
+     WITHDRAW + "test_a_request_the_owner_answered_cannot_be_withdrawn[approved]"),
+    ("withdrawn request still in the owner's list", "toolgate/core/owner_channel.py",
+     "\"AND json_extract(body,'$.status') IS NOT ?\"", "\"AND ? IS NOT NULL\"",
+     WITHDRAW + "test_the_asking_key_withdraws_its_waiting_request_and_the_owner_no_longer_sees_it"),
+])
+
+
 def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(
