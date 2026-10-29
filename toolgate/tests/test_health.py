@@ -7,6 +7,7 @@ at a database that genuinely cannot be opened.
 """
 import json
 import os
+import socket
 import sqlite3
 import threading
 import unittest
@@ -20,9 +21,20 @@ from toolgate.api import server, version
 from toolgate.api.routes import health as health_routes
 from toolgate.core import control_plane, vault
 
+PI_KEY = "pi-service-key-" + "h" * 40
+
+
+def _closed_url() -> str:
+    """An address with nothing listening: the port was bound once and released."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    return f"http://127.0.0.1:{port}"
+
 
 class _AlwaysOk(BaseHTTPRequestHandler):
     def do_GET(self):  # BaseHTTPRequestHandler's naming
+        self.server.seen.append({"path": self.path, "headers": dict(self.headers.items())})
         body = getattr(self.server, "health_body", {"service": "memorygate", "status": "ok"})
         encoded = json.dumps(body).encode()
         self.send_response(getattr(self.server, "response_status", 200))
@@ -47,6 +59,7 @@ class HealthTests(unittest.TestCase):
         self.env_patch.start()
 
         self.upstream = ThreadingHTTPServer(("127.0.0.1", 0), _AlwaysOk)
+        self.upstream.seen = []
         self.upstream_url = f"http://127.0.0.1:{self.upstream.server_port}"
         self.thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
         self.thread.start()
@@ -56,6 +69,8 @@ class HealthTests(unittest.TestCase):
             "MEMORYGATE_URL": self.upstream_url,
         })
         self.os_patch.start()
+        for name in ("TOOLGATE_PI_URL", "TOOLGATE_PI_SERVICE_KEY"):  # the Ollama path by default
+            os.environ.pop(name, None)
         health_routes._health_snapshot = None
         self.client = TestClient(server.app)
 
@@ -97,6 +112,7 @@ class HealthTests(unittest.TestCase):
             "control_plane_db": "ok", "vault": "ok",
             "searxng": "ok", "memorygate": "ok", "generation": "ok",
         })
+        self.assertEqual(body["checks"]["generation"], {"status": "ok", "via": "ollama"})
 
     def test_health_names_the_dependency_that_stopped_answering(self):
         self.point_upstreams_at(self.upstream_url)
@@ -192,3 +208,91 @@ class HealthTests(unittest.TestCase):
         self.assertNotIn("127.0.0.1", rendered)
         self.assertNotIn("mg_read_test_value", rendered)
         self.assertNotIn(str(self.root), rendered)
+
+    def use_pi(self, url: str):
+        os.environ["TOOLGATE_PI_URL"] = url + "/"
+        os.environ["TOOLGATE_PI_SERVICE_KEY"] = PI_KEY
+
+    def test_with_pi_configured_generation_is_pi_and_ollama_is_not_probed(self):
+        # Ollama is configured and gone; with Pi set, its state is not ToolGate's to report.
+        control_plane.update_settings(
+            {"research_searxng_url": self.upstream_url, "generation_url": _closed_url()}, "test"
+        )
+        self.use_pi(self.upstream_url)
+        self.upstream.health_body = {"service": "pi", "status": "ok"}
+
+        body = self.health()
+
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["checks"]["generation"], {"status": "ok", "via": "pi"})
+        paths = [request["path"] for request in self.upstream.seen]
+        self.assertIn("/health", paths)  # Pi's health, not /inference: no model call
+        self.assertNotIn("/api/tags", paths)
+        self.assertNotIn("/inference", paths)
+
+    def test_the_pi_probe_sends_no_key(self):
+        self.use_pi(self.upstream_url)
+        control_plane.update_settings({"research_searxng_url": self.upstream_url}, "test")
+        self.upstream.health_body = {"service": "pi", "status": "ok"}
+
+        rendered = json.dumps(self.health())
+
+        self.assertTrue(self.upstream.seen)
+        for request in self.upstream.seen:
+            self.assertNotIn(PI_KEY, json.dumps(request["headers"]))
+            self.assertNotIn("x-pi-service-key", {name.lower() for name in request["headers"]})
+        self.assertNotIn(PI_KEY, rendered)
+
+    def test_pi_unreachable_makes_generation_unavailable_without_naming_the_host(self):
+        control_plane.update_settings({"research_searxng_url": self.upstream_url}, "test")
+        pi_url = _closed_url()
+        self.use_pi(pi_url)
+
+        body = self.health()
+
+        self.assertEqual(body["status"], "degraded")
+        self.assertEqual(body["degraded"], ["generation"])
+        self.assertEqual(body["checks"]["generation"]["status"], "unavailable")
+        self.assertEqual(body["checks"]["generation"]["via"], "pi")
+        self.assertNotIn(pi_url, json.dumps(body))
+
+    def test_pi_own_degraded_parts_are_not_reported_as_generation(self):
+        control_plane.update_settings({"research_searxng_url": self.upstream_url}, "test")
+        self.use_pi(self.upstream_url)
+        self.upstream.health_body = {"service": "pi", "status": "degraded",
+                                     "checks": {"speech": {"status": "unavailable"}}}
+
+        body = self.health()
+
+        self.assertEqual(body["checks"]["generation"], {"status": "ok", "via": "pi"})
+        self.assertNotIn("speech", json.dumps(body))
+
+    def test_an_address_that_does_not_answer_as_pi_is_not_generation(self):
+        control_plane.update_settings({"research_searxng_url": self.upstream_url}, "test")
+        self.use_pi(self.upstream_url)
+        for answer in ({"models": []}, {"service": "memorygate", "status": "ok"}):
+            with self.subTest(answer=answer):
+                self.upstream.health_body = answer
+                self.assertEqual(self.health()["checks"]["generation"], {
+                    "status": "unavailable", "reason": "invalid_health_response", "via": "pi",
+                })
+
+    def test_pi_needs_both_its_address_and_key_before_it_is_the_generation_path(self):
+        self.point_upstreams_at(self.upstream_url)
+        os.environ["TOOLGATE_PI_URL"] = _closed_url()
+
+        body = self.health()
+
+        self.assertEqual(body["checks"]["generation"], {"status": "ok", "via": "ollama"})
+        self.assertIn("/api/tags", [request["path"] for request in self.upstream.seen])
+
+    def test_a_malformed_pi_address_is_unavailable_not_an_error(self):
+        control_plane.update_settings({"research_searxng_url": self.upstream_url}, "test")
+        for address in ("http://pi\x7fapi:8050", "http://" + "p" * 70 + ":8050"):
+            with self.subTest(address=address):
+                self.use_pi(address)
+
+                body = self.health()
+
+                self.assertEqual(body["checks"]["generation"]["status"], "unavailable")
+                self.assertNotIn("api:8050", json.dumps(body))

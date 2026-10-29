@@ -42,7 +42,7 @@ An install that predates encryption is migrated on its next start: cleartext val
 
 ### Health
 
-`GET /health` is unauthenticated and runs real probes: the control-plane database, the vault, SearXNG, and -- when a MemoryGate credential is configured -- MemoryGate. Configured generation or an active Ollama tool also probes Ollama.
+`GET /health` is unauthenticated and runs real probes: the control-plane database, the vault, SearXNG, and -- when a MemoryGate credential is configured -- MemoryGate. The `generation` check follows the path AI tools take, named in its `via`: with [Pi configured](#ai-tools-through-pi) it is Pi (`"via": "pi"`); otherwise configured generation or an active Ollama tool probes Ollama (`"via": "ollama"`).
 
 ```json
 {
@@ -54,7 +54,7 @@ An install that predates encryption is migrated on its next start: cleartext val
     "vault": {"status": "ok", "key_source": "key_file"},
     "searxng": {"status": "ok"},
     "memorygate": {"status": "ok"},
-    "generation": {"status": "unreachable", "reason": "ConnectError"}
+    "generation": {"status": "unavailable", "reason": "ConnectError", "via": "ollama"}
   },
   "checked_at": "2026-09-05T11:08:05.185008+00:00",
   "age_seconds": 0.0
@@ -96,7 +96,12 @@ Pi's `text`, trimmed, as before. Pi stores the key's SHA-256 under `toolgate` in
 - **The fallback.** When either setting is missing, ToolGate calls Ollama directly as it always
   has: `generation_url` (default `http://memorygate-ollama:11434`) with the tool's `model` or
   `generation_model`, its `temperature` and `max_tokens`. The health check's `generation` probe
-  still looks at that Ollama address.
+  then looks at that Ollama address.
+- **Health follows the same path.** With Pi configured, the `generation` check is Pi: a `GET
+  <TOOLGATE_PI_URL>/health` that must answer as Pi (`"service": "pi"`), with no key and no model
+  call, so Ollama's state is no longer reported as ToolGate's. Only reachability counts: Pi's own
+  degraded parts (speech, memory) show in Pi's health, not here. Which model the `tool-text` role
+  uses, and whether it works, is Pi's to report.
 
 ## Retiring the AI workspace
 
