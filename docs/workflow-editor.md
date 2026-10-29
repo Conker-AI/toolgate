@@ -29,7 +29,7 @@ one, otherwise it is `null`. The codes:
 
 | Code | Meaning |
 |---|---|
-| `invalid_document` | Not an `EditorDocument`: a missing or wrong field, a bound exceeded. The message starts with the field path, e.g. `budgets: Field required`. When this appears, no other check ran. |
+| `invalid_document` | Not an `EditorDocument`: a missing or wrong field, a bound exceeded. The message starts with the field path when there is one, e.g. `budgets: Field required`. When this appears, no other check ran. |
 | `invalid_graph` | A rule of `validate_graph`: one Input, connections, branches, references, step configuration. |
 | `credentials_not_allowed` | `credentialRefs` is not empty; credentials are bound on registered tools. |
 | `invalid_definition` | The workflow definition publishing would store breaks a registry rule, such as an input name that is not an identifier. |
