@@ -2,18 +2,21 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from toolgate.api.definitions import (
+    capability_metadata_errors,
     require_valid_automation_definition,
     require_valid_tool_definition,
+    tool_definition_errors,
 )
-from toolgate.api.deps import require_agent, require_owner
+from toolgate.api.deps import require_agent, require_owner, require_owner_or_agent
 from toolgate.api.models import V2Invoke
 from toolgate.api.routes.automations import run_automation
 from toolgate.core import (
     control_plane,
     editor_catalogue,
+    editor_check,
     editor_drafts,
     editor_graph,
     editor_publication,
@@ -58,6 +61,16 @@ def validate_owner_editor_draft(draft_id: str):
         "issues": issues,
         "execution_ready": False,
     }
+
+
+@router.post("/v2/editor/check", dependencies=[Depends(require_owner_or_agent)])
+def check_editor_document(payload: editor_check.Check):
+    """Check a document by the rules publishing applies. Saves, grants and runs nothing."""
+    return editor_check.check(
+        payload.document,
+        metadata_errors=capability_metadata_errors,
+        tool_errors=tool_definition_errors,
+    )
 
 
 @router.post("/v2/owner/editor-drafts/{draft_id}", dependencies=[Depends(require_owner)])
@@ -136,12 +149,22 @@ def run_owner_editor_draft(
 
 
 @router.post("/v2/owner/editor-drafts/{draft_id}/publish", dependencies=[Depends(require_owner)])
-def publish_owner_editor_draft(draft_id: str, payload: editor_publication.PublishDraft):
+def publish_owner_editor_draft(
+    draft_id: str,
+    payload: editor_publication.PublishDraft,
+    x_toolgate_execution_key: str | None = Header(None, alias="X-ToolGate-Execution-Key"),
+    x_toolgate_agent: str | None = Header(None, alias="X-ToolGate-Agent"),
+):
+    # "Let Conker use this tool" grants the chat's own key, so that key comes with the request.
+    agent = (
+        require_agent(x_toolgate_execution_key, x_toolgate_agent) if payload.conkerMayUse else None
+    )
     publication = editor_publication.publish_draft(
         draft_id,
         payload,
         validate=require_valid_automation_definition,
         validate_tool=require_valid_tool_definition,
+        agent=agent,
     )
     return {
         "draft_id": draft_id,
@@ -150,4 +173,6 @@ def publish_owner_editor_draft(draft_id: str, payload: editor_publication.Publis
         "version": publication["version"],
         "digest": publication["digest"],
         "published_at": publication["published_at"],
+        "toolId": editor_catalogue.workflow_tool_id(publication),
+        "conkerMayUse": payload.conkerMayUse,
     }

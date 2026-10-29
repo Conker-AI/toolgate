@@ -32,5 +32,17 @@ def require_owner(x_toolgate_owner_key: str | None = Header(None, alias="X-ToolG
     owner_channel.authenticate(x_toolgate_owner_key)
 
 
+def require_owner_or_agent(
+    x_toolgate_owner_key: str | None = Header(None, alias="X-ToolGate-Owner-Key"),
+    x_toolgate_execution_key: str | None = Header(None, alias="X-ToolGate-Execution-Key"),
+    x_toolgate_agent: str | None = Header(None, alias="X-ToolGate-Agent"),
+) -> None:
+    """For read-only calls: the owner key when it is sent, otherwise an execution key."""
+    if x_toolgate_owner_key is not None:
+        owner_channel.authenticate(x_toolgate_owner_key)
+    else:
+        require_agent(x_toolgate_execution_key, x_toolgate_agent)
+
+
 def deny(code: str, message: str, status: int = 403, next_action: str = ""):
     raise HTTPException(status, {"code": code, "message": message, "next_action": next_action})

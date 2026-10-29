@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Check a workflow document without saving it.** `POST /v2/editor/check` (execution key or owner
+  key) answers `{"valid", "issues": [{"code", "message", "nodeId"}]}` by the rules publishing
+  applies: the document's shape, the graph, that every `tool_call` names an active tool and every
+  `workflow_call` a published workflow, and publishing's size and cycle limits. It saves, grants
+  and runs nothing. See docs/workflow-editor.md.
+- **"Let Conker use this tool" when publishing.** The editor's publish takes `conkerMayUse`
+  (default `false`). When `true`, with the chat's execution key on the request, the publication is
+  visible to agents and that key gets the workflow's scopes in the same transaction, as the owner's
+  access switch gives them; a refused grant publishes nothing. The answer adds `toolId` (the id
+  Conker's tool list shows) and `conkerMayUse`.
+- **AI tools through Pi.** With `TOOLGATE_PI_URL` and `TOOLGATE_PI_SERVICE_KEY` set, an
+  `ollama_generate` tool gets its text from Pi's `tool-text` model role (`POST /inference`), so the
+  owner picks that model in Pi's Settings; Pi's role decides the temperature. Pi being unavailable
+  is the usual `AI_UNAVAILABLE` failure. Without them, the tool calls Ollama directly as before.
+
 ## 0.9.1
 
 - The Terminal accepts the arguments small local models actually send: a working folder of `/`
