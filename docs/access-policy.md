@@ -24,9 +24,14 @@ what must hold even if that resolution is wrong.
 ## The floor
 
 A tool is on the floor when the owner marked it sensitive (`POST /v2/owner/tools/{id}/sensitive`,
-`{"sensitive": true}`), or when it runs one of the fixed system controls that carry their own exact
-review (`port_control`, `container_control`, `process_control`). No decision skips the owner for
-these. Agent tool listings (`GET /v2/agent/tools`) include `"sensitive": true|false`.
+`{"sensitive": true}`), when it runs one of the fixed system controls that carry their own exact
+review (`port_control`, `container_control`, `process_control`), or when it calls a tool on an
+external MCP server (`mcp_http`). No decision skips the owner for these. Agent tool listings
+(`GET /v2/agent/tools`) include `"sensitive": true|false`.
+
+External MCP tools are on the floor because what they do is decided by a server outside the
+owner's control: an imported tool is always `owner_confirmation`, and no per-tool switch lets a
+delegate's `run` skip the owner. Unmarking it sensitive does not take it off the floor.
 
 ## Inbox buttons
 

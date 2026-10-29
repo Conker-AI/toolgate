@@ -16,6 +16,16 @@
   `ollama_generate` tool gets its text from Pi's `tool-text` model role (`POST /inference`), so the
   owner picks that model in Pi's Settings; Pi's role decides the temperature. Pi being unavailable
   is the usual `AI_UNAVAILABLE` failure. Without them, the tool calls Ollama directly as before.
+- **External MCP tools always ask the owner.** `mcp_http` is on the access floor, so a policy
+  delegate's `run` decision no longer turns an imported MCP tool into an automatic action; it parks
+  for the owner, as an imported tool always has. `GET /v2/owner/access` lists it in
+  `floorExecutions`, and agent tool listings mark these tools `sensitive`.
+- **The agent that asked can withdraw its approval request.** `POST
+  /v2/agent/requests/{id}/withdraw` (the key and agent that invoked; no body) moves a request still
+  waiting for the owner to `withdrawn`, records `request_withdrawn`, and takes it out of the owner
+  channel (list, detail and decision). It can never be approved or run. Idempotent; another key,
+  an unknown id or an informational request is 404, an answered request 409 `REQUEST_NOT_PENDING`.
+  For Pi to call when a chat is forgotten. See docs/APPROVAL_INTEGRITY.md.
 - Tests keep their files in pytest's `tmp_path` only. `toolgate/tests/conftest.py` stops and
   fails any test that writes into the repository, and refuses a `--basetemp` inside it. Two
   spending tests used to write an admin key into `toolgate/.env` when they started the app.

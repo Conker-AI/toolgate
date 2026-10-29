@@ -63,11 +63,7 @@ def create_agent_request(payload: V2Request, agent: dict = Depends(require_agent
         )
 
 
-@router.get("/v2/agent/requests/{request_id}")
-def agent_request_status(request_id: str, agent: dict = Depends(require_agent)):
-    request = control_plane.get("request", request_id)
-    if not request or request.get("payload", {}).get("created_by_agent_key") != agent["id"]:
-        raise HTTPException(404, "request not found")
+def _agent_view(request: dict) -> dict:
     return {
         "id": request["id"],
         "kind": request["kind"],
@@ -76,6 +72,33 @@ def agent_request_status(request_id: str, agent: dict = Depends(require_agent)):
         "created_at": request["created_at"],
         "decision": request.get("decision"),
     }
+
+
+@router.get("/v2/agent/requests/{request_id}")
+def agent_request_status(request_id: str, agent: dict = Depends(require_agent)):
+    request = control_plane.get("request", request_id)
+    if not request or request.get("payload", {}).get("created_by_agent_key") != agent["id"]:
+        raise HTTPException(404, "request not found")
+    return _agent_view(request)
+
+
+@router.post("/v2/agent/requests/{request_id}/withdraw")
+def withdraw_agent_request(request_id: str, agent: dict = Depends(require_agent)):
+    """Take back this caller's approval request while the owner has not answered (for example
+    when its chat is forgotten). Allowed in lockdown: it only removes authority."""
+    try:
+        request = approvals.withdraw_request(request_id, agent["id"], agent["name"])
+    except ValueError as exc:
+        deny(
+            "REQUEST_NOT_PENDING",
+            f"{str(exc).capitalize()}; only a request still waiting for the owner can be withdrawn",
+            409,
+            "Read it with GET /v2/agent/requests/{id}",
+        )
+    if request is None:
+        # Unknown and another key's request give the same answer.
+        raise HTTPException(404, "request not found")
+    return _agent_view(request)
 
 
 @router.post("/v2/admin/requests")

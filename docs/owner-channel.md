@@ -27,13 +27,20 @@ All routes require the dedicated header:
 
 - `GET /v2/owner/requests?limit=50&cursor=<request-id>` returns
   `{results: [...], next_cursor: null | string}`. Limit is 1–200. Only verification
-  requests appear. Pagination orders immutable `(created_at, id)` descending;
-  deciding an old request does not move it between pages. A 6 MiB projection budget
-  may return fewer than `limit` records; always follow `next_cursor`.
-- `GET /v2/owner/requests/{id}` returns the current projection below.
+  requests appear, except withdrawn ones. Pagination orders immutable `(created_at, id)`
+  descending; deciding an old request does not move it between pages. A 6 MiB projection
+  budget may return fewer than `limit` records; always follow `next_cursor` (a cursor whose
+  request was withdrawn meanwhile still works).
+- `GET /v2/owner/requests/{id}` returns the current projection below, or 404 once the agent
+  that asked withdrew it.
 - `POST /v2/owner/requests/{id}/decision` accepts only
   `{status: "approved" | "rejected" | "dismissed", note?: string}`. Note is at most
-  2,000 characters; unknown fields are rejected. Returns the current projection.
+  2,000 characters; unknown fields are rejected. Returns the current projection. A
+  withdrawn request answers 404.
+
+The agent that asked may withdraw a request while it is still pending (`POST
+/v2/agent/requests/{id}/withdraw`, see docs/APPROVAL_INTEGRITY.md). It then leaves this channel:
+the Inbox stops showing it and it can never be approved. `status` here is never `withdrawn`.
 
 ```text
 id, kind: "verification", title, details, actor, severity, status,
