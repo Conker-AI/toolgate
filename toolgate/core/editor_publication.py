@@ -49,6 +49,23 @@ class PublishDraft(editor_drafts.StrictDocument):
     expected_revision: Annotated[int, Field(ge=1)]
     expected_publication_version: Annotated[int, Field(ge=0)]
     authorization: Literal["auto", "owner_confirmation"] = "owner_confirmation"
+    # "Let Conker use this tool": publish it visible to agents and grant the presenting key.
+    conkerMayUse: bool = False
+
+
+def automation_id(identity):
+    # Stable opaque registry identity avoids case/underscore collisions in draft IDs.
+    return "editor-" + hashlib.sha256(identity.encode()).hexdigest()[:32]
+
+
+def definition(identity, document: EditorDocument, block, authorization):
+    """The registry definition a publication of this document stores."""
+    return {"id": identity, "name": document.name,
+            "description": document.description or "Owner-authored visual workflow",
+            "inputs": [item.model_dump(exclude_unset=True) for item in document.inputs],
+            "workflow": [block], "authorization": authorization, "status": "active",
+            "policy": cp.with_default_limits({"usage_limits": {"max_steps": document.budgets.maxSteps,
+                "max_runtime_seconds": math.ceil(document.budgets.timeoutMs / 1000)}})}
 
 
 def _table(conn):
@@ -80,11 +97,21 @@ def history(identity):
         return result
 
 
-def publish_draft(identity, payload: PublishDraft, *, validate, validate_tool):
+def _let_conker_use(conn, publication, agent):
+    from . import editor_runs
+    if not publication["definition"]["workflow"][0]["document"].get("agentVisible"):
+        raise OwnerError("publication_conflict", "This draft revision is already published without "
+                         "Conker's access; save the draft again to publish it with access.", 409)
+    if agent is None:
+        raise OwnerError("execution_unavailable", "Send the chat's execution key to grant it access.", 401)
+    editor_runs.change(conn, publication, editor_runs.caller_key(conn, agent), True)
+
+
+def publish_draft(identity, payload: PublishDraft, *, validate, validate_tool, agent=None):
+    """Publish the saved revision; with conkerMayUse, grant `agent`'s key in the same transaction."""
     from . import publications
     editor_drafts._identity(identity)
-    # Stable opaque registry identity avoids case/underscore collisions in draft IDs.
-    automation_id = "editor-" + hashlib.sha256(identity.encode()).hexdigest()[:32]
+    registry_id = automation_id(identity)
     with cp._conn() as conn:
         editor_drafts._table(conn)
         _table(conn)
@@ -100,27 +127,32 @@ def publish_draft(identity, payload: PublishDraft, *, validate, validate_tool):
             if previous["authorization"] != payload.authorization:
                 raise OwnerError("publication_conflict", "This draft revision is already published with different authorization.", 409)
             saved = conn.execute("SELECT body FROM v2_publications WHERE kind='automation' AND id=? AND version=?",
-                                 (automation_id, previous["version"])).fetchone()
-            return json.loads(saved[0])
+                                 (registry_id, previous["version"])).fetchone()
+            publication = json.loads(saved[0])
+            if payload.conkerMayUse:
+                _let_conker_use(conn, publication, agent)
+            return publication
         latest_version = previous["version"] if previous else 0
         if latest_version != payload.expected_publication_version:
             raise OwnerError("publication_conflict", "Publication changed; reload before publishing.", 409)
-        block = {"type": "editor_graph", "document": json.loads(row["body"])}
+        body = json.loads(row["body"])
+        if payload.conkerMayUse:
+            # Agents see a published workflow only when its document says so.
+            body["agentVisible"] = True
+        block = {"type": "editor_graph", "document": body}
         document = document_from_block(block)
-        existing = conn.execute("SELECT * FROM v2_objects WHERE kind='automation' AND id=?", (automation_id,)).fetchone()
+        existing = conn.execute("SELECT * FROM v2_objects WHERE kind='automation' AND id=?", (registry_id,)).fetchone()
         if (previous and (not existing or cp._row(existing)["version"] != latest_version)) or (existing and not previous):
             raise OwnerError("publication_conflict", "Registry definition changed outside this editor; review it before publishing.", 409)
-        definition = {"id": automation_id, "name": document.name,
-            "description": document.description or "Owner-authored visual workflow",
-            "inputs": [item.model_dump(exclude_unset=True) for item in document.inputs],
-            "workflow": [block], "authorization": payload.authorization, "status": "active",
-            "policy": cp.with_default_limits({"usage_limits": {"max_steps": document.budgets.maxSteps,
-                "max_runtime_seconds": math.ceil(document.budgets.timeoutMs / 1000)}})}
-        validate(definition)
-        saved = cp._put("automation", automation_id, definition,
+        stored = definition(registry_id, document, block, payload.authorization)
+        validate(stored)
+        saved = cp._put("automation", registry_id, stored,
                         expected_version=latest_version or None, connection=conn)
-        publication = publications.publish("automation", automation_id, saved["version"],
+        publication = publications.publish("automation", registry_id, saved["version"],
                                             validate_tool=validate_tool, connection=conn)
         conn.execute("INSERT INTO v2_editor_publications VALUES(?,?,?,?,?)",
-            (identity, payload.expected_revision, automation_id, saved["version"], payload.authorization))
+            (identity, payload.expected_revision, registry_id, saved["version"], payload.authorization))
+        if payload.conkerMayUse:
+            # Inside the publish transaction: a refused grant rolls the publication back too.
+            _let_conker_use(conn, publication, agent)
         return publication

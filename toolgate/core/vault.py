@@ -55,6 +55,9 @@ _CONFIG_KEYS = _CONTROL_KEYS | {
     "TOOLGATE_DASHBOARD_ORIGINS",
     "TOOLGATE_DATA_DIR",
     "TOOLGATE_ENV_PATH",
+    # Pi inference for AI tools (toolgate/executors/pi_inference.py).
+    "TOOLGATE_PI_URL",
+    "TOOLGATE_PI_SERVICE_KEY",
     # Retired configuration stays reserved so upgrades cannot expose it as provider secrets.
     "TOOLGATE_MCP_ACTOR",
     "TOOLGATE_MCP_PRESERVE_IDS",
@@ -172,6 +175,8 @@ def get_key(placeholder: str) -> str:
     """Return the real value for a vault placeholder. Never exposed to callers via list_placeholders()."""
     if placeholder in {"TOOLGATE_OWNER_KEY_SHA256", "TOOLGATE_OWNER_KEY"}:
         raise KeyError("Owner channel configuration is not a tool secret")
+    if placeholder == "TOOLGATE_PI_SERVICE_KEY":
+        raise KeyError("Pi's service key is not a tool secret")
     value = _load().get(placeholder) or os.environ.get(placeholder)
     if not value:
         raise KeyError(f"{placeholder} is not set in .env")

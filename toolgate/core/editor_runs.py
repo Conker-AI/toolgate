@@ -68,30 +68,40 @@ def scopes(publication):
     return list(dict.fromkeys(f"automation:{member['id']}" for member in publications.members(publication)))
 
 
+def caller_key(conn, agent):
+    """The chat's own active key; grants never belong to one agent or a bound key."""
+    if agent.get("identity"):
+        raise OwnerError("execution_unavailable", "Grant access on the chat's own key.", 403)
+    row = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (agent["id"],)).fetchone()
+    if not row or row["status"] != "active":
+        raise OwnerError("execution_unavailable", "Execution credential is no longer active.", 403)
+    return cp.public_agent_key(row)
+
+
+def change(conn, publication, caller, enabled):
+    """Grant or revoke the key's use of one publication inside the caller's transaction."""
+    required = scopes(publication)
+    # Remove only the root on revocation. Nested workflows may have their
+    # own independent grants and other callers; never revoke those here.
+    updated = list(dict.fromkeys([*caller["scopes"], *required])) if enabled else [s for s in caller["scopes"] if s != required[0]]
+    if not enabled and cp.is_scoped({**caller, "scopes": updated}, required[0]):
+        raise OwnerError("broad_execution_grant", "This caller has a broader grant; remove it through host administration first.", 409)
+    conn.execute("UPDATE v2_agent_keys SET scopes=? WHERE id=?", (json.dumps(updated), caller["id"]))
+    conn.execute("INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)", (uuid.uuid4().hex,
+        "editor_access_granted" if enabled else "editor_access_revoked", "warning", "automation",
+        publication["id"], "owner", json.dumps({"actor_id": caller["id"], "scopes": required}), cp._now()))
+    caller["scopes"] = updated
+
+
 def access(identity, payload: Target, agent, *, enabled=None):
     with cp._conn() as conn:
         if enabled is not None:
             conn.execute("BEGIN IMMEDIATE")
         publication = target(conn, identity, payload.version, payload.digest, available=enabled is True)
-        if agent.get("identity"):
-            # Grants belong to the chat's own key, never to one agent or a bound key.
-            raise OwnerError("execution_unavailable", "Grant access on the chat's own key.", 403)
-        row = conn.execute("SELECT * FROM v2_agent_keys WHERE id=?", (agent["id"],)).fetchone()
-        if not row or row["status"] != "active":
-            raise OwnerError("execution_unavailable", "Execution credential is no longer active.", 403)
-        caller = cp.public_agent_key(row)
+        caller = caller_key(conn, agent)
         required = scopes(publication)
         if enabled is not None:
-            # Remove only the root on revocation. Nested workflows may have their
-            # own independent grants and other callers; never revoke those here.
-            updated = list(dict.fromkeys([*caller["scopes"], *required])) if enabled else [s for s in caller["scopes"] if s != required[0]]
-            if not enabled and cp.is_scoped({**caller, "scopes": updated}, required[0]):
-                raise OwnerError("broad_execution_grant", "This caller has a broader grant; remove it through host administration first.", 409)
-            conn.execute("UPDATE v2_agent_keys SET scopes=? WHERE id=?", (json.dumps(updated), agent["id"]))
-            conn.execute("INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)", (uuid.uuid4().hex,
-                "editor_access_granted" if enabled else "editor_access_revoked", "warning", "automation",
-                publication["id"], "owner", json.dumps({"actor_id": agent["id"], "scopes": required}), cp._now()))
-            caller["scopes"] = updated
+            change(conn, publication, caller, enabled)
         return {"actor_id": caller["id"], "actor_name": caller["name"], "automation_id": publication["id"],
                 "enabled": all(cp.is_scoped(caller, scope) for scope in required), "required_scopes": required}
 

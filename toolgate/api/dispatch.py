@@ -15,6 +15,7 @@ from toolgate.executors import (
     container_control,
     filesystem_inventory,
     mcp_http,
+    pi_inference,
     process_control,
     research,
     research_base,
@@ -149,10 +150,21 @@ def _execute_memorygate(execution: dict, args: dict) -> dict:
 
 
 def _execute_ollama(execution: dict, args: dict) -> dict:
+    prompt = _render_template(execution["prompt_template"], args)
+    pi = pi_inference.configured()
+    if pi:
+        # Pi's tool-text role picks the model and temperature; the tool sets the token cap.
+        if len(prompt) > pi_inference.PROMPT_LIMIT:
+            deny("VALIDATION_ERROR", "AI tool prompt must be at most 64,000 characters", 422)
+        try:
+            text = pi_inference.generate(*pi, prompt, int(execution.get("max_tokens", 256)))
+        except pi_inference.PiUnavailable as exc:
+            deny("AI_UNAVAILABLE", f"AI tool failed: {exc}", 502)
+        return {"ok": True, "result": text.strip()}
+    # Fallback without Pi: the direct local Ollama call.
     url = (
         control_plane.settings().get("generation_url", "http://memorygate-ollama:11434").rstrip("/")
     )
-    prompt = _render_template(execution["prompt_template"], args)
     try:
         response = httpx.post(
             f"{url}/api/generate",
