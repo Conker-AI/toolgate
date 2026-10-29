@@ -8,13 +8,12 @@ at a database that genuinely cannot be opened.
 import json
 import os
 import sqlite3
-import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server, version
@@ -36,9 +35,12 @@ class _AlwaysOk(BaseHTTPRequestHandler):
 
 
 class HealthTests(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory, set before setUp
+        self.tmp_path = tmp_path
+
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp_dir.name)
+        self.root = self.tmp_path
         self.db_patch = patch.object(control_plane, "DB_PATH", self.root / "toolgate-test.db")
         self.db_patch.start()
         self.env_patch = patch.object(vault, "ENV_PATH", self.root / "vault.env")
@@ -66,7 +68,6 @@ class HealthTests(unittest.TestCase):
         self.os_patch.stop()
         self.env_patch.stop()
         self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     def point_upstreams_at(self, url: str):
         control_plane.update_settings({"research_searxng_url": url, "generation_url": url}, "test")
@@ -191,7 +192,3 @@ class HealthTests(unittest.TestCase):
         self.assertNotIn("127.0.0.1", rendered)
         self.assertNotIn("mg_read_test_value", rendered)
         self.assertNotIn(str(self.root), rendered)
-
-
-if __name__ == "__main__":
-    unittest.main()

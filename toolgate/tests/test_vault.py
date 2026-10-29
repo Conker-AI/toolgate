@@ -5,18 +5,21 @@ that a reader who holds the values file but not the install-time secret learns
 nothing, so nothing here may be mocked.
 """
 import os
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from toolgate.core import vault
 
 
 class VaultEncryptionTests(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory, set before setUp
+        self.tmp_path = tmp_path
+
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp_dir.name)
+        self.root = self.tmp_path
         self.env_path = self.root / "vault.env"
         self.key_file = self.root / "keys" / "vault.key"
         self.env_patch = patch.dict(
@@ -33,7 +36,6 @@ class VaultEncryptionTests(unittest.TestCase):
         self.path_patch.stop()
         self.env_patch.stop()
         os.environ.pop(vault._SALT_KEY, None)
-        self.temp_dir.cleanup()
 
     def _file_text(self) -> str:
         return self.env_path.read_text(encoding="utf-8")
@@ -143,7 +145,3 @@ class VaultEncryptionTests(unittest.TestCase):
             vault.set_secret("GITHUB_TOKEN", "ghp_value")
 
         self.assertNotIn("ghp_value", self._file_text() if self.env_path.exists() else "")
-
-
-if __name__ == "__main__":
-    unittest.main()

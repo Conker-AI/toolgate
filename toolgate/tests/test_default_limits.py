@@ -6,9 +6,9 @@ created through the API with no policy got `{}`, and an absent limit reads as
 unlimited. The seeded tools were fine; anything created afterwards, including
 a tool Conker proposes, was not.
 """
-import tempfile
 import unittest
-from pathlib import Path
+
+import pytest
 
 from toolgate.core import control_plane
 from toolgate.core.control_plane import DEFAULT_USAGE_LIMITS, with_default_limits
@@ -55,14 +55,16 @@ class ToolsAreRegisteredWithCeilings(unittest.TestCase):
     call it - which is exactly the shape the original bug had.
     """
 
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory, set before setUp
+        self.tmp_path = tmp_path
+
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
         self.original_db = control_plane.DB_PATH
-        control_plane.DB_PATH = Path(self.temp_dir.name) / "toolgate-test.db"
+        control_plane.DB_PATH = self.tmp_path / "toolgate-test.db"
 
     def tearDown(self):
         control_plane.DB_PATH = self.original_db
-        self.temp_dir.cleanup()
 
     def test_a_tool_registered_with_no_policy_has_finite_ceilings(self):
         tool = control_plane.create_tool({"id": "proposed.tool", "name": "Proposed"})

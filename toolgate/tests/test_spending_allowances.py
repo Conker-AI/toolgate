@@ -64,10 +64,14 @@ def test_real_reservation_rechecks_allowance(target):
     assert journal.get("root") is None
 
 
-def test_allowance_api_authority_and_actor_isolation(target):
+def test_allowance_api_authority_and_actor_isolation(target, monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
 
     from toolgate.api import server
+    # Startup writes the vault, so it gets files of its own.
+    monkeypatch.setattr(server.vault, "ENV_PATH", tmp_path / "vault.env")
+    monkeypatch.setenv("TOOLGATE_VAULT_KEY_FILE", str(tmp_path / "vault.key"))
+    monkeypatch.setenv("TOOLGATE_ADMIN_KEY", "allowance-owner")
     app = server.app
     with TestClient(app) as client:
         assert client.post("/v2/spending/allowances", json={}).status_code in (401, 403)

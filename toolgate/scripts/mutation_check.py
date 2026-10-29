@@ -310,7 +310,9 @@ def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedPr
             "--tb=short",
             "-p",
             "no:cacheprovider",
-            f"--basetemp={root / name}",
+            # Beside the copy, not inside it: the tests refuse a temporary directory in the tree
+            # they test (toolgate/tests/conftest.py).
+            f"--basetemp={root.parent / 'runs' / name}",
         ],
         cwd=root,
         env=env,
@@ -335,7 +337,8 @@ def main() -> int:
         print("\n".join(f"  {line}" for line in stale))
         return 1
     with tempfile.TemporaryDirectory(prefix="toolgate-mutations-") as directory:
-        root = Path(directory)
+        root = Path(directory) / "source"
+        (root.parent / "runs").mkdir()  # pytest creates --basetemp itself, but not its parent
         for source in (ROOT / "toolgate").rglob("*.py"):
             destination = root / source.relative_to(ROOT)
             destination.parent.mkdir(parents=True, exist_ok=True)

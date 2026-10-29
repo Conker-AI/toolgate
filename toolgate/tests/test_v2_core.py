@@ -1,10 +1,9 @@
-import tempfile
 import time
 import unittest
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
+import pytest
 from fastapi import HTTPException
 
 from toolgate.api import definitions, dispatch, server, workflows
@@ -12,14 +11,16 @@ from toolgate.core import approvals, control_plane
 
 
 class ControlPlaneTests(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory, set before setUp
+        self.tmp_path = tmp_path
+
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
         self.original_db = control_plane.DB_PATH
-        control_plane.DB_PATH = Path(self.temp_dir.name) / "toolgate-test.db"
+        control_plane.DB_PATH = self.tmp_path / "toolgate-test.db"
 
     def tearDown(self):
         control_plane.DB_PATH = self.original_db
-        self.temp_dir.cleanup()
 
     def test_tool_and_automation_scopes_are_separate(self):
         tool_agent = {"scopes": ["tool:*"]}
@@ -203,9 +204,3 @@ class ControlPlaneTests(unittest.TestCase):
                 {"ok": True, "result": {"first": 1}},
             )
         self.assertEqual(502, raised.exception.status_code)
-
-
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -16,6 +16,9 @@
   `ollama_generate` tool gets its text from Pi's `tool-text` model role (`POST /inference`), so the
   owner picks that model in Pi's Settings; Pi's role decides the temperature. Pi being unavailable
   is the usual `AI_UNAVAILABLE` failure. Without them, the tool calls Ollama directly as before.
+- Tests keep their files in pytest's `tmp_path` only. `toolgate/tests/conftest.py` stops and
+  fails any test that writes into the repository, and refuses a `--basetemp` inside it. Two
+  spending tests used to write an admin key into `toolgate/.env` when they started the app.
 
 ## 0.9.1
 
