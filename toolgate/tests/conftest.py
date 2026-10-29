@@ -81,7 +81,7 @@ def targets(event: str, args: tuple) -> list:
         return _database(args[0])
     if event == "os.mkdir":  # Path.mkdir(exist_ok=True) on an existing folder changes nothing
         return [args[0]] if _plain(args[2]) and not os.path.exists(args[0]) else []
-    if event in ("os.remove", "os.rmdir"):
+    if event in ("os.remove", "os.rmdir", "shutil.rmtree"):
         return [args[0]] if _plain(args[1]) else []
     if event in ("os.rename", "os.replace"):  # os.replace is audited as os.rename
         return list(args[:2]) if _plain(*args[2:4]) else []
@@ -94,7 +94,7 @@ def targets(event: str, args: tuple) -> list:
 
 _EVENTS = {
     "open", "sqlite3.connect", "os.mkdir", "os.remove", "os.rmdir", "os.rename", "os.replace",
-    "os.symlink", "os.link", "os.truncate",
+    "os.symlink", "os.link", "os.truncate", "shutil.rmtree",
 }  # fmt: skip
 
 

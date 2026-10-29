@@ -6,13 +6,12 @@ the real routes over the real ASGI app against a real SQLite file, because a
 mocked control plane would happily agree that a replay fails.
 """
 import os
-import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from toolgate.api import server
@@ -37,9 +36,12 @@ TOOL = {
 
 
 class ApprovalBoundaryTests(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory, set before setUp
+        self.tmp_path = tmp_path
+
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        root = Path(self.temp_dir.name)
+        root = self.tmp_path
         self.db_patch = patch.object(control_plane, "DB_PATH", root / "toolgate-test.db")
         self.db_patch.start()
         self.env_patch = patch.object(vault, "ENV_PATH", root / "vault.env")
@@ -61,7 +63,6 @@ class ApprovalBoundaryTests(unittest.TestCase):
         self.os_patch.stop()
         self.env_patch.stop()
         self.db_patch.stop()
-        self.temp_dir.cleanup()
 
     def invoke(self, key: str, value: str, approval_request_id: str | None = None):
         body = {"args": {"value": value}}
@@ -181,7 +182,3 @@ class ApprovalBoundaryTests(unittest.TestCase):
         for event in before:
             self.assertEqual(by_id[event["id"]], event)
         self.assertIn("verification_consumed", [event["event_type"] for event in after])
-
-
-if __name__ == "__main__":
-    unittest.main()

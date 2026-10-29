@@ -188,7 +188,11 @@ def test_concurrent_jobs_cannot_overbook_cumulative_cap(paid):
     assert len(journal.list_actions()) == 1
 
 
-def test_owner_only_can_set_caps_prices_and_mint_jobs(paid, monkeypatch):
+def test_owner_only_can_set_caps_prices_and_mint_jobs(paid, monkeypatch, tmp_path):
+    # Startup writes the vault, so it gets files of its own.
+    monkeypatch.setattr(server.vault, "ENV_PATH", tmp_path / "vault.env")
+    monkeypatch.setenv("TOOLGATE_VAULT_KEY_FILE", str(tmp_path / "vault.key"))
+    monkeypatch.setenv("TOOLGATE_ADMIN_KEY", "owner-secret")
     monkeypatch.setattr(server.vault, "get_control_key", lambda _: "owner-secret")
     _, key = control_plane.issue_agent_key("agent", ["tool:*"])
     with TestClient(server.app, raise_server_exceptions=True) as client:

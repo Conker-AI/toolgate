@@ -1,6 +1,7 @@
 """The suite stops any test that writes into the repository (see conftest.py)."""
 
 import os
+import shutil
 import sqlite3
 import uuid
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ def test_writes_into_the_repository_are_stopped_and_fail_the_test(request):
         lambda: target.mkdir(),
         lambda: source.replace(target),
         lambda: target.unlink(),
+        lambda: shutil.rmtree(target),
     ]
     for attempt in attempts:
         with pytest.raises(RepositoryWrite):

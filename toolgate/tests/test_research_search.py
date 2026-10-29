@@ -1,12 +1,11 @@
 """Research search: SearXNG, Tavily, Reddit, Hacker News and Discourse, page fetching, and their safety rules."""
 
-import tempfile
 import unittest
 from datetime import UTC, datetime
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
+import pytest
 
 from toolgate.api import builtin_capabilities, definitions, invocation
 from toolgate.api.routes import agent as agent_routes
@@ -15,14 +14,16 @@ from toolgate.executors import research, research_base, research_forums, researc
 
 
 class ResearchSearchTests(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory, set before setUp
+        self.tmp_path = tmp_path
+
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
         self.original_db = control_plane.DB_PATH
-        control_plane.DB_PATH = Path(self.temp_dir.name) / "toolgate-test.db"
+        control_plane.DB_PATH = self.tmp_path / "toolgate-test.db"
 
     def tearDown(self):
         control_plane.DB_PATH = self.original_db
-        self.temp_dir.cleanup()
 
 
     def test_tool_scopes_support_safe_prefix_grants(self):

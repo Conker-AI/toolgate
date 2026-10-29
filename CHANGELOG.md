@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Tests keep their files in pytest's `tmp_path` only. `toolgate/tests/conftest.py` stops and
+  fails any test that writes into the repository, and refuses a `--basetemp` inside it. Two
+  spending tests used to write an admin key into `toolgate/.env` when they started the app.
+
 ## 0.9.1
 
 - The Terminal accepts the arguments small local models actually send: a working folder of `/`

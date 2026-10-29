@@ -19,8 +19,10 @@ python toolgate/scripts/mutation_check.py
 Run one file:
 
 ```powershell
-python -m unittest toolgate.tests.test_approval_boundary -v
+python -m pytest toolgate/tests/test_approval_boundary.py -v
 ```
+
+Tests keep their files in pytest's `tmp_path`, never in the checkout. `toolgate/tests/conftest.py` fails any test that writes into the repository, naming the path, and refuses a `--basetemp` inside it.
 
 The suite is not all in-memory: the approval binding is driven over the ASGI app against a real SQLite database -- including a twelve-thread race that must produce exactly one success -- and `/health` is checked against an upstream that is genuinely stopped mid-test.
 

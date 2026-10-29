@@ -1,16 +1,22 @@
 import importlib
 import os
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from toolgate.core import paths
 
 
 class RuntimePathsTests(unittest.TestCase):
+    @pytest.fixture(autouse=True)
+    def _use_tmp_path(self, tmp_path):  # pytest's temporary directory
+        self.root = str(tmp_path)
+
     def test_data_and_env_paths_can_live_in_persistent_runtime_volume(self):
-        with tempfile.TemporaryDirectory() as root, patch.dict(
+        root = self.root
+        with patch.dict(
             os.environ,
             {"TOOLGATE_DATA_DIR": root, "TOOLGATE_ENV_PATH": f"{root}/vault.env"},
         ):
@@ -26,9 +32,7 @@ class RuntimePathsTests(unittest.TestCase):
 
         # Patch the storage boundary without recreating exception classes already
         # registered by the HTTP server during test collection.
-        with tempfile.TemporaryDirectory() as root, patch.object(
-            control_plane, "DB_PATH", Path(root) / "toolgate.db",
-        ):
+        with patch.object(control_plane, "DB_PATH", Path(self.root) / "toolgate.db"):
             first = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
             second = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
             self.assertEqual(first["id"], second["id"])
@@ -39,9 +43,7 @@ class RuntimePathsTests(unittest.TestCase):
 
         # Patch the storage boundary without recreating exception classes already
         # registered by the HTTP server during test collection.
-        with tempfile.TemporaryDirectory() as root, patch.object(
-            control_plane, "DB_PATH", Path(root) / "toolgate.db",
-        ):
+        with patch.object(control_plane, "DB_PATH", Path(self.root) / "toolgate.db"):
             first = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
             second = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:research.*"])
             self.assertEqual(first["id"], second["id"])
@@ -51,7 +53,8 @@ class RuntimePathsTests(unittest.TestCase):
     def test_explicit_admin_key_is_persisted_instead_of_replaced(self):
         from toolgate.core import vault
 
-        with tempfile.TemporaryDirectory() as root, patch.dict(
+        root = self.root
+        with patch.dict(
             os.environ,
             {
                 "TOOLGATE_DATA_DIR": root,
@@ -67,7 +70,3 @@ class RuntimePathsTests(unittest.TestCase):
             self.assertIn("TOOLGATE_ADMIN_KEY=explicit-admin-key", Path(f"{root}/vault.env").read_text())
         importlib.reload(paths)
         importlib.reload(vault)
-
-
-if __name__ == "__main__":
-    unittest.main()
