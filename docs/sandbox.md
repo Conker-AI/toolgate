@@ -45,14 +45,21 @@ agent > tool default, the floor, Handled; see access-policy.md) and agent identi
 | Privileges | every capability dropped, `no-new-privileges`, not privileged, no devices, private IPC and cgroup namespaces, Docker's default seccomp profile |
 | Filesystem | read-only root; `/tmp` tmpfs (`SANDBOX_TMP_MB`, default 128) |
 | Environment | the image's own non-secret ENV plus fixed paths and locale; never a credential |
-| Memory | `SANDBOX_MEMORY_MB` (512; installs `SANDBOX_INSTALL_MEMORY_MB`, 1024), no swap |
-| CPU | `SANDBOX_CPUS_MILLI` (1000 = one CPU) |
+| Memory | `SANDBOX_MEMORY_MB` (512; installs `SANDBOX_INSTALL_MEMORY_MB`, 1024), no swap; the owner may lower it for Terminal commands |
+| CPU | `SANDBOX_CPUS_MILLI` (1000 = one CPU); the owner may lower it for Terminal commands |
 | Processes | `SANDBOX_PIDS` (128) |
 | Files | largest file `SANDBOX_FILE_MB` (512), open files `SANDBOX_NOFILE` (1024), no core dumps |
-| Workspace | `SANDBOX_WORKSPACE_MB` (2048) and `SANDBOX_WORKSPACE_FILES` (100000), checked every 2 s; a command that goes over is stopped, and a workspace already over may shrink but not grow |
-| Time | per call (Terminal up to 100 s; installs 100 s), runner maximum `SANDBOX_MAX_SECONDS` (600) |
+| Workspace | `SANDBOX_WORKSPACE_MB` (2048, the owner may lower it) and `SANDBOX_WORKSPACE_FILES` (100000), checked every 2 s; a command that goes over is stopped, and a workspace already over may shrink but not grow |
+| Time | per call (Terminal up to 100 s, or the owner's lower limit; installs 100 s, or the owner's lower tool limit), runner maximum `SANDBOX_MAX_SECONDS` (600) |
 | Logs | json-file, at most 4 MiB, removed with the container |
 | Concurrency | one command per agent at a time, `SANDBOX_CONCURRENT` (2) overall |
+
+The owner's settings in ToolGate (`GET`/`PUT /v2/owner/settings`: `terminal_seconds`,
+`terminal_memory_mb`, `terminal_cpus`, `terminal_workspace_mb`, `tool_seconds`) can only lower
+these, never raise them: ToolGate refuses a value past 100 s, 512 MB, one CPU or 2048 MB, and sends
+the chosen limits with each command as `limits`; the runner keeps its own configured limit when that
+is lower. They apply from the next command, with no restart. A workspace size below what a workspace
+already holds stops it growing; nothing is deleted.
 
 Python packages install into `/workspace/.venv` (which sees the image's libraries) and npm
 packages into `/workspace/node_modules`; both are on `PATH` for later commands.

@@ -28,8 +28,8 @@ MAX_REQUEST = 64 * 1024
 KEEP_OUTPUT = 64 * 1024
 DEFAULT_SOCKET = "/run/conker-sandbox/runner.sock"
 OOM_SETTLE_CHECKS = 10  # tenths of a second to wait for Docker's out-of-memory label
-RUN_KEYS = {"v", "op", "agent", "command", "cwd", "timeout", "request_id"}
-INSTALL_KEYS = {"v", "op", "agent", "manager", "packages", "timeout", "request_id"}
+RUN_KEYS = {"v", "op", "agent", "command", "cwd", "timeout", "request_id", "limits"}
+INSTALL_KEYS = {"v", "op", "agent", "manager", "packages", "timeout", "request_id", "limits"}
 
 
 class Failure(Exception):
@@ -180,6 +180,11 @@ class Runner:
                 )
         except validation.Refused as exc:
             raise Failure(exc.code, str(exc)) from None
+        try:
+            # The owner's lower limits for this command; nothing a request sends can raise one.
+            config = spec.lowered(self.config, request.get("limits"))
+        except spec.ConfigError as exc:
+            raise Failure("invalid_limits", str(exc)) from None
         timeout = request.get("timeout", 60)
         if type(timeout) is not int or not 1 <= timeout <= self.config.limits.max_seconds:
             raise Failure("invalid_timeout", "The time limit is outside the configured bound.")
@@ -194,20 +199,20 @@ class Runner:
             if not self.slots.acquire(timeout=10):
                 raise Failure("busy", "The sandbox is busy; try again shortly.")
             try:
-                return self._execute(agent, argv, op == "install", timeout, request_id)
+                return self._execute(config, agent, argv, op == "install", timeout, request_id)
             finally:
                 self.slots.release()
         finally:
             lock.release()
 
-    def _execute(self, agent, argv, install, timeout, request_id) -> dict:
-        limits = self.config.limits
-        path = workspace(self.config, agent)
+    def _execute(self, config, agent, argv, install, timeout, request_id) -> dict:
+        limits = config.limits
+        path = workspace(config, agent)
         start_bytes, start_files = usage(path, limits.workspace_files)
         # A workspace already over its quota may shrink but not grow.
         byte_ceiling = max(limits.workspace_mb * 1024 * 1024, start_bytes)
         file_ceiling = max(limits.workspace_files, start_files)
-        body = spec.container(self.config, agent, argv, install=install, request_id=request_id)
+        body = spec.container(config, agent, argv, install=install, request_id=request_id)
         name = f"conker-sandbox-{agent[:40]}-{uuid.uuid4().hex[:12]}"
         container = self.docker.create(body, name)
         started = time.monotonic()

@@ -32,10 +32,10 @@ def sandbox(request: dict, timeout: float = 180) -> dict:
         return json.loads(connection.makefile("rb").readline(2 * 1024 * 1024))
 
 
-def run(agent: str, command: str, timeout: int = 30, cwd: str = "") -> dict:
-    return sandbox(
-        {"v": 1, "op": "run", "agent": agent, "command": command, "cwd": cwd, "timeout": timeout}
-    )
+def run(agent: str, command: str, timeout: int = 30, cwd: str = "", limits=None) -> dict:
+    request = {"v": 1, "op": "run", "agent": agent, "command": command, "cwd": cwd}
+    # `limits`: the owner's lower limits, as ToolGate sends them.
+    return sandbox({**request, "timeout": timeout, **({"limits": limits} if limits else {})})
 
 
 def install(agent: str, manager: str, packages: list[str], timeout: int = 120) -> dict:
@@ -60,7 +60,9 @@ def unique_agent(prefix: str = "verify") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
-def while_running(docker: Docker, agent: str, command: str = "sleep 6", install_request=None):
+def while_running(
+    docker: Docker, agent: str, command: str = "sleep 6", install_request=None, limits=None
+):
     """Inspect the container of a live request for `agent`; returns (inspect, final answer)."""
     answer: dict = {}
 
@@ -68,7 +70,7 @@ def while_running(docker: Docker, agent: str, command: str = "sleep 6", install_
         if install_request is not None:
             answer.update(sandbox(install_request))
         else:
-            answer.update(run(agent, command, timeout=60))
+            answer.update(run(agent, command, timeout=60, limits=limits))
 
     thread = threading.Thread(target=send)
     thread.start()

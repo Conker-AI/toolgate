@@ -511,7 +511,7 @@ class ResearchSearchTests(unittest.TestCase):
         self.assertTrue(all("UNTRUSTED_WEB_CONTENT" in row["content"] for row in result["documents"]))
 
     def test_research_bundle_preserves_source_reports_and_deduplicates_urls(self):
-        def fake_search(_query, source, _limit, _recency):
+        def fake_search(_query, source, _limit, _recency, until=None):
             suffix = "shared" if source == "general" else source
             return {
                 "result_count": 1, "provider": source, "fallback_failures": [],

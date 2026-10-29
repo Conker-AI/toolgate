@@ -340,3 +340,65 @@ class TestEnvironment:
         # Has proxy variables for install
         assert env_dict["CONKER_PROXY_SOCKET"] == "/run/conker-proxy/proxy.sock"
         assert env_dict["CONKER_PROXY_PORT"] == "3128"
+
+
+class TestLoweredLimits:
+    """The owner's settings may lower memory, CPU and workspace for one command, never raise them."""
+
+    def setup_method(self):
+        self.config = spec.Config.from_env({
+            "SANDBOX_IMAGE": "sha256:" + "a" * 64,
+            "SANDBOX_WORKSPACES_VOLUME": "ws",
+            "SANDBOX_PROXY_VOLUME": "px",
+            "SANDBOX_MEMORY_MB": "256",
+        })
+
+    def test_no_limits_keep_the_configured_ones(self):
+        assert spec.lowered(self.config, None) is self.config
+        assert spec.lowered(self.config, {}) == self.config
+
+    def test_lower_values_shape_the_container(self):
+        lowered = spec.lowered(self.config, {"memory_mb": 128, "cpus_milli": 500, "workspace_mb": 64})
+        assert (lowered.limits.memory_mb, lowered.limits.cpus_milli) == (128, 500)
+        assert lowered.limits.workspace_mb == 64
+        assert lowered.limits.pids == self.config.limits.pids
+        host = spec.container(lowered, "companion", spec.run_argv("ls", ""))["HostConfig"]
+        assert host["Memory"] == host["MemorySwap"] == 128 * 1024 * 1024
+        assert host["NanoCpus"] == 500_000_000
+
+    def test_a_higher_value_keeps_the_configured_limit(self):
+        lowered = spec.lowered(
+            self.config, {"memory_mb": 4096, "cpus_milli": 64000, "workspace_mb": 1048576}
+        )
+        assert lowered.limits == self.config.limits
+
+    @pytest.mark.parametrize(
+        "limits",
+        [
+            {"memory_mb": 63},
+            {"cpus_milli": 99},
+            {"workspace_mb": 15},
+            {"memory_mb": "128"},
+            {"memory_mb": True},
+            {"memory_mb": 128.0},
+            {"pids": 16},
+            {"max_seconds": 5},
+            ["memory_mb"],
+            "128",
+        ],
+    )
+    def test_anything_else_is_refused(self, limits):
+        with pytest.raises(spec.ConfigError):
+            spec.lowered(self.config, limits)
+
+    def test_the_defaults_are_todays_limits(self):
+        defaults = spec.Config.from_env({
+            "SANDBOX_IMAGE": "sha256:" + "a" * 64,
+            "SANDBOX_WORKSPACES_VOLUME": "ws",
+            "SANDBOX_PROXY_VOLUME": "px",
+        }).limits
+        assert (defaults.memory_mb, defaults.cpus_milli, defaults.workspace_mb) == (
+            spec.MEMORY_MB,
+            spec.CPUS_MILLI,
+            spec.WORKSPACE_MB,
+        )

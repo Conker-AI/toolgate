@@ -1,4 +1,5 @@
-"""Gateway status, lockdown, settings, verification methods and the AI archive export."""
+"""Gateway status, lockdown, settings, the owner's tool settings, verification methods and the AI
+archive export."""
 
 import hashlib
 import hmac
@@ -8,15 +9,16 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse
 
-from toolgate.api.deps import deny, require_admin
+from toolgate.api.deps import deny, require_admin, require_owner
 from toolgate.api.models import (
     DEFAULT_CONFIRMATION_EXPIRY_SECONDS,
     V2Settings,
     VerificationCallback,
     VerificationMethodCreate,
 )
-from toolgate.core import approvals, control_plane, legacy_archive, vault
+from toolgate.core import approvals, control_plane, legacy_archive, tool_settings, vault
 
 router = APIRouter()
 
@@ -52,6 +54,19 @@ def get_settings(_tier: str = Depends(require_admin)):
 @router.put("/v2/settings")
 def update_settings(payload: V2Settings, _tier: str = Depends(require_admin)):
     return control_plane.update_settings(payload.model_dump(), "admin")
+
+
+@router.get("/v2/owner/settings", dependencies=[Depends(require_owner)])
+def owner_settings():
+    """How tools run (time limits, the Terminal's resources, web search) and the revision a save
+    must name. Null numbers keep today's limits."""
+    return JSONResponse(tool_settings.load(), headers={"Cache-Control": "no-store"})
+
+
+@router.put("/v2/owner/settings", dependencies=[Depends(require_owner)])
+def save_owner_settings(payload: tool_settings.Update):
+    """Replace them. A stale revision is refused (409); a value past its ceiling is refused (422)."""
+    return JSONResponse(tool_settings.save(payload), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/v2/verification-methods")

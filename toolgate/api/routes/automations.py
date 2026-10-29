@@ -13,7 +13,7 @@ from toolgate.api.invocation import (
 from toolgate.api.models import DEFAULT_CONFIRMATION_EXPIRY_SECONDS, V2Automation, V2Invoke
 from toolgate.api.routes.publications import _requested_publication
 from toolgate.api.workflows import _automation_input_errors, _run_workflow_steps
-from toolgate.core import approvals, control_plane, publications
+from toolgate.core import approvals, control_plane, publications, tool_settings
 from toolgate.core import execution_journal as journal
 
 router = APIRouter()
@@ -219,7 +219,9 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         "count": 0,
         "max_steps": int(limits.get("max_steps", 100)),
         "started_at": time.monotonic(),
-        "runtime_ceiling": min(int(limits.get("max_runtime_seconds", 30) or 30), 120),
+        "runtime_ceiling": tool_settings.seconds(
+            min(int(limits.get("max_runtime_seconds", 30) or 30), 120)
+        ),
     }
     try:
         final = _run_workflow_steps(

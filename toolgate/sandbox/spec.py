@@ -1,7 +1,8 @@
 """The one container shape every sandbox command runs in. Nothing in a request can change it.
 
 A request chooses only the agent (which picks the workspace folder), the command or packages, the
-working folder inside the workspace and a time limit within the configured bound. Everything else
+working folder inside the workspace, a time limit within the configured bound and, from the
+owner's settings, memory, CPU and workspace limits at or below the configured ones. Everything else
 here is fixed configuration from the runner's environment, read once at startup:
 
 - no network: `NetworkMode: none` (only loopback); installs add the package proxy's socket
@@ -17,6 +18,7 @@ here is fixed configuration from the runner's environment, read once at startup:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 from dataclasses import dataclass
@@ -31,6 +33,13 @@ PATH = (
     "/workspace/.venv/bin:/workspace/node_modules/.bin:"
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
+# Today's limits for one command when the runner's environment sets none. The owner's settings in
+# ToolGate may lower them for each command, never raise them (`lowered`).
+MEMORY_MB = 512
+CPUS_MILLI = 1000
+WORKSPACE_MB = 2048
+# The limits a request may lower, each with the least it accepts (the environment's own floors).
+LOWERABLE = {"memory_mb": 64, "cpus_milli": 100, "workspace_mb": 16}
 
 
 class ConfigError(ValueError):
@@ -91,14 +100,14 @@ class Config:
         uid = _int(env, "SANDBOX_UID", 65533, 1000, 2**31 - 2)
         gid = _int(env, "SANDBOX_GID", 65533, 1000, 2**31 - 2)
         limits = Limits(
-            memory_mb=_int(env, "SANDBOX_MEMORY_MB", 512, 64, 65536),
+            memory_mb=_int(env, "SANDBOX_MEMORY_MB", MEMORY_MB, 64, 65536),
             install_memory_mb=_int(env, "SANDBOX_INSTALL_MEMORY_MB", 1024, 64, 65536),
-            cpus_milli=_int(env, "SANDBOX_CPUS_MILLI", 1000, 100, 64000),
+            cpus_milli=_int(env, "SANDBOX_CPUS_MILLI", CPUS_MILLI, 100, 64000),
             pids=_int(env, "SANDBOX_PIDS", 128, 16, 4096),
             tmp_mb=_int(env, "SANDBOX_TMP_MB", 128, 8, 8192),
             file_mb=_int(env, "SANDBOX_FILE_MB", 512, 1, 65536),
             nofile=_int(env, "SANDBOX_NOFILE", 1024, 64, 65536),
-            workspace_mb=_int(env, "SANDBOX_WORKSPACE_MB", 2048, 16, 1048576),
+            workspace_mb=_int(env, "SANDBOX_WORKSPACE_MB", WORKSPACE_MB, 16, 1048576),
             workspace_files=_int(env, "SANDBOX_WORKSPACE_FILES", 100000, 100, 10000000),
             max_seconds=_int(env, "SANDBOX_MAX_SECONDS", 600, 5, 3600),
             concurrent=_int(env, "SANDBOX_CONCURRENT", 2, 1, 64),
@@ -112,6 +121,21 @@ class Config:
             proxy_volume=volumes["SANDBOX_PROXY_VOLUME"],
             limits=limits,
         )
+
+
+def lowered(config: Config, requested) -> Config:
+    """`config` with a request's lower limits for one command. A value above the configured limit
+    keeps the configured one, so a request can only ever make a command stricter."""
+    if requested is None:
+        return config
+    if not isinstance(requested, dict) or set(requested) - set(LOWERABLE):
+        raise ConfigError("limits may name only memory_mb, cpus_milli and workspace_mb")
+    changes = {}
+    for name, value in requested.items():
+        if type(value) is not int or value < LOWERABLE[name]:
+            raise ConfigError(f"{name} must be a whole number of at least {LOWERABLE[name]}")
+        changes[name] = min(value, getattr(config.limits, name))
+    return dataclasses.replace(config, limits=dataclasses.replace(config.limits, **changes))
 
 
 def environment(install: bool = False) -> list[str]:

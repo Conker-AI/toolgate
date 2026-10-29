@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from toolgate.api import definitions, dispatch, server
 from toolgate.core import control_plane as cp
-from toolgate.core import identities
+from toolgate.core import identities, tool_settings
 from toolgate.executors import sandbox
 from toolgate.sandbox.tools import ensure_builtin_sandbox_capabilities
 
@@ -221,12 +221,49 @@ def test_a_runner_refusal_is_a_failed_result(gate):
     assert body["code"] == "TOOL_UNAVAILABLE" and body["result"]["error_code"] == "busy"
 
 
+def choose(**settings):
+    revision = tool_settings.load()["revision"]
+    tool_settings.save(tool_settings.Update(expected_revision=revision, settings=settings))
+
+
+def test_the_owners_terminal_limit_caps_the_time_and_lowers_the_default(gate):
+    client, _, calls, _ = gate
+    auto("sandbox.run")
+    choose(terminal_seconds=20)
+    refused = invoke(client, {"command": "ls", "timeout_seconds": 60}, action="o1")
+    assert refused.status_code == 422
+    assert "timeout_seconds is 1 to 20" in refused.json()["detail"]["message"]
+    assert invoke(client, {"command": "ls"}, action="o2").json()["code"] == "OK"
+    assert calls[-1]["timeout"] == 20
+    choose(terminal_seconds=60, tool_seconds=10)  # the lower of the two wins
+    assert invoke(client, {"command": "ls", "timeout_seconds": 10}, action="o3").json()["code"] == "OK"
+    assert invoke(client, {"command": "ls", "timeout_seconds": 11}, action="o4").status_code == 422
+    assert len(calls) == 2
+
+
+def test_the_owners_limits_reach_the_runner_only_when_set(gate):
+    client, _, calls, _ = gate
+    auto("sandbox.run")
+    auto("sandbox.install")
+    assert invoke(client, {"command": "ls"}, action="l1").json()["code"] == "OK"
+    assert "limits" not in calls[-1]
+    choose(terminal_memory_mb=256, terminal_cpus=0.5, terminal_workspace_mb=1024, tool_seconds=40)
+    assert invoke(client, {"command": "ls"}, action="l2").json()["code"] == "OK"
+    assert calls[-1]["limits"] == {"memory_mb": 256, "cpus_milli": 500, "workspace_mb": 1024}
+    assert calls[-1]["timeout"] == 30
+    install = {"manager": "pip", "packages": ["six"]}
+    assert invoke(client, install, tool="sandbox.install", action="l3").json()["code"] == "OK"
+    # Installs keep their own memory; the workspace size and the tool time limit still apply.
+    assert (calls[-1]["limits"], calls[-1]["timeout"]) == ({"workspace_mb": 1024}, 40)
+
+
 def test_install_sends_validated_packages_only(gate):
     client, _, calls, _ = gate
     auto("sandbox.install")
     ok = invoke(client, {"manager": "pip", "packages": ["six"]}, tool="sandbox.install", action="i1")
     assert ok.json()["code"] == "OK"
     assert calls[-1] == {**calls[-1], "op": "install", "manager": "pip", "packages": ["six"], "timeout": 100}
+    assert "limits" not in calls[-1]
     for bad in (["git+https://x"], ["x.whl"], ["-r", "reqs.txt"]):
         response = invoke(client, {"manager": "pip", "packages": bad}, tool="sandbox.install", action="i2")
         assert response.status_code == 422

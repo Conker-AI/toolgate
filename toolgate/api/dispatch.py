@@ -9,7 +9,7 @@ import httpx
 from fastapi import HTTPException
 
 from toolgate.api.deps import deny
-from toolgate.core import control_plane, spending, vault
+from toolgate.core import control_plane, spending, tool_settings, vault
 from toolgate.core.public_https import DestinationDenied, public_client, public_url, resolve_public
 from toolgate.executors import (
     container_control,
@@ -93,7 +93,7 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
                 f"Required vault reference '{secret_ref}' is not configured",
                 503,
             )
-    timeout = min(float(execution.get("timeout_seconds", 10)), 30)
+    timeout = tool_settings.seconds(min(float(execution.get("timeout_seconds", 10)), 30))
     max_bytes = min(int(execution.get("max_response_bytes", 262144)), 1048576)
     try:
         with public_client(timeout=timeout, headers=headers) as client:
@@ -140,7 +140,10 @@ def _execute_memorygate(execution: dict, args: dict) -> dict:
         }
     try:
         response = httpx.post(
-            f"{base_url}/runtime/{operation}", json=body, headers=headers, timeout=45
+            f"{base_url}/runtime/{operation}",
+            json=body,
+            headers=headers,
+            timeout=tool_settings.seconds(45),
         )
         response.raise_for_status()
         result = response.json()
@@ -157,7 +160,12 @@ def _execute_ollama(execution: dict, args: dict) -> dict:
         if len(prompt) > pi_inference.PROMPT_LIMIT:
             deny("VALIDATION_ERROR", "AI tool prompt must be at most 64,000 characters", 422)
         try:
-            text = pi_inference.generate(*pi, prompt, int(execution.get("max_tokens", 256)))
+            text = pi_inference.generate(
+                *pi,
+                prompt,
+                int(execution.get("max_tokens", 256)),
+                timeout=tool_settings.seconds(pi_inference.TIMEOUT_SECONDS),
+            )
         except pi_inference.PiUnavailable as exc:
             deny("AI_UNAVAILABLE", f"AI tool failed: {exc}", 502)
         return {"ok": True, "result": text.strip()}
@@ -180,7 +188,7 @@ def _execute_ollama(execution: dict, args: dict) -> dict:
                     "num_ctx": 4096,
                 },
             },
-            timeout=180,
+            timeout=tool_settings.seconds(180),
         )
         response.raise_for_status()
         text = response.json()["response"]
@@ -220,7 +228,7 @@ def _execute_gemini(execution: dict, args: dict) -> dict:
                 "Content-Type": "application/json",
                 "x-goog-api-key": api_key,
             },
-            timeout=min(float(execution.get("timeout_seconds", 60)), 120),
+            timeout=tool_settings.seconds(min(float(execution.get("timeout_seconds", 60)), 120)),
         )
         response.raise_for_status()
         payload = response.json()

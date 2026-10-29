@@ -14,10 +14,11 @@ import os
 import re
 import socket
 
+from toolgate.core import tool_settings
 from toolgate.sandbox import validation
 
 EXECUTIONS = {"sandbox_run": "sandbox.run", "sandbox_install": "sandbox.install"}
-MAX_RUN_SECONDS = 100
+MAX_RUN_SECONDS = tool_settings.TERMINAL_SECONDS
 DEFAULT_RUN_SECONDS = 30
 MAX_ANSWER = 1024 * 1024
 KEEP = 16000
@@ -41,12 +42,14 @@ class OutcomeUnknown(RuntimeError):
 
 
 def _seconds(args: dict) -> int:
-    """The time limit; absent or null means the default, as models often send null."""
+    """The time limit; absent or null means the default, as models often send null. The most is
+    the owner's Terminal limit when it is lower than the Terminal's own."""
+    most = tool_settings.terminal_seconds()
     seconds = args.get("timeout_seconds")
     if seconds is None:
-        return DEFAULT_RUN_SECONDS
-    if type(seconds) is not int or not 1 <= seconds <= MAX_RUN_SECONDS:
-        raise validation.Refused("invalid_timeout", "timeout_seconds is 1 to 100.")
+        return min(DEFAULT_RUN_SECONDS, most)
+    if type(seconds) is not int or not 1 <= seconds <= most:
+        raise validation.Refused("invalid_timeout", f"timeout_seconds is 1 to {most}.")
     return seconds
 
 
@@ -123,7 +126,7 @@ def execute(tool: dict, args: dict, agent: str, action_id: str) -> dict:
                 "request_id": action_id[:100],
             }
         else:
-            seconds = MAX_RUN_SECONDS
+            seconds = tool_settings.seconds(MAX_RUN_SECONDS)
             request = {
                 "v": 1,
                 "op": "install",
@@ -135,6 +138,10 @@ def execute(tool: dict, args: dict, agent: str, action_id: str) -> dict:
             }
     except validation.Refused as exc:
         return {"ok": False, "error": str(exc), "error_code": exc.code}
+    limits = tool_settings.terminal_limits(install=kind == "sandbox_install")
+    if limits:
+        # Lower than the runner's own, never higher: the runner keeps its limit when that is less.
+        request["limits"] = limits
     try:
         answer = _send(request, seconds + 60)
     except SandboxError as exc:
