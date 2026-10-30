@@ -532,6 +532,20 @@
         "title": "OwnerDecision",
         "type": "object"
       },
+      "OwnerLockdown": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "OwnerLockdown",
+        "type": "object"
+      },
       "PortFinalizationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -831,6 +845,19 @@
       "Settings": {
         "additionalProperties": false,
         "properties": {
+          "run_window_minutes": {
+            "anyOf": [
+              {
+                "maximum": 15.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Window Minutes"
+          },
           "terminal_cpus": {
             "anyOf": [
               {
@@ -5542,6 +5569,104 @@
         "summary": "Validate Owner Editor Draft"
       }
     },
+    "/v2/owner/lockdown": {
+      "get": {
+        "description": "Whether ToolGate is in lockdown (no tool or workflow runs, read-only ones included, and no\nagent can file a request), why, and who set it: the owner, the operator (\"admin\") or ToolGate\nitself (\"system\", after repeated bad verification callbacks).",
+        "operationId": "owner_lockdown_v2_owner_lockdown_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-ToolGate-Owner-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Owner-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Owner Lockdown"
+      },
+      "post": {
+        "description": "Turn lockdown on or off with the owner key. On only takes power away, so Pi's gateway asks no\npassword for it; off gives the power back, so the gateway sends it only with the owner's\npassword proof.",
+        "operationId": "owner_set_lockdown_v2_owner_lockdown_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-ToolGate-Owner-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Owner-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerLockdown"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Owner Set Lockdown"
+      }
+    },
     "/v2/owner/mcp/discover": {
       "post": {
         "operationId": "owner_mcp_discover_v2_owner_mcp_discover_post",
@@ -6128,7 +6253,7 @@
     },
     "/v2/owner/settings": {
       "get": {
-        "description": "How tools run (time limits, the Terminal's resources, web search) and the revision a save\nmust name. Null numbers keep today's limits.",
+        "description": "How tools run (time limits, the Terminal's resources, web search, the run window after an\napproval) and the revision a save must name. Null numbers keep today's limits.",
         "operationId": "owner_settings_v2_owner_settings_get",
         "parameters": [
           {
