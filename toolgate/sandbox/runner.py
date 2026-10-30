@@ -264,6 +264,7 @@ class Runner:
             if not state.get("Running"):
                 # Docker records an out-of-memory kill from a separate event that can land just
                 # after the exit code. A SIGKILL we did not send gets a moment to be labelled.
+                # On cgroup v2 that event can be lost altogether; the label stays Docker's word.
                 for _ in range(OOM_SETTLE_CHECKS):
                     if killed or state.get("ExitCode") != 137 or state.get("OOMKilled"):
                         break

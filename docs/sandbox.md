@@ -30,7 +30,9 @@ agent > tool default, the floor, Handled; see access-policy.md) and agent identi
 4. The container is watched for its time limit and the workspace quota, then its output is read
    (the last 64 KiB of each stream) and the container is removed. ToolGate returns `exitCode`,
    `stdout`, `stderr` (control sequences stripped, last 16000 characters), `timedOut`,
-   `outOfMemory`, `workspaceFull`, `durationMs` and `truncated`.
+   `outOfMemory`, `workspaceFull`, `durationMs` and `truncated`. `outOfMemory` is Docker's own
+   label, which Docker can lose on cgroup v2; exit code 137 without `timedOut` means the command
+   was killed, most often by the memory limit.
 5. If the answer is lost after the request was sent, the receipt is `OUTCOME_UNKNOWN` and reusing
    the action id never runs the command again.
 
