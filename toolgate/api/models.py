@@ -86,6 +86,11 @@ class OwnerDecision(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class OwnerLockdown(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+    enabled: bool
+
+
 class V2Invoke(BaseModel):
     args: dict = {}
     approval_request_id: str | None = None

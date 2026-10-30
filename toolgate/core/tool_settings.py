@@ -1,4 +1,5 @@
-"""The owner's settings for how tools run: a time limit, the Terminal's resources and web search.
+"""The owner's settings for how tools run: a time limit, the Terminal's resources, web search and
+how long an approved action has to start.
 
 These are control-plane settings: only the owner credential reads or changes them, and every save
 names the revision it replaces, so a stale screen is refused instead of overwriting a newer change.
@@ -21,6 +22,10 @@ What each one changes:
 - `web_skip_sites`: sites never used as sources, added to the built-in ones; their pages are not
   fetched either.
 - `web_page_characters`: the most text one fetched page gives the model.
+- `run_window_minutes`: once the owner approves a request that waited for them, how long that
+  exact action has to start; it still runs once. Only shorter than today's 15 minutes. It applies
+  to approvals decided after the change: each approval keeps the window recorded when it was
+  decided (core/approvals.py).
 """
 
 from __future__ import annotations
@@ -37,6 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from toolgate.sandbox import spec
 
+from . import approvals
 from . import control_plane as cp
 from .owner_channel import OwnerError
 
@@ -45,6 +51,7 @@ TOOL_SECONDS = 180  # the longest ToolGate waits on any tool today: AI text thro
 TERMINAL_SECONDS = 100  # the most one Terminal command may run
 PAGE_CHARACTERS = 20000  # the most text one fetched page gives the model
 SKIP_SITES = 50
+RUN_WINDOW_MINUTES = approvals.MAX_RUN_WINDOW_MINUTES  # an approved action has 15 minutes today
 SAFE_SEARCH = {"off": 0, "moderate": 1, "strict": 2}  # SearXNG's levels
 SITE = r"(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"
 
@@ -64,6 +71,7 @@ class Settings(StrictDocument):
     web_region: Annotated[str, Field(pattern=r"^(?:[a-z]{2})?$")] = ""
     web_skip_sites: Annotated[list[str], Field(max_length=SKIP_SITES)] = []
     web_page_characters: Annotated[int, Field(ge=1000, le=PAGE_CHARACTERS)] | None = None
+    run_window_minutes: Annotated[int, Field(ge=1, le=RUN_WINDOW_MINUTES)] | None = None
 
     @field_validator("web_region", mode="before")
     @classmethod
@@ -205,3 +213,12 @@ def skipped(url: str, sites: list[str] | None = None) -> bool:
 
 def page_characters() -> int:
     return current().web_page_characters or PAGE_CHARACTERS
+
+
+def run_window(connection) -> int:
+    """Minutes an approval given now leaves its action to start. Read inside the caller's deciding
+    transaction, so the window recorded is the one in force at the decision."""
+    row = connection.execute(
+        "SELECT body FROM v2_objects WHERE kind=? AND id=?", (KIND, IDENTITY)
+    ).fetchone()
+    return current(_stored(row)).run_window_minutes or RUN_WINDOW_MINUTES

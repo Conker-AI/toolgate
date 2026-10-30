@@ -139,8 +139,11 @@ def child_bindings(tools: dict) -> dict:
         for key, tool in tools.items()}
 
 
-# Once the owner approves a request that waited for him, the action has this long to run.
-EXECUTION_WINDOW = timedelta(minutes=15)
+# Once the owner approves a request that waited for him, the action has this long to run. The
+# owner may choose a shorter window (`run_window_minutes`, core/tool_settings.py), never a longer
+# one; each approval records the window in force when it was decided.
+MAX_RUN_WINDOW_MINUTES = 15
+EXECUTION_WINDOW = timedelta(minutes=MAX_RUN_WINDOW_MINUTES)
 
 
 def create_verification_request(title: str, details: str, actor: str, subject_type: str,
@@ -148,9 +151,9 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
                                 expiry_seconds: int = 60, actor_id: str | None = None, *,
                                 publication_digest: str | None = None, card: str = "do") -> dict:
     """A request for the owner's decision on one exact action. A positive expiry bounds the wait
-    (15 to 900 seconds); 0 means it waits until he answers, and the action then has
-    EXECUTION_WINDOW from his approval to run. `card` is the tool's button template, copied now
-    so the Inbox shows the buttons he chose when he was asked."""
+    (15 to 900 seconds); 0 means it waits until he answers, and the action then has the owner's
+    run window (at most EXECUTION_WINDOW) from the approval to run. `card` is the tool's button
+    template, copied now so the Inbox shows the buttons he chose when he was asked."""
     expiry = (
         datetime.now(UTC) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
         if expiry_seconds > 0
@@ -257,20 +260,26 @@ def consume_verification_in_transaction(conn, request_id: str, subject_type: str
 def _execution_deadline(record: dict, binding: dict) -> datetime | None:
     """When an approved action stops being runnable; None when the record is malformed.
 
-    A bounded request ends at its own expiry. One that waited for the owner (no expiry) ends
-    EXECUTION_WINDOW after his approval, which is recorded outside the immutable binding."""
+    A bounded request ends at its own expiry. One that waited for the owner (no expiry) ends the
+    run window recorded with the decision after it, both outside the immutable binding. A decision
+    recorded before the window became a setting has EXECUTION_WINDOW; a recorded window is never
+    allowed past it."""
     if "expires_at" not in binding:
         return None
     raw = binding["expires_at"]
     if raw is None:
-        raw = (record.get("decision") or {}).get("at")
+        decision = record.get("decision") or {}
+        raw = decision.get("at")
         if not isinstance(raw, str):
+            return None
+        minutes = decision.get("run_window_minutes", MAX_RUN_WINDOW_MINUTES)
+        if type(minutes) is not int or not 1 <= minutes <= MAX_RUN_WINDOW_MINUTES:
             return None
         try:
             decided = datetime.fromisoformat(raw)
         except ValueError:
             return None
-        return decided + EXECUTION_WINDOW if decided.tzinfo is not None else None
+        return decided + timedelta(minutes=minutes) if decided.tzinfo is not None else None
     try:
         expires_at = datetime.fromisoformat(raw)
     except (TypeError, ValueError):
@@ -291,6 +300,7 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
             guard(conn, record)
         if record.get("status") != "pending":
             raise ValueError(f"request is already {record.get('status')}")
+        decision = {"actor": actor, "note": note, "at": _now()}
         if record.get("kind") == "verification":
             if not _verification_origin_valid(conn, record):
                 raise ValueError("Approval was not issued intact by ToolGate; request fresh confirmation")
@@ -298,7 +308,12 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
                 binding = record.get("payload", {}).get("binding", {})
                 if "expires_at" not in binding:
                     raise ValueError("Approval expiry is invalid; request fresh confirmation")
-                if binding["expires_at"] is not None:
+                if binding["expires_at"] is None:
+                    # The window in force now stays with this approval; a later change never
+                    # moves it.
+                    from toolgate.core import tool_settings
+                    decision["run_window_minutes"] = tool_settings.run_window(conn)
+                else:
                     try:
                         expires_at = datetime.fromisoformat(binding["expires_at"])
                     except (TypeError, ValueError) as exc:
@@ -306,7 +321,7 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
                     if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
                         raise ValueError("Approval has expired; request fresh confirmation")
         record["status"] = status
-        record["decision"] = {"actor": actor, "note": note, "at": _now()}
+        record["decision"] = decision
         _save_request(conn, record)
         _request_event(conn, "request_decided", "info" if status == "approved" else "warning",
                        request_id, actor, {"status": status})

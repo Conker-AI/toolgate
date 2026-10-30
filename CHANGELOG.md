@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **How long an approved action has to start.** The owner's settings (`/v2/owner/settings`) gain
+  `run_window_minutes` (1-15; null keeps today's 15 minutes; never longer). Once the owner approves
+  a request that waited for them, the exact action must start within it, and still runs once. Each
+  approval records the window in force when it was decided (`decision.run_window_minutes`), so a
+  change applies to approvals decided after it and never moves one already given; a recorded window
+  past 15 minutes is refused where it is used. A request with its own bounded expiry keeps that
+  expiry.
+- **The lockdown switch on the owner key.** `GET /v2/owner/lockdown` answers `{"lockdown",
+  "reason", "changed_by"}` and `POST /v2/owner/lockdown` with exactly `{"enabled": true|false}`
+  turns it on or off: the same lockdown as the operator's `/v2/settings/lockdown` (which stays).
+  Pi's gateway is meant to pass "on" with the owner's session alone and "off" only with the
+  owner's password proof.
 - **The owner's tool settings.** `GET /v2/owner/settings` and `PUT /v2/owner/settings` (owner key
   only; the body is `{"expected_revision", "settings"}` and a stale revision is refused with 409
   `settings_revision_conflict`). Each value has a hard ceiling at today's limit, so a setting can

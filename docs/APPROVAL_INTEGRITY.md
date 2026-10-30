@@ -21,10 +21,15 @@ arguments, binding, expiry, and caller identity; only decision and consumption
 state are excluded. Neither public request endpoint can write issuance provenance.
 
 By default a request has no expiry (`expires_at: null`): it waits until the owner answers,
-however long that takes. His approval opens a 15-minute window (`EXECUTION_WINDOW`, measured
-from the recorded decision time, outside the fingerprint) in which the exact action may run once;
-after that the approval is spent. `default_confirmation_expiry_seconds` set to 15-900 bounds the
-wait instead, and such a request cannot be approved once it has run out.
+however long that takes. His approval opens a window in which the exact action may run once;
+after that the approval is spent. The window is 15 minutes (`EXECUTION_WINDOW`) unless the owner
+chose a shorter `run_window_minutes` (1-15, `/v2/owner/settings`; never longer). It is measured
+from the recorded decision time, and the window in force at the decision is recorded beside it
+(`decision.run_window_minutes`), both outside the fingerprint, so changing the setting never moves
+an approval already given. A recorded window past 15 minutes or malformed makes the approval
+unusable; one decided before the window was a setting has 15 minutes.
+`default_confirmation_expiry_seconds` set to 15-900 bounds the wait instead, and such a request
+cannot be approved once it has run out; its approval runs until that expiry, not the window.
 
 Both decision and consumption verify this provenance. A forged or subsequently
 altered verification cannot be authorized, even if the database contains an
