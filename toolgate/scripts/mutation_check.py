@@ -348,6 +348,32 @@ MUTANTS.extend([
 ])
 
 
+CARDS = "toolgate/tests/test_ask_cards.py::"
+OWNER_RUNS = "toolgate/tests/test_owner_runs.py::"
+MUTANTS.extend([
+    ("agent tool list drops the owner's card", "toolgate/api/routes/agent.py",
+     '"card": cards.get(tool["id"], ask_cards.DEFAULT),', '"card": ask_cards.DEFAULT,',
+     CARDS + "test_the_agent_tool_list_carries_the_card_he_picked"),
+    ("published workflow drops its tools' cards", "toolgate/core/editor_catalogue.py",
+     "'card': ask_cards.for_workflow(tools, cards)})", "'card': ask_cards.DEFAULT})",
+     CARDS + "test_a_published_workflow_shows_the_strongest_card_of_the_tools_it_runs"),
+    ("owner run without the owner key", "toolgate/api/routes/owner_runs.py",
+     '@router.post("/v2/owner/tools/{tool_id}/runs", dependencies=[Depends(require_owner)])',
+     '@router.post("/v2/owner/tools/{tool_id}/runs")',
+     OWNER_RUNS + "test_only_the_owner_key_with_the_chat_key_runs"),
+    ("owner run lifts the floor", "toolgate/core/owner_runs.py",
+     "return FLOOR if access_policy.on_floor(tool) else None", "return None",
+     OWNER_RUNS + "test_the_floor_still_asks_when_he_presses_run"),
+    ("owner run read without the owner key", "toolgate/api/routes/owner_runs.py",
+     '@router.get("/v2/owner/tools/{tool_id}/runs", dependencies=[Depends(require_owner)])',
+     '@router.get("/v2/owner/tools/{tool_id}/runs")',
+     OWNER_RUNS + "test_only_the_owner_key_with_the_chat_key_runs"),
+    ("owner run read unbounded", "toolgate/api/routes/owner_runs.py",
+     "Query(default=20, ge=1, le=owner_runs.MAX_RUNS)", "Query(default=20, ge=1)",
+     OWNER_RUNS + "test_recent_runs_are_this_tools_own_newest_first_and_bounded"),
+])
+
+
 def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(

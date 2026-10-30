@@ -27,7 +27,7 @@ A tool is on the floor when the owner marked it sensitive (`POST /v2/owner/tools
 `{"sensitive": true}`), when it runs one of the fixed system controls that carry their own exact
 review (`port_control`, `container_control`, `process_control`), or when it calls a tool on an
 external MCP server (`mcp_http`). No decision skips the owner for these. Agent tool listings
-(`GET /v2/agent/tools`) include `"sensitive": true|false`.
+(`GET /v2/agent/tools`) include `"sensitive": true|false` and `"card"` (see Inbox buttons).
 
 External MCP tools are on the floor because what they do is decided by a server outside the
 owner's control: an imported tool is always `owner_confirmation`, and no per-tool switch lets a
@@ -44,6 +44,62 @@ kept beside the floor, not part of the tool, so the tool's version and bound app
 Each request copies the template when it is made (`card` in the owner channel's projection); `GET
 /v2/owner/access` lists every template that is not `do` as `cards`. The Terminal (`sandbox.run`)
 starts with `run`.
+
+Agents read the same value. Each item of `GET /v2/agent/tools` has `"card"`: the template the owner
+picked for that tool (`do` when he picked none). A published workflow has no template of its own, so
+each item of `GET /v2/agent/published-workflows` has `"card"`: the strongest template among the tools
+it runs, its nested workflows' tools included, strongest first `pay`, `delete`, `ship`, `publish`,
+`send`, `save`, `run`, else `do`. A workflow that sends through his "send" tool is listed as `send`.
+Pi's reviewer reads it: when the AI decides, a tool whose card is `send` or `publish` (reaches a
+person) or `ship`, `delete` or `pay` (can't be undone) always asks him, from his own choice rather
+than from a model's answer. The workflow's own Inbox request still shows `do`; only the listing
+derives it.
+
+## Running a tool by hand
+
+The owner runs one tool himself with the owner key and the chat's own execution key:
+
+```
+POST /v2/owner/tools/{id}/runs
+X-ToolGate-Owner-Key: <owner key>
+X-ToolGate-Execution-Key: <the chat's own key>
+
+{"action_id": "owner_<32 hex>", "args": {...}, "approval_request_id": "<id>"}   (last one optional)
+```
+
+- `action_id` is the run's identity: `owner_` and 32 lowercase hex characters, made once per press
+  of Run. Repeating it returns the journal's receipt and never runs the tool twice; the same id with
+  other arguments is 409 `ACTION_CONFLICT`. `args` is a JSON object of at most 32 KB. Nothing else
+  is accepted, in particular no `decision`: his runs carry no AI decision.
+- It runs any active tool, whether or not Conker's key may use it; the run is recorded under the
+  chat's key (its journal row, its Terminal workspace, its spending), and the key must still be
+  active when it runs. A key acting as an agent (`X-ToolGate-Agent`) or bound to one is 403
+  `execution_unavailable`. A missing, turned-off or unknown tool is 404 `TOOL_UNAVAILABLE`.
+- Asking is the agent invoke's: the tool's own authorization applies, `blocked` is 403
+  `POLICY_DENIED`, lockdown is 423, and a tool on the floor always asks, even when its own setting is
+  `auto`. A tool that asks answers `{"code": "CONFIRMATION_REQUIRED", "request_id", "expires_at",
+  "message", "next_action"}` and its request waits in his Inbox (`actor: "owner"`, with the tool's
+  card). After he approves, send the same body with `approval_request_id`; before that, or with an
+  approval that does not match this exact action, the answer is 409 `APPROVAL_INVALID` and nothing
+  runs. Every other answer is the invoke route's: `{"code": "OK" | "TOOL_UNAVAILABLE", "message",
+  "result", "action_id", "status"}`, or `OUTCOME_UNKNOWN` when a dispatch did not report back.
+- Errors are `{"detail": {"code", "message"}}`; the owner key missing or wrong is 401
+  `owner_credential_required`, the execution key missing or wrong is 401.
+
+The owner reads a tool's recent runs from the journal with the owner key alone:
+
+```
+GET /v2/owner/tools/{id}/runs?limit=20        (1-50, default 20)
+
+{"items": [{"action_id", "actor_id", "parent_action_id", "version", "status",
+            "created_at", "args", "response"}]}
+```
+
+Newest first, by any key (Conker's, another agent's, his own runs, and runs inside a workflow, which
+have a `parent_action_id`). `status` is `dispatching`, `completed` or `outcome_unknown`;
+`created_at` is ISO 8601; `args` and `response` are exactly what the journal stores (the response
+the run returned), nothing more. A run still waiting for his approval is not in the journal yet: it
+is in his Inbox. An unknown tool id has no runs (`{"items": []}`).
 
 ## Delegates
 

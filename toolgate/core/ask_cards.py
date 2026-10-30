@@ -19,6 +19,9 @@ TEMPLATES = ("do", "send", "publish", "ship", "run", "delete", "pay", "save")
 DEFAULT = "do"
 # Built-in tools whose template is known before he picks one.
 BUILT_IN = {"sandbox.run": "run"}
+# A published workflow has no template of its own: it shows the strongest one among the tools it
+# runs, so a workflow that sends through his "send" tool is still a send. Strongest first.
+STRONGEST = ("pay", "delete", "ship", "publish", "send", "save", "run")
 
 
 class Card(BaseModel):
@@ -44,6 +47,12 @@ def chosen() -> dict[str, str]:
 
 def card_for(tool_id: str) -> str:
     return chosen().get(tool_id, DEFAULT)
+
+
+def for_workflow(tool_ids, cards: dict[str, str]) -> str:
+    """The strongest template among a workflow's tools (`cards` from `chosen()`), else the default."""
+    present = {cards.get(tool_id, DEFAULT) for tool_id in tool_ids}
+    return next((template for template in STRONGEST if template in present), DEFAULT)
 
 
 def set_card(tool_id: str, template: str, actor: str = "owner") -> str:

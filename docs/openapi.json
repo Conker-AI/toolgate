@@ -1146,6 +1146,40 @@
         "title": "ToolField",
         "type": "object"
       },
+      "ToolRun": {
+        "additionalProperties": false,
+        "properties": {
+          "action_id": {
+            "pattern": "^owner_[a-f0-9]{32}$",
+            "title": "Action Id",
+            "type": "string"
+          },
+          "approval_request_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Request Id"
+          },
+          "args": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Args",
+            "type": "object"
+          }
+        },
+        "required": [
+          "action_id"
+        ],
+        "title": "ToolRun",
+        "type": "object"
+      },
       "Toolkit": {
         "additionalProperties": false,
         "properties": {
@@ -6591,6 +6625,166 @@
           }
         },
         "summary": "Owner Set Card"
+      }
+    },
+    "/v2/owner/tools/{tool_id}/runs": {
+      "get": {
+        "description": "The newest runs of this tool, by any key, as the journal stores them.",
+        "operationId": "owner_tool_runs_v2_owner_tools__tool_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool_id",
+            "required": true,
+            "schema": {
+              "title": "Tool Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ToolGate-Owner-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Owner-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Owner Tool Runs"
+      },
+      "post": {
+        "description": "Run any active tool as the owner, under the chat's own key. A tool that asks still makes an\napproval request; resume with the same action_id and its approval_request_id.",
+        "operationId": "owner_run_tool_v2_owner_tools__tool_id__runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool_id",
+            "required": true,
+            "schema": {
+              "title": "Tool Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ToolGate-Owner-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Owner-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ToolGate-Execution-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Execution-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ToolGate-Agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Agent"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Owner Run Tool"
       }
     },
     "/v2/owner/tools/{tool_id}/sensitive": {

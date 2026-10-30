@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 
 from toolgate.api.deps import require_agent
-from toolgate.core import access_policy, control_plane, editor_catalogue
+from toolgate.core import access_policy, ask_cards, control_plane, editor_catalogue
 from toolgate.core import execution_journal as journal
 
 router = APIRouter()
@@ -15,9 +15,16 @@ router = APIRouter()
 @router.get("/v2/agent/tools")
 def agent_tools(agent: dict = Depends(require_agent)):
     # `sensitive`: on the owner's floor, so it always asks him whatever a delegate decides.
+    # `card`: the Inbox buttons he picked for it (send, publish, ship, delete, pay say it reaches a
+    # person or can't be undone), so a caller's reviewer reads that from him, not from a model.
     marked = access_policy.sensitive_ids()
+    cards = ask_cards.chosen()
     return [
-        {**tool, "sensitive": access_policy.on_floor(tool, marked)}
+        {
+            **tool,
+            "sensitive": access_policy.on_floor(tool, marked),
+            "card": cards.get(tool["id"], ask_cards.DEFAULT),
+        }
         for tool in control_plane.list_objects("tool")
         if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])
     ]
