@@ -41,6 +41,14 @@
   `ollama_generate` tool gets its text from Pi's `tool-text` model role (`POST /inference`), so the
   owner picks that model in Pi's Settings; Pi's role decides the temperature. Pi being unavailable
   is the usual `AI_UNAVAILABLE` failure. Without them, the tool calls Ollama directly as before.
+- **Health reports Pi as the AI path when Pi is configured.** With `TOOLGATE_PI_URL` and
+  `TOOLGATE_PI_SERVICE_KEY` set, the `generation` check probes Pi's `/health` (no key sent, no
+  model call; it must answer as Pi) instead of Ollama, so Ollama's state is no longer reported as
+  ToolGate's. The check names its path in `via` (`pi` or `ollama`). A malformed address is
+  `unavailable` rather than an error.
+- **`docs/openapi.json` is generated.** `toolgate/scripts/export_openapi.py` writes it from the app
+  (keys sorted) and CI's `--check` fails when it differs from the code. It had fallen behind at
+  0.2.2.
 - **External MCP tools always ask the owner.** `mcp_http` is on the access floor, so a policy
   delegate's `run` decision no longer turns an imported MCP tool into an automatic action; it parks
   for the owner, as an imported tool always has. `GET /v2/owner/access` lists it in

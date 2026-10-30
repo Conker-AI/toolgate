@@ -11,6 +11,7 @@ from fastapi import APIRouter
 
 from toolgate.api.version import SERVICE_VERSION
 from toolgate.core import control_plane, vault
+from toolgate.executors import pi_inference
 
 router = APIRouter()
 
@@ -36,11 +37,17 @@ def _probe_control_plane() -> dict:
     return {"status": "ok"}
 
 
-def _probe_http(url: str, path: str, expected_service: str | None = None) -> dict:
-    """Coarse reachability of one upstream. Never returns the host or the body."""
+def _probe_http(
+    url: str, path: str, expected_service: str | None = None, relay_status: bool = True
+) -> dict:
+    """Coarse reachability of one upstream. Never returns the host or the body.
+
+    With `expected_service`, the answer must be that module's health document; `relay_status`
+    then decides whether its own status becomes this check's status or only its shape counts.
+    """
     try:
         response = httpx.get(f"{url.rstrip('/')}{path}", timeout=HEALTH_PROBE_TIMEOUT_SECONDS)
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, httpx.InvalidURL, UnicodeError) as exc:  # a malformed address too
         # "unavailable" is the contract's word for configured-but-not-working;
         # the exception class carries why. Status vocabulary is fixed so one
         # dashboard can render every module - nuance belongs in reason.
@@ -60,7 +67,7 @@ def _probe_http(url: str, path: str, expected_service: str | None = None) -> dic
             or body.get("status") not in {"ok", "degraded", "unavailable"}
         ):
             return {"status": "unavailable", "reason": "invalid_health_response"}
-        if body["status"] != "ok":
+        if relay_status and body["status"] != "ok":
             return {"status": body["status"], "reason": "upstream_reports_" + body["status"]}
     return {"status": "ok"}
 
@@ -85,6 +92,7 @@ def _run_dependency_checks() -> dict:
         settings = {}
         generation_configured = False
 
+    # name -> the arguments of _probe_http for that check
     probes = {
         "searxng": (
             settings.get("research_searxng_url", "http://toolgate-searxng:8080"),
@@ -95,11 +103,19 @@ def _run_dependency_checks() -> dict:
         probes["memorygate"] = (
             os.environ.get("MEMORYGATE_URL", "http://memorygate-api:8020"),
             "/health",
+            "memorygate",
         )
     else:
         checks["memorygate"] = {"status": "not_configured"}
 
-    if generation_configured:
+    pi = pi_inference.configured()
+    if pi:
+        # AI tools write through Pi's tool-text role, so Pi is the generation path and the model
+        # behind the role (local or hosted) is Pi's to report. Only whether Pi answers as Pi
+        # counts: Pi's own degraded parts (speech, memory) are not ToolGate's generation. The
+        # check sends no key and makes no model call.
+        probes["generation"] = (pi[0], "/health", "pi", False)
+    elif generation_configured:
         probes["generation"] = (
             settings.get("generation_url", "http://memorygate-ollama:11434"),
             "/api/tags",
@@ -108,13 +124,10 @@ def _run_dependency_checks() -> dict:
         checks["generation"] = {"status": "not_configured"}
 
     with ThreadPoolExecutor(max_workers=len(probes)) as pool:
-        results = {
-            name: pool.submit(
-                _probe_http, url, path, "memorygate" if name == "memorygate" else None
-            )
-            for name, (url, path) in probes.items()
-        }
+        results = {name: pool.submit(_probe_http, *probe) for name, probe in probes.items()}
     checks.update({name: future.result() for name, future in results.items()})
+    if "generation" in results:
+        checks["generation"]["via"] = "pi" if pi else "ollama"
 
     failing = sorted(
         name for name, check in checks.items() if check["status"] not in _HEALTHY_STATUSES
