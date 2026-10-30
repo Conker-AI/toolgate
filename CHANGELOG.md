@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.11.0
+
 - **Agents read the owner's Inbox card.** Each item of `GET /v2/agent/tools` has `card`, the button
   template the owner picked for that tool (`do` when none), and each item of `GET
   /v2/agent/published-workflows` has `card`, the strongest template among the tools the workflow
