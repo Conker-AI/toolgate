@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.10.0
+
 - **How long an approved action has to start.** The owner's settings (`/v2/owner/settings`) gain
   `run_window_minutes` (1-15; null keeps today's 15 minutes; never longer). Once the owner approves
   a request that waited for them, the exact action must start within it, and still runs once. Each
