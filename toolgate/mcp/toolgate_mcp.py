@@ -19,7 +19,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 SERVER_NAME = "toolgate"
-SERVER_VERSION = "0.10.0"
+SERVER_VERSION = "0.11.0"
 
 
 def _request(method: str, path: str, body: dict | None = None) -> Any:
