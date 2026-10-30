@@ -10,9 +10,9 @@ def test_memory_limit_oom(docker):
     # Try to allocate 600MB (limit is 256MB)
     answer = run(agent, "python3 -c 'b=bytearray(600*1024*1024); print(\"OK\")'", timeout=30)
 
-    # Should be OOM killed
-    assert answer.get("oom_killed") is True, f"Expected OOM killed, got {answer}"
-    assert answer.get("exit_code") == 137, f"Expected exit code 137 (OOM), got {answer.get('exit_code')}"
+    # Killed by the memory limit. Docker can lose its out-of-memory label on cgroup v2, so the
+    # exit code is the proof, not oom_killed (docs/sandbox.md).
+    assert (answer.get("exit_code"), answer.get("timed_out")) == (137, False), answer
 
     # Check container memory limit
     inspect, _ = while_running(docker, agent, "sleep 1")
@@ -128,8 +128,9 @@ def test_the_owners_lower_limits_reach_the_container(docker):
     assert inspect["HostConfig"]["NanoCpus"] == 500_000_000
     cpu = run(agent, "cat /sys/fs/cgroup/cpu.max", limits=lower)
     assert cpu["stdout"].strip() == "50000 100000", cpu
+    # 200 MB under the owner's 128 MB is killed; the exit code is the proof (see above).
     memory = run(agent, "python3 -c 'b=bytearray(200*1024*1024)'", limits=lower)
-    assert memory["oom_killed"] is True, memory
+    assert (memory["exit_code"], memory["timed_out"]) == (137, False), memory
 
     # Higher than the runner's own limits (256 MB, one CPU): the runner keeps its own.
     inspect, answer = while_running(docker, agent, limits={"memory_mb": 4096, "cpus_milli": 8000})
