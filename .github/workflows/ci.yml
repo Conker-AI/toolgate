@@ -63,6 +63,10 @@ jobs:
         # 600 lines per source file; files that were already larger may only shrink.
         run: python toolgate/scripts/check_file_sizes.py
 
+      - name: OpenAPI document matches the code
+        # docs/openapi.json is the API reference; written by hand, it fell versions behind.
+        run: python toolgate/scripts/export_openapi.py --check
+
       - name: Tests
         run: python -m pytest toolgate/tests/ --ignore=toolgate/tests/test_module_contract.py -q
 

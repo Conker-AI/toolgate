@@ -16,6 +16,13 @@ Prove the A2/B5 tests detect broken behavior in disposable source copies:
 python toolgate/scripts/mutation_check.py
 ```
 
+`docs/openapi.json` is written from the app, keys sorted; CI fails when it differs. After a route
+or model change, regenerate it:
+
+```powershell
+python toolgate/scripts/export_openapi.py
+```
+
 Run one file:
 
 ```powershell
