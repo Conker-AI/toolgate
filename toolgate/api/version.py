@@ -1,3 +1,3 @@
 """ToolGate's release version, reported by /health and the OpenAPI document."""
 
-SERVICE_VERSION = "0.9.1"
+SERVICE_VERSION = "0.10.0"
