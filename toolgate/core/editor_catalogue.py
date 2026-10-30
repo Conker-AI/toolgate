@@ -1,8 +1,8 @@
 """Owner editor metadata: registered capabilities, never executor or vault data."""
 import json
 
+from . import ask_cards, publications
 from . import control_plane as cp
-from . import publications
 
 
 def workflow_tool_id(publication):
@@ -11,8 +11,10 @@ def workflow_tool_id(publication):
 
 
 def agent_workflows(agent):
-    """Only executable immutable workflows; never expose graph or credential config."""
+    """Only executable immutable workflows; never expose graph or credential config. `card` is the
+    strongest Inbox template the owner picked among the tools the workflow runs."""
     items = []
+    cards = ask_cards.chosen()
     with cp._conn() as conn:
         rows = conn.execute("SELECT id,version FROM v2_publications p WHERE kind='automation' "
             "AND version=(SELECT MAX(version) FROM v2_publications WHERE kind=p.kind AND id=p.id) ORDER BY id")
@@ -29,11 +31,13 @@ def agent_workflows(agent):
             if any(step.get('type') == 'editor_graph' and not step['document'].get('agentVisible', False)
                    for step in definition.get('workflow', [])):
                 continue
+            tools = {tool_id for member in publications.members(publication) for tool_id in member['tools']}
             items.append({'id': workflow_tool_id(publication),
                 'name': str(definition.get('name') or row['id'])[:160],
                 'description': str(definition.get('description', ''))[:800],
                 'inputs': [{key: field[key] for key in ('name', 'type', 'required', 'description') if key in field}
-                           for field in definition.get('inputs', []) if isinstance(field, dict)]})
+                           for field in definition.get('inputs', []) if isinstance(field, dict)],
+                'card': ask_cards.for_workflow(tools, cards)})
     return items
 
 

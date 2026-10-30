@@ -118,7 +118,7 @@ def test_agent_discovers_only_scoped_immutable_workflow_metadata(gate):
     rows = client.get(path, headers=execution).json()
     assert len(rows) == 1
     assert rows[0]['id'].endswith(':1:' + target['digest'])
-    assert set(rows[0]) == {'id', 'name', 'description', 'inputs'}
+    assert set(rows[0]) == {'id', 'name', 'description', 'inputs', 'card'}
     client.post('/v2/owner/editor-drafts/example/access', headers=headers,
                 json={**target, 'enabled': False}).raise_for_status()
     assert client.get(path, headers=execution).json() == []

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Agents read the owner's Inbox card.** Each item of `GET /v2/agent/tools` has `card`, the button
+  template the owner picked for that tool (`do` when none), and each item of `GET
+  /v2/agent/published-workflows` has `card`, the strongest template among the tools the workflow
+  runs. Pi's reviewer takes its "reaches a person / can't be undone" stop from it (send, publish,
+  ship, delete, pay always ask), so that stop now fires.
+- **The owner runs a tool by hand.** `POST /v2/owner/tools/{id}/runs` (owner key and the chat's own
+  execution key; body `{"action_id": "owner_<32 hex>", "args", "approval_request_id"?}`) runs any
+  active tool, built-in or MCP, with the same asking as an agent's invoke: a tool that asks makes an
+  approval request and the same run resumes after he approves; a tool on the floor always asks;
+  blocked stays blocked. `GET /v2/owner/tools/{id}/runs?limit=` (owner key, 1-50) reads that tool's
+  newest runs from the journal. Shapes in docs/access-policy.md.
+
 ## 0.10.0
 
 - **How long an approved action has to start.** The owner's settings (`/v2/owner/settings`) gain

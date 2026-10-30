@@ -2,8 +2,10 @@
 
 ToolGate's browser gateway integration uses a dedicated credential, separate from
 both `TOOLGATE_ADMIN_KEY` and every scoped execution key. It grants only bounded
-verification-request reads and decisions. It grants no tool execution, vault,
-configuration, spending or administration access.
+verification-request reads and decisions. It grants no vault, configuration,
+spending or administration access, and on its own no tool execution: running a
+tool by hand needs the chat's execution key beside it and asks exactly as that
+key's invoke would (docs/access-policy.md, Running a tool by hand).
 
 Provision a fresh random credential of at least 32 characters through the host's
 secret management. Supply the raw value only to the gateway as
