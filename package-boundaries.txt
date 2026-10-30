@@ -1,0 +1,13 @@
+# Cross-package imports in ToolGate, checked by toolgate/scripts/check_package_boundaries.py.
+# These existed when the check arrived (2026-10-31). Delete an edge once it is gone;
+# add one only on purpose, with the reason in the commit.
+api -> core
+api -> executors
+api -> sandbox
+core -> executors
+core -> sandbox
+executors -> core
+executors -> sandbox
+sandbox -> core
+scripts -> api
+scripts -> core
