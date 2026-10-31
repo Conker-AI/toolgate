@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Two settings saves at once no longer undo each other.** Lockdown, the control-plane settings, a
+  service and a verification method are read, changed and written under one write lock, so a
+  settings save at the same moment as turning lockdown on can no longer turn it back off. A tool
+  input declared as an object now refuses a value that is not one.
 - **Tool settings hold when they cannot be read.** A settings database that is there but cannot be
   read (locked past the wait, damaged) refuses with 503 `settings_unreadable` instead of running
   tools on the defaults, so no tool goes past the owner's limits or onto a site they skip. One stored
