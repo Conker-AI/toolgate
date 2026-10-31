@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Agent notes to the owner have bounded fields.** `POST /v2/requests` (and the operator's
+  request route) refuses with 422 a `title` over 500 characters, `details` over 8,000, a `kind` over
+  64, a `payload` over 32 KiB as JSON, and a `severity` other than `info`, `warning` or `critical`,
+  so one agent key cannot fill the owner's queue or the audit log.
 - **A tool secret cannot name ToolGate's own configuration.** A secret reference to the admin key,
   the bootstrap key, the vault secret or any other configuration key is refused, so a tool or
   verification method cannot send them out. `.env` is created owner-only (0600) and startup

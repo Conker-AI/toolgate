@@ -82,7 +82,8 @@ class V2Request(BaseModel):
     @classmethod
     def _bounded(cls, value: dict) -> dict:
         # Any agent key can write these; a bound keeps one from filling the owner's queue and log.
-        if len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8")) > REQUEST_PAYLOAD_BYTES:
+        size = len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
+        if size > REQUEST_PAYLOAD_BYTES:
             raise ValueError(f"payload is larger than {REQUEST_PAYLOAD_BYTES} bytes")
         return value
 
