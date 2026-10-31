@@ -1,6 +1,8 @@
 """Owner access policy at the HTTP boundary: who may decide "run", the floor, tightening, no leaks."""
 
 import hashlib
+import sqlite3
+from contextlib import closing
 
 import pytest
 from fastapi.testclient import TestClient
@@ -218,3 +220,15 @@ def test_tool_access_is_the_owners_and_checks_the_exact_tool(api):
         headers={**owner(pi_key), "X-ToolGate-Agent": "companion"},
     )
     assert as_agent.status_code == 403
+
+
+def test_a_grant_whose_audit_event_cannot_be_written_is_not_applied(api):
+    client, _, pi_key, _ = api
+    digest = tool_access(client, pi_key, "echo.hidden").json()["digest"]
+    with closing(sqlite3.connect(cp.DB_PATH)) as db:
+        db.execute("CREATE TRIGGER no_events BEFORE INSERT ON v2_events "
+                   "BEGIN SELECT RAISE(ABORT, 'events refused'); END")
+        db.commit()
+    with pytest.raises(sqlite3.Error):
+        tool_access(client, pi_key, "echo.hidden", True, digest)
+    assert tool_access(client, pi_key, "echo.hidden").json()["enabled"] is False
