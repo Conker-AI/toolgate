@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Reading the newest events no longer sorts the whole event log.** The event log carries an index
+  on its time column, so `events()` (the admin activity view and `GET /v2/agent/events`) reads the
+  newest rows from the index instead of scanning and sorting every recorded event. Results are
+  unchanged.
 - **Research refuses an oversized JSON answer before parsing it.** Every research provider now reads
   its JSON through one check: a body over 4 MiB is refused with "<provider> response exceeded the
   safe size limit" and is not parsed (the App Store keeps its own 1 MiB check). Where a provider
