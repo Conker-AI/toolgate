@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A tool secret cannot name ToolGate's own configuration.** A secret reference to the admin key,
+  the bootstrap key, the vault secret or any other configuration key is refused, so a tool or
+  verification method cannot send them out. `.env` is created owner-only (0600) and startup
+  tightens an older file where it can.
+
 ## 0.11.0
 
 - **Agents read the owner's Inbox card.** Each item of `GET /v2/agent/tools` has `card`, the button
