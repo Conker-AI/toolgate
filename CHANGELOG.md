@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A search no longer reads every cached page to clear old ones.** Purging expired research
+  results reads only each result's id and expiry and deletes them on one connection, instead of
+  loading every cached page (up to 20,000 characters each) and opening a connection per deletion.
+  What counts as expired is unchanged.
 - **Two settings saves at once no longer undo each other.** Lockdown, the control-plane settings, a
   service and a verification method are read, changed and written under one write lock, so a
   settings save at the same moment as turning lockdown on can no longer turn it back off. A tool

@@ -4,7 +4,7 @@ import re
 import secrets
 from datetime import UTC, datetime
 
-from toolgate.core.control_plane import _put, get, list_objects, remove
+from toolgate.core.control_plane import _conn, _put, get
 
 
 def cache_research_result(result: dict, expires_at: str) -> dict:
@@ -27,13 +27,21 @@ def get_research_result(result_id: str) -> dict | None:
 
 
 def purge_expired_research_results(now: datetime | None = None) -> int:
+    """Delete expired results on one connection, reading only each row's expiry, not its page."""
     cutoff = now or datetime.now(UTC)
-    removed = 0
-    for record in list_objects("research_result"):
-        try:
-            expired = datetime.fromisoformat(record["expires_at"]) <= cutoff
-        except (KeyError, TypeError, ValueError):
-            expired = True
-        if expired and remove("research_result", record["id"]):
-            removed += 1
-    return removed
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT id, json_extract(body, '$.expires_at') FROM v2_objects"
+            " WHERE kind='research_result'"
+        ).fetchall()
+        expired = [(row[0],) for row in rows if _expired(row[1], cutoff)]
+        return conn.executemany(
+            "DELETE FROM v2_objects WHERE kind='research_result' AND id=?", expired
+        ).rowcount
+
+
+def _expired(expires_at, cutoff: datetime) -> bool:
+    try:
+        return datetime.fromisoformat(expires_at) <= cutoff
+    except (TypeError, ValueError):
+        return True
