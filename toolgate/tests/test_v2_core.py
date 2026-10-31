@@ -187,7 +187,28 @@ class ControlPlaneTests(unittest.TestCase):
             "workflow": [{"type": "tool_call", "tool_id": "sensitive-action", "args": {}}],
         }))
 
-
+    def test_automation_runtime_limit_is_checked_when_saved(self):
+        base = {
+            "id": "runtime-limit", "name": "Runtime limit", "description": "Test runtime limits.",
+            "inputs": [], "policy": {"usage_limits": {"max_steps": 10}},
+            "authorization": "auto", "status": "draft", "schedule": None, "workflow": [],
+        }
+        for value in ("soon", -1, 0, 121, True, 2.5):
+            with self.subTest(value=value):
+                errors = definitions.automation_definition_errors({
+                    **base,
+                    "policy": {"usage_limits": {"max_steps": 10, "max_runtime_seconds": value}},
+                })
+                self.assertIn("max_runtime_seconds", "; ".join(errors))
+        for limits in ({"max_steps": 10, "max_runtime_seconds": 1},
+                       {"max_steps": 10, "max_runtime_seconds": 30},
+                       {"max_steps": 10, "max_runtime_seconds": 120},
+                       {"max_steps": 10}):
+            with self.subTest(limits=limits):
+                errors = definitions.automation_definition_errors(
+                    {**base, "policy": {"usage_limits": limits}}
+                )
+                self.assertNotIn("max_runtime_seconds", "; ".join(errors))
 
     def test_tool_results_expose_declared_output_names(self):
         tool = {

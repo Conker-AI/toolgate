@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **An automation's runtime limit is checked when it is saved.** `max_runtime_seconds` must be a
+  whole number from 1 to 120; a condition, switch, loop or retry whose branch returns now records
+  its own step in the run's steps.
 - **Tool settings hold when they cannot be read.** A settings database that is there but cannot be
   read (locked past the wait, damaged) refuses with 503 `settings_unreadable` instead of running
   tools on the defaults, so no tool goes past the owner's limits or onto a site they skip. One stored
