@@ -5,6 +5,7 @@ that a reader who holds the values file but not the install-time secret learns
 nothing, so nothing here may be mocked.
 """
 import os
+import stat
 import unittest
 from unittest.mock import patch
 
@@ -145,3 +146,40 @@ class VaultEncryptionTests(unittest.TestCase):
             vault.set_secret("GITHUB_TOKEN", "ghp_value")
 
         self.assertNotIn("ghp_value", self._file_text() if self.env_path.exists() else "")
+
+    def test_toolgate_configuration_never_resolves_as_a_tool_secret(self):
+        vault.ensure_control_keys()  # the admin key is now in the values file as well
+        names = sorted(vault._CONFIG_KEYS - {"TOOLGATE_VAULT_KEY_FILE"})
+        with patch.dict(os.environ, {name: "private-config" for name in names}):
+            for name in [*names, "TOOLGATE_VAULT_KEY_FILE"]:
+                with self.subTest(name=name), self.assertRaises(KeyError):
+                    vault.get_key(name)
+
+    def test_service_credentials_kept_in_the_vault_still_resolve(self):
+        vault.set_secret("MEMORYGATE_READ_KEY", "read-value")
+        vault.set_secret("TOOLGATE_CALLBACK_SECRET", "callback-value")
+
+        self.assertEqual(vault.get_key("MEMORYGATE_READ_KEY"), "read-value")
+        self.assertEqual(vault.get_key("TOOLGATE_CALLBACK_SECRET"), "callback-value")
+
+    def _mode(self) -> int:
+        return stat.S_IMODE(self.env_path.stat().st_mode)
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+    def test_the_values_file_holding_the_admin_key_is_owner_only(self):
+        vault.ensure_control_keys()
+        self.assertEqual(self._mode() & 0o077, 0)
+        vault.set_secret("GITHUB_TOKEN", "ghp_value")  # the rewrite keeps the mode
+        self.assertEqual(self._mode() & 0o077, 0)
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+    def test_a_first_secret_creates_an_owner_only_values_file(self):
+        vault.set_secret("GITHUB_TOKEN", "ghp_value")
+        self.assertEqual(self._mode() & 0o077, 0)
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+    def test_startup_tightens_a_values_file_an_older_version_left_readable(self):
+        self.env_path.write_text("GITHUB_TOKEN=ghp_value\n", encoding="utf-8")
+        os.chmod(self.env_path, 0o644)
+        vault.ensure_control_keys()
+        self.assertEqual(self._mode() & 0o077, 0)

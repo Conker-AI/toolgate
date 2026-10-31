@@ -40,6 +40,15 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertIn("'enabled' must be true or false", errors)
         self.assertIn("'extra' is not an allowed argument", errors)
 
+    def test_input_validation_rejects_an_object_input_that_is_not_an_object(self):
+        schema = [{"name": "arguments", "type": "object", "required": True}]
+        for value in ("x", ["a"], 3, True):
+            self.assertEqual(
+                ["'arguments' must be an object"],
+                control_plane.validate_inputs(schema, {"arguments": value}),
+            )
+        self.assertEqual([], control_plane.validate_inputs(schema, {"arguments": {"a": 1}}))
+
     def test_verification_is_bound_to_action_and_consumed_once(self):
         request = approvals.create_verification_request(
             "Run test", "Bound action", "agent", "tool", "echo", {"value": 3}, 2, 60, "agent-key"

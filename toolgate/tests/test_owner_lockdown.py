@@ -3,6 +3,8 @@
 can file a request; off, they work again. Only the owner key reaches it; Pi's gateway asks the
 owner's password for turning it off (turning it on only takes power away)."""
 
+import threading
+
 import pytest
 
 from toolgate.core import control_plane as cp
@@ -127,3 +129,27 @@ def test_the_operator_route_still_works_and_the_owner_sees_it(gate):
     assert response.status_code == 200
     view = client.get("/v2/owner/lockdown", headers=HEADERS).json()
     assert view == {"lockdown": True, "reason": "drill", "changed_by": "admin"}
+
+
+def test_a_settings_save_at_the_same_moment_never_turns_lockdown_back_off(gate, monkeypatch):
+    """Two writers of the one settings row: each reads and writes under the same lock."""
+    put, other = cp._put, None
+
+    def save_meanwhile(*args, **kwargs):
+        nonlocal other
+        if other is None:  # the lockdown's write; a settings save starts right before it
+            other = threading.Thread(
+                target=cp.update_settings, args=({"default_confirmation_expiry_seconds": 60}, "admin")
+            )
+            other.start()
+            other.join(timeout=1)  # without the lock it finishes here, on the old state
+        return put(*args, **kwargs)
+
+    monkeypatch.setattr(cp, "_put", save_meanwhile)
+    cp.set_lockdown(True, "owner")
+    other.join(timeout=10)
+
+    assert not other.is_alive()
+    state = cp.settings()
+    assert state["lockdown"] is True
+    assert state["default_confirmation_expiry_seconds"] == 60

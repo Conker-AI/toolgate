@@ -1,8 +1,9 @@
 """Request bodies of the ToolGate HTTP API."""
 
+import json
 from typing import Literal
 
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, StrictInt, field_validator
 
 from toolgate.core.access_policy import Decision
 
@@ -65,14 +66,26 @@ class V2Automation(BaseModel):
     status: str = "draft"
 
 
+REQUEST_PAYLOAD_BYTES = 32768
+
+
 class V2Request(BaseModel):
     """Informational owner messages; verification is issued only by an invocation."""
 
-    kind: str
-    title: str
-    details: str
+    kind: str = Field(max_length=64)
+    title: str = Field(max_length=500)
+    details: str = Field(max_length=8000)
     payload: dict = {}
-    severity: str = "info"
+    severity: Literal["info", "warning", "critical"] = "info"
+
+    @field_validator("payload")
+    @classmethod
+    def _bounded(cls, value: dict) -> dict:
+        # Any agent key can write these; a bound keeps one from filling the owner's queue and log.
+        size = len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
+        if size > REQUEST_PAYLOAD_BYTES:
+            raise ValueError(f"payload is larger than {REQUEST_PAYLOAD_BYTES} bytes")
+        return value
 
 
 class V2RequestDecision(BaseModel):

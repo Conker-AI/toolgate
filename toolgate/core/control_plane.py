@@ -159,6 +159,17 @@ def retain_definition(conn, kind: str, definition: dict) -> None:
         conn.execute("INSERT INTO v2_definition_versions VALUES(?,?,?,?)", (*key, json.dumps(definition)))
 
 
+def _change(kind: str, obj_id: str, change, default: dict | None = None) -> dict | None:
+    """Read, change and write one object under one write lock, so two writers never undo each other."""
+    with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+        current = _row(row) if row else (dict(default) if default is not None else None)
+        if current is None:
+            return None
+        return _put(kind, obj_id, change(current), connection=conn)
+
+
 def get(kind: str, obj_id: str) -> dict | None:
     with _conn() as conn:
         row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
@@ -182,11 +193,13 @@ def remove(kind: str, obj_id: str) -> bool:
 
 
 def event(event_type: str, severity: str = "info", subject_type: str | None = None,
-          subject_id: str | None = None, actor: str | None = None, payload: dict | None = None) -> dict:
+          subject_id: str | None = None, actor: str | None = None, payload: dict | None = None,
+          *, connection=None) -> dict:
+    """Record an event; pass the caller's `connection` to write it in the caller's transaction."""
     record = {"id": str(uuid.uuid4()), "event_type": event_type, "severity": severity,
               "subject_type": subject_type, "subject_id": subject_id, "actor": actor,
               "payload": payload or {}, "created_at": _now()}
-    with _conn() as conn:
+    with (nullcontext(connection) if connection is not None else _conn()) as conn:
         conn.execute("INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)", (
             record["id"], record["event_type"], record["severity"], record["subject_type"],
             record["subject_id"], record["actor"], json.dumps(record["payload"]), record["created_at"],
@@ -227,13 +240,16 @@ def latest_event_at(event_type: str, subject_type: str, subject_id: str) -> date
     return datetime.fromisoformat(row["created_at"]) if row else None
 
 
+_SETTINGS = {"id": "control-plane", "lockdown": False}
+
+
 def settings() -> dict:
-    return get("settings", "control-plane") or {"id": "control-plane", "lockdown": False}
+    return get("settings", "control-plane") or dict(_SETTINGS)
 
 
 def set_lockdown(enabled: bool, actor: str, reason: str = "") -> dict:
-    state = {**settings(), "lockdown": enabled, "reason": reason, "changed_by": actor}
-    state = _put("settings", "control-plane", state)
+    state = _change("settings", "control-plane", lambda state: {
+        **state, "lockdown": enabled, "reason": reason, "changed_by": actor}, _SETTINGS)
     event("lockdown_enabled" if enabled else "lockdown_disabled", "critical" if enabled else "info",
           "settings", "control-plane", actor, {"reason": reason})
     return state
@@ -241,9 +257,8 @@ def set_lockdown(enabled: bool, actor: str, reason: str = "") -> dict:
 
 def update_settings(changes: dict, actor: str) -> dict:
     protected = {"id", "created_at", "updated_at", "lockdown", "changed_by", "reason"}
-    state = settings()
-    state.update({key: value for key, value in changes.items() if key not in protected})
-    state = _put("settings", "control-plane", state)
+    allowed = {key: value for key, value in changes.items() if key not in protected}
+    state = _change("settings", "control-plane", lambda state: {**state, **allowed}, _SETTINGS)
     event("settings_updated", "info", "settings", "control-plane", actor, {"keys": sorted(changes)})
     return state
 
@@ -384,6 +399,8 @@ def validate_inputs(schema: list[dict], args: dict) -> list[str]:
             errors.append(f"'{name}' must be text")
         elif kind == "array" and not isinstance(value, list):
             errors.append(f"'{name}' must be an array")
+        elif kind == "object" and not isinstance(value, dict):
+            errors.append(f"'{name}' must be an object")
         if isinstance(value, (int, float)):
             if field.get("minimum") is not None and value < field["minimum"]:
                 errors.append(f"'{name}' must be at least {field['minimum']}")
@@ -414,6 +431,9 @@ def validate_inputs(schema: list[dict], args: dict) -> list[str]:
     return errors
 
 
+_FIXED = {"id", "created_at", "updated_at"}
+
+
 def create_service(body: dict) -> dict:
     service_id = body.get("id") or body["name"].lower().replace(" ", "-")
     return _put("service", service_id, {"name": body["name"], "description": body.get("description", ""),
@@ -422,12 +442,8 @@ def create_service(body: dict) -> dict:
 
 
 def update_service(service_id: str, changes: dict) -> dict | None:
-    service = get("service", service_id)
-    if not service:
-        return None
-    service.update({key: value for key, value in changes.items()
-                    if key not in {"id", "created_at", "updated_at"}})
-    return _put("service", service_id, service)
+    allowed = {key: value for key, value in changes.items() if key not in _FIXED}
+    return _change("service", service_id, lambda service: {**service, **allowed})
 
 
 def create_verification_method(body: dict) -> dict:
@@ -442,12 +458,8 @@ def create_verification_method(body: dict) -> dict:
 
 
 def update_verification_method(method_id: str, changes: dict) -> dict | None:
-    method = get("verification_method", method_id)
-    if not method:
-        return None
-    method.update({key: value for key, value in changes.items()
-                   if key not in {"id", "created_at", "updated_at"}})
-    return _put("verification_method", method_id, method)
+    allowed = {key: value for key, value in changes.items() if key not in _FIXED}
+    return _change("verification_method", method_id, lambda method: {**method, **allowed})
 
 
 # A tool with no ceiling is a tool that can run until something else breaks -

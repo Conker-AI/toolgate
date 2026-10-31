@@ -102,16 +102,25 @@ def _stored(row) -> dict:
 
 def _read() -> dict:
     """The saved document, read-only: reading the settings never creates or changes the database.
-    No database or no saved settings yet reads as nothing saved."""
+    No database or no saved settings yet reads as nothing saved. A database that is there but
+    cannot be read refuses, so no tool runs past limits or onto sites the owner set."""
+    path = Path(cp.DB_PATH).resolve()
+    if not path.exists():
+        return {}
     try:
-        uri = Path(cp.DB_PATH).resolve().as_uri() + "?mode=ro"
-        with closing(sqlite3.connect(uri, uri=True)) as db:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
+            if not db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_objects'"
+            ).fetchone():
+                return {}
             row = db.execute(
                 "SELECT body FROM v2_objects WHERE kind=? AND id=?", (KIND, IDENTITY)
             ).fetchone()
-    except sqlite3.Error:
-        return {}
+    except sqlite3.Error as exc:
+        raise OwnerError(
+            "settings_unreadable", "Tool settings could not be read; try again shortly.", 503
+        ) from exc
     return _stored(row)
 
 
@@ -137,21 +146,33 @@ def save(update: Update, actor: str = "owner") -> dict:
                 "settings_revision_conflict", "Settings changed; reload before saving.", 409
             )
         cp._put(KIND, IDENTITY, {"settings": values, "revision": revision + 1}, connection=db)
-    before = current(stored).model_dump()
-    changed = sorted(key for key in values if values[key] != before[key])
-    cp.event("tool_settings_updated", "info", "settings", IDENTITY, actor, {"keys": changed})
+        before = current(stored).model_dump()
+        changed = sorted(key for key in values if values[key] != before[key])
+        # In the same transaction: a save is never applied without its event, nor refused after.
+        cp.event(
+            "tool_settings_updated", "info", "settings", IDENTITY, actor, {"keys": changed},
+            connection=db,
+        )
     return {"settings": values, "revision": revision + 1}
 
 
 def current(stored: dict | None = None) -> Settings:
-    """The settings tools run by now. A stored value this version no longer allows is ignored,
-    which falls back to today's limit rather than past it."""
+    """The settings tools run by now. A stored value this version no longer allows (or a name it
+    does not know) is ignored, which falls back to today's limit rather than past it; the other
+    values still apply."""
     if stored is None:
         stored = _read()
-    try:
-        return Settings.model_validate(stored.get("settings", {}))
-    except ValidationError:
+    saved = stored.get("settings", {})
+    if not isinstance(saved, dict):
         return Settings()
+    kept = {}
+    for name, value in saved.items():
+        try:  # one value at a time; a name this version does not know is refused too
+            Settings.model_validate({name: value})
+        except ValidationError:
+            continue
+        kept[name] = value
+    return Settings.model_validate(kept)
 
 
 # --- what tools read ---------------------------------------------------------------------------
