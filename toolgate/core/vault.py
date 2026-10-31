@@ -171,12 +171,22 @@ def _decrypt(name: str, raw: str) -> str:
         raise VaultError(f"{name} is encrypted with a different vault key and cannot be read") from exc
 
 
+def _ensure_env_file() -> None:
+    """Create the values file owner-only: it holds the admin key in the clear."""
+    if not ENV_PATH.exists():
+        ENV_PATH.touch(mode=0o600)
+
+
 def get_key(placeholder: str) -> str:
     """Return the real value for a vault placeholder. Never exposed to callers via list_placeholders()."""
     if placeholder in {"TOOLGATE_OWNER_KEY_SHA256", "TOOLGATE_OWNER_KEY"}:
         raise KeyError("Owner channel configuration is not a tool secret")
     if placeholder == "TOOLGATE_PI_SERVICE_KEY":
         raise KeyError("Pi's service key is not a tool secret")
+    if placeholder in _CONFIG_KEYS:
+        # A tool's secret_headers or secret_ref would otherwise send the admin key, the
+        # bootstrap execution key or the vault secret itself to the tool's host.
+        raise KeyError(f"{placeholder} is ToolGate's own configuration, not a tool secret")
     value = _load().get(placeholder) or os.environ.get(placeholder)
     if not value:
         raise KeyError(f"{placeholder} is not set in .env")
@@ -198,8 +208,7 @@ def set_secret(name: str, value: str, *, allow_existing: bool = True) -> None:
     if not allow_existing and name in _load():
         raise ValueError(f"{name} already exists")
 
-    if not ENV_PATH.exists():
-        ENV_PATH.touch()
+    _ensure_env_file()
     set_key(str(ENV_PATH), name, _encrypt(value), quote_mode="never")
 
 
@@ -257,8 +266,11 @@ def ensure_control_keys() -> dict:
 
     Returns the key only when it was freshly generated.
     """
-    if not ENV_PATH.exists():
-        ENV_PATH.touch()
+    _ensure_env_file()
+    try:
+        os.chmod(ENV_PATH, 0o600)  # older versions created it world-readable
+    except OSError:
+        pass  # a file mounted read-only or owned by another account keeps its mode
 
     values = _load()
     generated = {}
@@ -281,8 +293,7 @@ def rotate_control_key(name: str) -> str:
     if name != "TOOLGATE_ADMIN_KEY":
         raise ValueError(f"Cannot rotate {name}")
     new_value = uuid.uuid4().hex
-    if not ENV_PATH.exists():
-        ENV_PATH.touch()
+    _ensure_env_file()
     set_key(str(ENV_PATH), name, new_value, quote_mode="never")
     os.environ[name] = new_value
     return new_value
