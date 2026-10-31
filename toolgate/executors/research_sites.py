@@ -13,6 +13,7 @@ from toolgate.executors.research_base import (
     STACKEXCHANGE_QUERY_STOP_WORDS,
     ResearchError,
     _normalize,
+    json_body,
 )
 from toolgate.executors.research_text import clean_text, extract_html_text
 
@@ -31,7 +32,7 @@ def _github(query: str, _source: str, limit: int, recency_days: int, timeout: fl
         public_headers = {name: value for name, value in headers.items() if name != "Authorization"}
         response = httpx.get("https://api.github.com/search/issues", headers=public_headers, **request_args)
     response.raise_for_status()
-    rows = response.json().get("items", [])
+    rows = json_body(response, "GitHub").get("items", [])
     results = []
     for row in rows[:limit]:
         body = clean_text(row.get("body") or "", 6000)
@@ -66,7 +67,7 @@ def _github_repositories(query: str, _source: str, limit: int, recency_days: int
         response = httpx.get("https://api.github.com/search/repositories", headers=public_headers, **request_args)
     response.raise_for_status()
     results = []
-    for row in response.json().get("items", [])[:limit]:
+    for row in json_body(response, "GitHub").get("items", [])[:limit]:
         full_name = clean_text(row.get("full_name"), 160)
         description = clean_text(row.get("description") or "", 1200)
         topics = [clean_text(topic, 80) for topic in row.get("topics", [])[:12] if clean_text(topic, 80)]
@@ -101,7 +102,7 @@ def _stackoverflow(query: str, _source: str, limit: int, recency_days: int, time
         timeout=timeout,
     )
     response.raise_for_status()
-    rows = response.json().get("items", [])
+    rows = json_body(response, "Stack Overflow").get("items", [])
     results = []
     for row in rows[:limit]:
         body = extract_html_text(row.get("body") or "", 6000)
@@ -152,11 +153,12 @@ def _stackexchange(query: str, _source: str, limit: int, recency_days: int, time
                 params={**base_params, "site": site}, timeout=timeout,
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+            payload = json_body(response, "Stack Exchange")
+        except (httpx.HTTPError, ResearchError) as exc:
             last_error = exc
             continue
         site_rows = []
-        for row in response.json().get("items", []):
+        for row in payload.get("items", []):
             body = extract_html_text(row.get("body") or "", 6000)
             item = _normalize(row.get("title"), row.get("link"), body, "stackexchange", row.get("creation_date"))
             if item:
@@ -315,7 +317,7 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
         timeout=timeout,
     )
     search_response.raise_for_status()
-    videos = search_response.json().get("items", [])
+    videos = json_body(search_response, "YouTube").get("items", [])
     ranked: list[tuple[int, dict]] = []
     comments_per_video = min(20, max(5, (limit * 2 + max(len(videos), 1) - 1) // max(len(videos), 1)))
     for video in videos:
@@ -333,9 +335,10 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
                 timeout=timeout,
             )
             comments_response.raise_for_status()
-        except httpx.HTTPError:
+            comment_rows = json_body(comments_response, "YouTube").get("items", [])
+        except (httpx.HTTPError, ResearchError):
             continue
-        for wrapper in comments_response.json().get("items", []):
+        for wrapper in comment_rows:
             top_level = wrapper.get("snippet", {}).get("topLevelComment", {})
             comment_id = str(top_level.get("id") or "")
             snippet = top_level.get("snippet", {})
@@ -381,7 +384,7 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
         timeout=timeout,
     )
     topic_response.raise_for_status()
-    topic_payload = topic_response.json()
+    topic_payload = json_body(topic_response, "Product Hunt")
     if topic_payload.get("errors"):
         raise ResearchError("Product Hunt topic lookup returned a GraphQL error")
     topics: list[dict] = []
@@ -418,7 +421,7 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
         timeout=timeout,
     )
     product_response.raise_for_status()
-    product_payload = product_response.json()
+    product_payload = json_body(product_response, "Product Hunt")
     if product_payload.get("errors"):
         raise ResearchError("Product Hunt product lookup returned a GraphQL error")
 

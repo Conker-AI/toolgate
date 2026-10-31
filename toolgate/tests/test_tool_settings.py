@@ -3,8 +3,9 @@ it replaces, no value goes past today's limit, and each one changes what tools d
 settings are also covered in test_sandbox_tools.py, test_sandbox_spec.py, test_sandbox_runner.py
 and sandbox/verify (the real Docker Engine)."""
 
+import sqlite3
 import time
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from unittest.mock import Mock
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 from toolgate.api import dispatch, invocation
 from toolgate.core import control_plane as cp
 from toolgate.core import research_cache, tool_settings
+from toolgate.core.owner_channel import OwnerError
 from toolgate.executors import mcp_http, pi_inference, research, research_base, research_web
 from toolgate.executors import sandbox as sandbox_executor
 from toolgate.sandbox import spec
@@ -178,6 +180,63 @@ def test_reading_them_never_creates_the_database(tmp_path, monkeypatch):
     assert tool_settings.current() == tool_settings.Settings()
     assert tool_settings.seconds(30) == 30
     assert not (tmp_path / "absent.db").exists()
+
+
+def test_one_value_this_version_no_longer_allows_drops_only_that_value(store):
+    stored = {"tool_seconds": 999, "web_skip_sites": ["example.com"], "web_safe_search": "strict",
+              "a_retired_setting": True}
+    cp._put("settings", "tools", {"settings": stored, "revision": 2})
+    chosen = tool_settings.current()
+    assert chosen.tool_seconds is None
+    assert (chosen.web_skip_sites, chosen.web_safe_search) == (["example.com"], "strict")
+    cp._put("settings", "tools", {"settings": ["not", "a", "document"], "revision": 3})
+    assert tool_settings.current() == tool_settings.Settings()
+
+
+def test_a_database_without_the_settings_table_reads_as_nothing_saved(tmp_path, monkeypatch):
+    path = tmp_path / "gate.db"
+    with closing(sqlite3.connect(path)) as db:
+        db.execute("CREATE TABLE other (x)")
+    monkeypatch.setattr(cp, "DB_PATH", path)
+    assert tool_settings.current() == tool_settings.Settings()
+
+
+def test_a_database_that_cannot_be_read_refuses_rather_than_dropping_the_owners_limits(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "gate.db"
+    path.write_bytes(b"not a database " * 100)
+    monkeypatch.setattr(cp, "DB_PATH", path)
+    for read in (tool_settings.current, tool_settings.skip_sites, lambda: tool_settings.seconds(30)):
+        with pytest.raises(OwnerError) as refused:
+            read()
+        assert (refused.value.code, refused.value.status) == ("settings_unreadable", 503)
+
+
+def test_the_owner_route_says_when_the_settings_cannot_be_read(gate, monkeypatch):
+    connect = sqlite3.connect
+
+    def locked(target, *args, **kwargs):
+        if "mode=ro" in str(target):
+            raise sqlite3.OperationalError("database is locked")
+        return connect(target, *args, **kwargs)
+
+    monkeypatch.setattr(tool_settings.sqlite3, "connect", locked)
+    response = gate[0].get("/v2/owner/settings", headers=HEADERS)
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "settings_unreadable"
+
+
+def test_a_save_whose_event_cannot_be_written_is_not_applied(store):
+    choose(tool_seconds=30)
+    with closing(sqlite3.connect(cp.DB_PATH)) as db:
+        db.execute("CREATE TRIGGER no_events BEFORE INSERT ON v2_events "
+                   "BEGIN SELECT RAISE(ABORT, 'events refused'); END")
+        db.commit()
+    with pytest.raises(sqlite3.Error):
+        choose(tool_seconds=60)
+    assert tool_settings.load()["revision"] == 1
+    assert tool_settings.current().tool_seconds == 30
 
 
 # --- tools.timeout: one tool call ----------------------------------------------------------------

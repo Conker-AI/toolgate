@@ -23,6 +23,18 @@ class ResearchError(RuntimeError):
     """A safe, owner-readable research failure."""
 
 
+JSON_LIMIT = 4 * 1024 * 1024  # bytes; a provider's JSON answer larger than this is refused unparsed
+
+
+def json_body(response: httpx.Response, provider: str, limit: int = JSON_LIMIT):
+    """The response's JSON, refused before parsing when the body is larger than the limit."""
+    content = response.content
+    # httpx always exposes bytes here; test fakes may stub .json() alone, with no real body.
+    if isinstance(content, (bytes, bytearray)) and len(content) > limit:
+        raise ResearchError(f"{provider} response exceeded the safe size limit")
+    return response.json()
+
+
 _PROVIDER_COOLDOWNS: dict[str, float] = {}
 
 
