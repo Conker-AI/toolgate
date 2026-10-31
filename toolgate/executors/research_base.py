@@ -146,6 +146,15 @@ def _requested_site_domain(query: str) -> str | None:
     return domain
 
 
+# A page that writes the fence's own tokens could close it early or open one of its own.
+FENCE_TOKEN = re.compile(r"\[(\s*/?\s*)UNTRUSTED_WEB_CONTENT", re.I)
+
+
+def _fenced(result_id: str, text: str) -> str:
+    text = FENCE_TOKEN.sub(r"(\1UNTRUSTED_WEB_CONTENT", text)
+    return f"[UNTRUSTED_WEB_CONTENT id={result_id}]\n{text}\n[/UNTRUSTED_WEB_CONTENT]"
+
+
 def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
     record = research_cache.get_research_result(result_id)
     if not record:
@@ -181,7 +190,7 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
             "title": record.get("title"), "url": record.get("url"), "content_safety": inspection,
             "published_at": record.get("published_at"), "recency_provenance": record.get("recency_provenance"),
             "content_stats": {"received_bytes": 0, "model_characters": len(text), "snapshot": True},
-            "content": f"[UNTRUSTED_WEB_CONTENT id={result_id}]\n{text}\n[/UNTRUSTED_WEB_CONTENT]",
+            "content": _fenced(result_id, text),
         }
 
     url = record["url"]
@@ -246,7 +255,7 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
         "recency_provenance": recency_provenance,
         "content_safety": inspection,
         "content_stats": {"received_bytes": len(body), "model_characters": len(text)},
-        "content": f"[UNTRUSTED_WEB_CONTENT id={result_id}]\n{text}\n[/UNTRUSTED_WEB_CONTENT]",
+        "content": _fenced(result_id, text),
     }
 
 
