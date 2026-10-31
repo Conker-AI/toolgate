@@ -182,11 +182,13 @@ def remove(kind: str, obj_id: str) -> bool:
 
 
 def event(event_type: str, severity: str = "info", subject_type: str | None = None,
-          subject_id: str | None = None, actor: str | None = None, payload: dict | None = None) -> dict:
+          subject_id: str | None = None, actor: str | None = None, payload: dict | None = None,
+          *, connection=None) -> dict:
+    """Record an event; pass the caller's `connection` to write it in the caller's transaction."""
     record = {"id": str(uuid.uuid4()), "event_type": event_type, "severity": severity,
               "subject_type": subject_type, "subject_id": subject_id, "actor": actor,
               "payload": payload or {}, "created_at": _now()}
-    with _conn() as conn:
+    with (nullcontext(connection) if connection is not None else _conn()) as conn:
         conn.execute("INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)", (
             record["id"], record["event_type"], record["severity"], record["subject_type"],
             record["subject_id"], record["actor"], json.dumps(record["payload"]), record["created_at"],
