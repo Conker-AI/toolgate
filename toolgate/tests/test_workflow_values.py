@@ -56,6 +56,28 @@ class WorkflowValueTests(unittest.TestCase):
                 self.assertNotIn("answer", state["vars"])
                 self.assertEqual([], state["results"])
 
+    def test_a_branch_that_returns_keeps_its_own_receipt(self):
+        branch = [{"type": "set", "name": "seen", "value": 1},
+                  {"type": "return", "value": "done"}]
+        expected_codes = {"condition": "CONDITION_MET", "switch": "SWITCH_SELECTED",
+                          "loop": "LOOP_RETURNED"}
+        for kind, step in (
+            ("condition", {"type": "condition", "left": "ready", "operator": "equals",
+                           "right": "ready", "then": branch}),
+            ("switch", {"type": "switch", "value": "ready", "cases": {"ready": branch}}),
+            ("loop", {"type": "loop", "items": ["a", "b"], "max_iterations": 2,
+                      "steps": branch}),
+        ):
+            with self.subTest(kind=kind):
+                state = self.state()
+                result = self.run_steps([step], state)
+                self.assertEqual("done", result["result"])
+                self.assertEqual(["set", kind], [r["type"] for r in state["results"]])
+                receipt = state["results"][-1]["result"]
+                self.assertEqual(expected_codes[kind], receipt["code"])
+                if kind == "loop":
+                    self.assertEqual(1, receipt["iterations"])
+
     def test_nested_loop_restores_outer_item_for_following_steps(self):
         state = self.state()
         result = self.run_steps([
