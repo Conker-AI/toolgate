@@ -26,6 +26,7 @@ this module can decrypt anything.  None of them is a provider credential, and
 they are neither listed nor writable as vault secrets.
 """
 import base64
+import contextlib
 import hashlib
 import os
 import re
@@ -267,10 +268,10 @@ def ensure_control_keys() -> dict:
     Returns the key only when it was freshly generated.
     """
     _ensure_env_file()
-    try:
-        os.chmod(ENV_PATH, 0o600)  # older versions created it world-readable
-    except OSError:
-        pass  # a file mounted read-only or owned by another account keeps its mode
+    # Older versions created it world-readable. A file mounted read-only or owned by another account
+    # keeps its mode.
+    with contextlib.suppress(OSError):
+        os.chmod(ENV_PATH, 0o600)
 
     values = _load()
     generated = {}
