@@ -419,7 +419,11 @@ def main() -> int:
             destination = root / source.relative_to(ROOT)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(source.read_bytes())
-        baseline = run_tests(root, sorted({m[4] for m in MUTANTS}), "baseline")
+        try:
+            baseline = run_tests(root, sorted({m[4] for m in MUTANTS}), "baseline")
+        except subprocess.TimeoutExpired:
+            print("Baseline timed out; fix the behavior before testing mutations.")
+            return 1
         if baseline.returncode:
             print(baseline.stdout + baseline.stderr)
             print("Baseline failed; fix the behavior before testing mutations.")
@@ -435,6 +439,9 @@ def main() -> int:
             path.write_text(original.replace(before, after), encoding="utf-8")
             try:
                 result = run_tests(root, [test], f"mutant-{index}")
+            except subprocess.TimeoutExpired:
+                print(f"TIMED OUT: {label}")
+                return 1
             finally:
                 path.write_text(original, encoding="utf-8")
             if result.returncode != 1 or f"FAILED {test}" not in result.stdout:

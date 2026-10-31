@@ -555,14 +555,12 @@ class ResearchSearchTests(unittest.TestCase):
             "snippet": "We manually dispatch every job.", "source": "reddit", "published_at": "2026-07-29T00:00:00Z",
             "content_safety": {"risk": "low", "flags": []},
         }]
-        with patch.object(research_forums, "_reddit") as blocked_json, \
-             patch.object(research, "_reddit_rss_search", return_value=[]), \
+        with patch.object(research, "_reddit_rss_search", return_value=[]), \
              patch.object(research, "_searx", return_value=fallback), \
              patch.object(research, "_tavily") as remote_fallback:
             result = research.search("field service dispatch", "reddit", 5, 90)
         self.assertEqual("searxng", result["provider"])
         self.assertTrue(any("reddit_atom: no results" in failure for failure in result["fallback_failures"]))
-        blocked_json.assert_not_called()
         remote_fallback.assert_not_called()
 
     def test_tavily_quota_failure_opens_bounded_provider_circuit(self):

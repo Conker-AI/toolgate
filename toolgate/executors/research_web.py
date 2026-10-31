@@ -20,6 +20,7 @@ from toolgate.executors.research_base import (
     _normalize,
     _requested_site_domain,
     _require_provider_ready,
+    json_body,
 )
 from toolgate.executors.research_text import clean_text, extract_html_text
 
@@ -44,7 +45,7 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
                 return item
             response = httpx.get(f"https://hn.algolia.com/api/v1/items/{match.group(1)}", timeout=timeout)
             response.raise_for_status()
-            payload = response.json()
+            payload = json_body(response, "Hacker News")
             parts = [extract_html_text(payload.get("text") or "", 2400)]
             for child in payload.get("children", [])[:12]:
                 parts.append(extract_html_text(child.get("text") or "", 800))
@@ -71,11 +72,11 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
                 params["key"] = vault.get_key("STACKEXCHANGE_KEY")
             response = httpx.get(f"https://api.stackexchange.com/2.3/questions/{match.group(1)}", params=params, timeout=timeout)
             response.raise_for_status()
-            rows = response.json().get("items", [])
+            rows = json_body(response, "Stack Overflow").get("items", [])
             body = extract_html_text(rows[0].get("body") or "", 6000) if rows else ""
             if body:
                 return {**item, "document": f"Stack Overflow question: {item['title']}\nQuestion body: {body}"}
-    except (httpx.HTTPError, KeyError, TypeError, ValueError):
+    except (httpx.HTTPError, ResearchError, KeyError, TypeError, ValueError):
         return item
     return item
 
@@ -100,7 +101,7 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
         timeout=timeout,
     )
     response.raise_for_status()
-    rows = response.json().get("results", [])
+    rows = json_body(response, "SearXNG").get("results", [])
     results = []
     for row in rows:
         if len(results) >= limit:
@@ -160,7 +161,7 @@ def _tavily_unmetered(query: str, source: str, limit: int, recency_days: int, ti
         _cooldown_provider("tavily", 60 * 60)
     response.raise_for_status()
     _PROVIDER_COOLDOWNS.pop("tavily", None)
-    rows = response.json().get("results", [])
+    rows = json_body(response, "Tavily").get("results", [])
     results = []
     for row in rows[:limit]:
         extracted = clean_text(row.get("content") or "", 6000)
