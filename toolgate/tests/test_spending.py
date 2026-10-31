@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from toolgate.api import deps, invocation, models, server
+from toolgate.api import definitions, deps, invocation, models, server
 from toolgate.api.routes import automations as automations_routes
 from toolgate.core import approvals, control_plane, spending
 from toolgate.core import execution_journal as journal
@@ -222,6 +222,15 @@ def test_unaccounted_paid_routes_never_reach_network(paid, monkeypatch, kind):
             invoke(paid)
         assert error.value.detail["code"] == "BUDGET_DENIED"
     assert calls == []
+
+
+def test_the_editor_refuses_a_model_without_a_spending_adapter(paid):
+    def model_errors(tool):
+        return [e for e in definitions.tool_definition_errors(tool) if "model" in e]
+
+    assert model_errors(paid) == []
+    paid["execution"]["model"] = "gemini-3.5-flash-lite"
+    assert model_errors(paid) == [f"gemini_generate.model must be one of: {spending.MODEL}"]
 
 
 def test_provider_bound_violation_disables_further_paid_dispatch(paid, monkeypatch):

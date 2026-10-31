@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The tool editor accepts only a Gemini model that can run.** A `gemini_generate` tool could be
+  saved with `gemini-3.5-flash-lite`, but only `gemini-2.5-flash-lite` has a bounded spending
+  adapter, so every run of that tool was refused with `AI_MODEL_DENIED` (or `BUDGET_DENIED`)
+  after the owner had approved it. Saving now names the one model that runs. Dispatch and the
+  spending budget are unchanged.
+
 - **A search no longer reads every cached page to clear old ones.** Purging expired research
   results reads only each result's id and expiry and deletes them on one connection, instead of
   loading every cached page (up to 20,000 characters each) and opening a connection per deletion.

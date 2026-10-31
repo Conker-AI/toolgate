@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
-from toolgate.core import control_plane, editor_publication, publications
+from toolgate.core import control_plane, editor_publication, publications, spending
 from toolgate.executors import mcp_http, research
 
 SUPPORTED_TOOL_EXECUTORS = {
@@ -39,7 +39,8 @@ CAPABILITY_STATUSES = {"draft", "active", "disabled"}
 INPUT_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
 
 
-GEMINI_MODELS = {"gemini-3.5-flash-lite", "gemini-2.5-flash-lite"}
+# Only a model with a bounded spending adapter can run; dispatch refuses any other one.
+GEMINI_MODELS = {spending.MODEL}
 
 
 AI_CONFIRMATIONS = {
