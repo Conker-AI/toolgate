@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Research refuses an oversized JSON answer before parsing it.** Every research provider now reads
+  its JSON through one check: a body over 4 MiB is refused with "<provider> response exceeded the
+  safe size limit" and is not parsed (the App Store keeps its own 1 MiB check). Where a provider
+  already skipped a failed request (a Discourse host, a Stack Exchange site, a YouTube video's
+  comments, a community snapshot, a Discourse topic), it skips an oversized one the same way;
+  elsewhere the provider fails as on an HTTP error. The unused Reddit JSON search and
+  `AI_CONFIRMATIONS` are gone.
 - **A search no longer reads every cached page to clear old ones.** Purging expired research
   results reads only each result's id and expiry and deletes them on one connection, instead of
   loading every cached page (up to 20,000 characters each) and opening a connection per deletion.
