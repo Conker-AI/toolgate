@@ -308,6 +308,25 @@ def test_only_the_configured_peer_uid_may_run(make, tmp_path, admitted):
         assert answer == {**answer, "ok": False, "code": "not_permitted"} and docker.calls == []
 
 
+def test_a_request_cut_before_its_newline_never_runs(make, tmp_path):
+    """ToolGate calls a failed send "unavailable", not "unknown": sendall raises only before its
+    last byte, the newline, leaves, so the runner must run no line without one."""
+    sandbox, docker, _ = make()
+    path = str(tmp_path / "runner.sock")
+    with runner.Server(path, sandbox, {os.getuid()}) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(10)
+                connection.connect(path)
+                connection.sendall(json.dumps(run_request()).encode())
+                connection.shutdown(socket.SHUT_WR)
+                answer = json.loads(connection.makefile("rb").readline())
+        finally:
+            server.shutdown()
+    assert answer["code"] == "invalid_request" and docker.calls == []
+
+
 def test_an_out_of_memory_label_that_lands_after_the_exit_is_kept(make, monkeypatch):
     """Docker records the OOM kill from a separate event that can arrive just after the exit."""
     sandbox, docker, _ = make()

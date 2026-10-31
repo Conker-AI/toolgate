@@ -89,6 +89,8 @@ def _send(request: dict, timeout: float) -> dict:
             connection.connect(path)
             connection.settimeout(timeout)
             connection.sendall(json.dumps(request).encode() + b"\n")
+            # Not before: sendall raises only while its last byte, the newline, is unsent, and the
+            # runner runs no request without one (test_a_request_cut_before_its_newline_never_runs).
             sent = True
             raw = connection.makefile("rb").readline(MAX_ANSWER + 1)
         if len(raw) > MAX_ANSWER or not raw.endswith(b"\n"):
