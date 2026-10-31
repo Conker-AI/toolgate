@@ -285,11 +285,12 @@ def fetch_batch(result_ids: list[str], max_chars: int = 3500) -> dict:
                 raise ResearchError("the tool time limit was reached")
             documents.append(fetch(result_id, max_chars, min(15.0, remaining)))
         except ResearchError as exc:
+            # Not the content-safety block: "blocked" stays the safety filter's word.
             documents.append({
                 "result_id": result_id,
-                "blocked": True,
+                "blocked": False,
                 "content": "",
                 "error": str(exc)[:240],
-                "notice": "This result was withheld; other batch results remain usable.",
+                "notice": "This result could not be fetched; other batch results remain usable.",
             })
     return {"documents": documents, "result_count": len(documents)}

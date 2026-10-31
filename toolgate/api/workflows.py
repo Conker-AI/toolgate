@@ -209,8 +209,8 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             calculated = {
                 "add": lambda: sum(values),
                 "subtract": lambda: values[0] - sum(values[1:]),
-                "multiply": lambda: __import__("math").prod(values),
-                "divide": lambda: values[0] / __import__("math").prod(values[1:]),
+                "multiply": lambda: math.prod(values),
+                "divide": lambda: values[0] / math.prod(values[1:]),
                 "min": lambda: min(values),
                 "max": lambda: max(values),
             }.get(operation)
@@ -237,6 +237,7 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             result = {"code": "CONDITION_MET" if matches else "CONDITION_NOT_MET"}
             final = _run_workflow_steps(branch, state, actor, approval_granted)
             if final is not None:
+                state["results"].append({"type": kind, "result": result})
                 return final
             if not matches and not branch and step.get("on_false", "stop") == "stop":
                 deny("POLICY_DENIED", "Automation condition was not met")
@@ -246,6 +247,7 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             result = {"code": "SWITCH_SELECTED", "case": selected}
             final = _run_workflow_steps(branch, state, actor, approval_granted)
             if final is not None:
+                state["results"].append({"type": kind, "result": result})
                 return final
         elif kind == "loop":
             items = _workflow_value(step.get("items"), state)
@@ -257,12 +259,16 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             had_previous = item_name in state["vars"]
             previous = state["vars"].get(item_name)
             try:
-                for item in items:
+                for iterations, item in enumerate(items, 1):
                     state["vars"][item_name] = item
                     final = _run_workflow_steps(
                         step.get("steps", []), state, actor, approval_granted
                     )
                     if final is not None:
+                        state["results"].append({
+                            "type": kind,
+                            "result": {"code": "LOOP_RETURNED", "iterations": iterations},
+                        })
                         return final
             finally:
                 if had_previous:
@@ -276,6 +282,10 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
                 try:
                     final = _run_workflow_steps([step["step"]], state, actor, approval_granted)
                     if final is not None:
+                        state["results"].append({
+                            "type": kind,
+                            "result": {"code": "RETRY_COMPLETE", "attempts": attempt + 1},
+                        })
                         return final
                     last_error = None
                     break

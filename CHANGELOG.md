@@ -5,6 +5,29 @@
 - **A workflow's run history no longer opens a connection per run.** Reading the recent runs of one
   editor workflow now reads every receipt on the connection it already had, instead of opening one
   connection per run (up to 30 a page). The history itself is unchanged.
+
+- **A service lists the automations that call its tools inside a branch.** The service's linked
+  automations only saw a tool called as a top-level workflow step, so a tool used inside a
+  condition, switch, loop, retry, parallel or editor-graph step left the service looking unused by
+  that automation. Every nested tool call now counts, and each automation's tools are walked once
+  instead of once per step of every automation.
+
+- **An automation's runtime limit is checked when it is saved.** `max_runtime_seconds` must be a
+  whole number from 1 to 120; a condition, switch, loop or retry whose branch returns now records
+  its own step in the run's steps.
+
+- **A research batch no longer reports a failed page as withheld by the safety filter.** When
+  one handle in `research.fetch_batch` had expired, was unknown, was on a skipped site or ran out
+  of time, its row said `blocked: true` and "This result was withheld", the content-safety
+  block's words. It now says `blocked: false`, "This result could not be fetched", and keeps
+  the error. Pages the safety filter withholds are still `blocked: true`.
+
+- **The tool editor accepts only a Gemini model that can run.** A `gemini_generate` tool could be
+  saved with `gemini-3.5-flash-lite`, but only `gemini-2.5-flash-lite` has a bounded spending
+  adapter, so every run of that tool was refused with `AI_MODEL_DENIED` (or `BUDGET_DENIED`)
+  after the owner had approved it. Saving now names the one model that runs. Dispatch and the
+  spending budget are unchanged.
+
 - **Research refuses an oversized JSON answer before parsing it.** Every research provider now reads
   its JSON through one check: a body over 4 MiB is refused with "<provider> response exceeded the
   safe size limit" and is not parsed (the App Store keeps its own 1 MiB check). Where a provider

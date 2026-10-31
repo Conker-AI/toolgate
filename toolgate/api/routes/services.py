@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
+from toolgate.api.definitions import workflow_tool_ids
 from toolgate.api.deps import deny, require_admin
 from toolgate.api.models import V2Service
 from toolgate.core import control_plane
@@ -14,27 +15,27 @@ from toolgate.core.public_https import public_client, public_url
 router = APIRouter()
 
 
+def _service_links(service: dict, tools: list, automations: list, automation_tools: dict) -> dict:
+    linked_tools = [tool["id"] for tool in tools if tool.get("service_id") == service["id"]]
+    tool_ids = set(linked_tools)
+    return {
+        **service,
+        "linked_tools": linked_tools,
+        "linked_automations": [
+            item["id"] for item in automations if automation_tools[item["id"]] & tool_ids
+        ],
+    }
+
+
 @router.get("/v2/services")
 def list_services(_tier: str = Depends(require_admin)):
     tools = control_plane.list_objects("tool")
     automations = control_plane.list_objects("automation")
+    automation_tools = {
+        item["id"]: set(workflow_tool_ids(item.get("workflow", []))) for item in automations
+    }
     return [
-        {
-            **service,
-            "linked_tools": [
-                tool["id"] for tool in tools if tool.get("service_id") == service["id"]
-            ],
-            "linked_automations": [
-                item["id"]
-                for item in automations
-                if any(
-                    step.get("tool_id")
-                    in {tool["id"] for tool in tools if tool.get("service_id") == service["id"]}
-                    for step in item.get("workflow", [])
-                    if isinstance(step, dict)
-                )
-            ],
-        }
+        _service_links(service, tools, automations, automation_tools)
         for service in control_plane.list_objects("service")
     ]
 
