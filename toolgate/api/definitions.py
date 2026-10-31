@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
-from toolgate.core import control_plane, editor_publication, publications
+from toolgate.core import control_plane, editor_publication, publications, spending
 from toolgate.executors import mcp_http, research
 
 SUPPORTED_TOOL_EXECUTORS = {
@@ -39,7 +39,8 @@ CAPABILITY_STATUSES = {"draft", "active", "disabled"}
 INPUT_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
 
 
-GEMINI_MODELS = {"gemini-3.5-flash-lite", "gemini-2.5-flash-lite"}
+# Only a model with a bounded spending adapter can run; dispatch refuses any other one.
+GEMINI_MODELS = {spending.MODEL}
 
 
 def input_schema_errors(inputs) -> list[str]:
@@ -537,6 +538,9 @@ def automation_definition_errors(automation: dict) -> list[str]:
     max_steps = automation.get("policy", {}).get("usage_limits", {}).get("max_steps", 100)
     if not isinstance(max_steps, int) or not 1 <= max_steps <= 500:
         errors.append("policy.usage_limits.max_steps must be between 1 and 500")
+    runtime = automation.get("policy", {}).get("usage_limits", {}).get("max_runtime_seconds", 30)
+    if isinstance(runtime, bool) or not isinstance(runtime, int) or not 1 <= runtime <= 120:
+        errors.append("policy.usage_limits.max_runtime_seconds must be between 1 and 120")
     return errors
 
 

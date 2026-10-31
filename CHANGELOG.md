@@ -6,6 +6,23 @@
   on its time column, so `events()` (the admin activity view and `GET /v2/agent/events`) reads the
   newest rows from the index instead of scanning and sorting every recorded event. Results are
   unchanged.
+
+- **An automation's runtime limit is checked when it is saved.** `max_runtime_seconds` must be a
+  whole number from 1 to 120; a condition, switch, loop or retry whose branch returns now records
+  its own step in the run's steps.
+
+- **A research batch no longer reports a failed page as withheld by the safety filter.** When
+  one handle in `research.fetch_batch` had expired, was unknown, was on a skipped site or ran out
+  of time, its row said `blocked: true` and "This result was withheld", the content-safety
+  block's words. It now says `blocked: false`, "This result could not be fetched", and keeps
+  the error. Pages the safety filter withholds are still `blocked: true`.
+
+- **The tool editor accepts only a Gemini model that can run.** A `gemini_generate` tool could be
+  saved with `gemini-3.5-flash-lite`, but only `gemini-2.5-flash-lite` has a bounded spending
+  adapter, so every run of that tool was refused with `AI_MODEL_DENIED` (or `BUDGET_DENIED`)
+  after the owner had approved it. Saving now names the one model that runs. Dispatch and the
+  spending budget are unchanged.
+
 - **Research refuses an oversized JSON answer before parsing it.** Every research provider now reads
   its JSON through one check: a body over 4 MiB is refused with "<provider> response exceeded the
   safe size limit" and is not parsed (the App Store keeps its own 1 MiB check). Where a provider
