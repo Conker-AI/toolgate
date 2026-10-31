@@ -19,6 +19,7 @@ from toolgate.executors.research_base import (
     _cooldown_provider,
     _normalize,
     _require_provider_ready,
+    json_body,
 )
 from toolgate.executors.research_text import clean_text, extract_html_text
 from toolgate.executors.research_web import _searx, _tavily
@@ -32,7 +33,7 @@ def _hackernews(query: str, _source: str, limit: int, recency_days: int, timeout
         timeout=timeout,
     )
     response.raise_for_status()
-    rows = response.json().get("hits", [])
+    rows = json_body(response, "Hacker News").get("hits", [])
     results = []
     for row in rows:
         if len(results) >= limit:
@@ -45,30 +46,6 @@ def _hackernews(query: str, _source: str, limit: int, recency_days: int, timeout
         item = _normalize(title, target, comment, "hackernews", row.get("created_at"))
         if item:
             results.append({**item, "document": f"Hacker News story: {clean_text(title, 300)}\nPublic comment: {comment}"})
-    return results
-
-
-def _reddit(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
-    response = httpx.get(
-        "https://www.reddit.com/search.json",
-        params={"q": query, "sort": "new", "t": "day" if recency_days <= 1 else "week" if recency_days <= 7 else "month" if recency_days <= 45 else "year", "limit": limit, "raw_json": 1},
-        headers={"User-Agent": "ToolGateResearch/2.0 (local owner-operated research)"},
-        timeout=timeout,
-    )
-    response.raise_for_status()
-    rows = response.json().get("data", {}).get("children", [])
-    results = []
-    for wrapper in rows[:limit]:
-        row = wrapper.get("data", {})
-        item = _normalize(
-            row.get("title"),
-            f"https://www.reddit.com{row.get('permalink', '')}",
-            row.get("selftext") or "",
-            "reddit",
-            row.get("created_utc"),
-        )
-        if item:
-            results.append(item)
     return results
 
 
@@ -257,10 +234,10 @@ def _discourse(query: str, _source: str, limit: int, recency_days: int, timeout:
                 timeout=min(2.5, remaining),
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+            payload = json_body(response, "Discourse")
+        except (httpx.HTTPError, ResearchError) as exc:
             last_error = exc
             continue
-        payload = response.json()
         topics = {int(topic.get("id")): topic for topic in payload.get("topics", []) if topic.get("id")}
         host_rows = []
         for post in payload.get("posts", []):
@@ -307,9 +284,9 @@ def _discourse(query: str, _source: str, limit: int, recency_days: int, timeout:
                 timeout=min(2.0, remaining),
             )
             response.raise_for_status()
-            posts = response.json().get("post_stream", {}).get("posts", [])
+            posts = json_body(response, "Discourse").get("post_stream", {}).get("posts", [])
             opening = min(posts, key=lambda post: int(post.get("post_number") or 9999)) if posts else None
-        except (httpx.HTTPError, TypeError, ValueError):
+        except (httpx.HTTPError, ResearchError, TypeError, ValueError):
             opening = None
         if not opening:
             hydrated.append(item)
