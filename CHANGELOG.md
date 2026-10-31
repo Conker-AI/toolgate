@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A workflow's run history no longer opens a connection per run.** Reading the recent runs of one
+  editor workflow now reads every receipt on the connection it already had, instead of opening one
+  connection per run (up to 30 a page). The history itself is unchanged.
 - **Research refuses an oversized JSON answer before parsing it.** Every research provider now reads
   its JSON through one check: a body over 4 MiB is refused with "<provider> response exceeded the
   safe size limit" and is not parsed (the App Store keeps its own 1 MiB check). Where a provider

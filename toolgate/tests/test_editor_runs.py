@@ -47,6 +47,45 @@ def test_real_run_replay_conflict_and_persisted_history(gate):
     assert history[0]['action_id'] == body['action_id']
 
 
+def test_run_history_reads_every_receipt_on_one_connection(gate, monkeypatch):
+    client, _agent, headers, target = setup(gate)
+    base = '/v2/owner/editor-drafts/example'
+    client.post(base + '/access', headers=headers, json={**target, 'enabled': True}).raise_for_status()
+    body = {**target, 'action_id': 'editor_' + uuid.uuid4().hex, 'args': {}}
+    first = client.post(base + '/runs', headers=headers, json=body)
+    assert first.status_code == 200, first.text
+    responses = {first.json()['action_id']: first.json()}
+
+    def connections_for_history():
+        count = 0
+        original_conn = cp._conn
+        def counting(*args, **kwargs):
+            nonlocal count
+            count += 1
+            return original_conn(*args, **kwargs)
+        def no_get(action_id):
+            raise AssertionError('history must read the journal on its own connection')
+        with monkeypatch.context() as m:
+            m.setattr(cp, '_conn', counting)
+            m.setattr(journal, 'get', no_get)
+            history = client.get(base + '/runs', headers=headers)
+        return history.status_code, history.json()['items'], count
+
+    one = connections_for_history()
+    assert one[0] == 200
+    for _ in range(2):
+        posted = client.post(base + '/runs', headers=headers,
+                             json={**body, 'action_id': 'editor_' + uuid.uuid4().hex})
+        assert posted.status_code == 200, posted.text
+        responses[posted.json()['action_id']] = posted.json()
+    three = connections_for_history()
+    assert three[0] == 200
+    assert len(three[1]) == 3
+    for item in three[1]:
+        assert item['response'] == responses[item['action_id']]
+    assert three[2] == one[2]
+
+
 def test_approval_resumes_same_action_and_never_duplicates_dispatch(gate):
     client, _agent, headers, target = setup(gate, 'owner_confirmation')
     base = '/v2/owner/editor-drafts/example'
