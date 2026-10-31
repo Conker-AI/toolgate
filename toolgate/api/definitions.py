@@ -538,6 +538,9 @@ def automation_definition_errors(automation: dict) -> list[str]:
     max_steps = automation.get("policy", {}).get("usage_limits", {}).get("max_steps", 100)
     if not isinstance(max_steps, int) or not 1 <= max_steps <= 500:
         errors.append("policy.usage_limits.max_steps must be between 1 and 500")
+    runtime = automation.get("policy", {}).get("usage_limits", {}).get("max_runtime_seconds", 30)
+    if isinstance(runtime, bool) or not isinstance(runtime, int) or not 1 <= runtime <= 120:
+        errors.append("policy.usage_limits.max_runtime_seconds must be between 1 and 120")
     return errors
 
 

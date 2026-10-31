@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **An automation's runtime limit is checked when it is saved.** `max_runtime_seconds` must be a
+  whole number from 1 to 120; a condition, switch, loop or retry whose branch returns now records
+  its own step in the run's steps.
+
 - **A research batch no longer reports a failed page as withheld by the safety filter.** When
   one handle in `research.fetch_batch` had expired, was unknown, was on a skipped site or ran out
   of time, its row said `blocked: true` and "This result was withheld", the content-safety
