@@ -209,8 +209,8 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
             calculated = {
                 "add": lambda: sum(values),
                 "subtract": lambda: values[0] - sum(values[1:]),
-                "multiply": lambda: __import__("math").prod(values),
-                "divide": lambda: values[0] / __import__("math").prod(values[1:]),
+                "multiply": lambda: math.prod(values),
+                "divide": lambda: values[0] / math.prod(values[1:]),
                 "min": lambda: min(values),
                 "max": lambda: max(values),
             }.get(operation)
