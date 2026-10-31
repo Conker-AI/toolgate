@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A service lists the automations that call its tools inside a branch.** The service's linked
+  automations only saw a tool called as a top-level workflow step, so a tool used inside a
+  condition, switch, loop, retry, parallel or editor-graph step left the service looking unused by
+  that automation. Every nested tool call now counts, and each automation's tools are walked once
+  instead of once per step of every automation.
+
 - **An automation's runtime limit is checked when it is saved.** `max_runtime_seconds` must be a
   whole number from 1 to 120; a condition, switch, loop or retry whose branch returns now records
   its own step in the run's steps.
