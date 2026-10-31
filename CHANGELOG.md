@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Tool settings hold when they cannot be read.** A settings database that is there but cannot be
+  read (locked past the wait, damaged) refuses with 503 `settings_unreadable` instead of running
+  tools on the defaults, so no tool goes past the owner's limits or onto a site they skip. One stored
+  value this version no longer allows now drops only that value; the others still apply. A settings
+  save and a tool access grant are written in the same transaction as their audit event.
 - **Agent notes to the owner have bounded fields.** `POST /v2/requests` (and the operator's
   request route) refuses with 422 a `title` over 500 characters, `details` over 8,000, a `kind` over
   64, a `payload` over 32 KiB as JSON, and a `severity` other than `info`, `warning` or `critical`,

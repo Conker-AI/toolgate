@@ -78,15 +78,16 @@ def access(identity, agent, payload: State | None = None, *, accept=None, not_fo
                 "UPDATE v2_agent_keys SET scopes=? WHERE id=?", (json.dumps(updated), caller["id"])
             )
             caller["scopes"] = updated
-    if payload:
-        cp.event(
-            f"{event_prefix}_granted" if payload.enabled else f"{event_prefix}_revoked",
-            "warning",
-            "tool",
-            identity,
-            "owner",
-            {"actor_id": caller["id"]},
-        )
+            # In the same transaction: a grant never lands without its audit event.
+            cp.event(
+                f"{event_prefix}_granted" if payload.enabled else f"{event_prefix}_revoked",
+                "warning",
+                "tool",
+                identity,
+                "owner",
+                {"actor_id": caller["id"]},
+                connection=conn,
+            )
     return {
         "schemaVersion": 1,
         "toolId": identity,
