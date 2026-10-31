@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A research batch no longer reports a failed page as withheld by the safety filter.** When
+  one handle in `research.fetch_batch` had expired, was unknown, was on a skipped site or ran out
+  of time, its row said `blocked: true` and "This result was withheld", the content-safety
+  block's words. It now says `blocked: false`, "This result could not be fetched", and keeps
+  the error. Pages the safety filter withholds are still `blocked: true`.
+
 - **The tool editor accepts only a Gemini model that can run.** A `gemini_generate` tool could be
   saved with `gemini-3.5-flash-lite`, but only `gemini-2.5-flash-lite` has a bounded spending
   adapter, so every run of that tool was refused with `AI_MODEL_DENIED` (or `BUDGET_DENIED`)
