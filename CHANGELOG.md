@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Two settings saves at once no longer undo each other.** Lockdown, the control-plane settings, a
+  service and a verification method are read, changed and written under one write lock, so a
+  settings save at the same moment as turning lockdown on can no longer turn it back off. A tool
+  input declared as an object now refuses a value that is not one.
 - **Agent notes to the owner have bounded fields.** `POST /v2/requests` (and the operator's
   request route) refuses with 422 a `title` over 500 characters, `details` over 8,000, a `kind` over
   64, a `payload` over 32 KiB as JSON, and a `severity` other than `info`, `warning` or `critical`,
