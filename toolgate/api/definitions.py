@@ -43,21 +43,6 @@ INPUT_TYPES = {"string", "integer", "number", "boolean", "array", "object"}
 GEMINI_MODELS = {spending.MODEL}
 
 
-AI_CONFIRMATIONS = {
-    "approve",
-    "approved",
-    "correct",
-    "done",
-    "good",
-    "looks good",
-    "perfect",
-    "ship it",
-    "that is correct",
-    "that works",
-    "yes",
-}
-
-
 def input_schema_errors(inputs) -> list[str]:
     if not isinstance(inputs, list):
         return ["inputs must be a list"]
