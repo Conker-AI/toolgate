@@ -10,7 +10,7 @@ from typing import Annotated
 from pydantic import Field, JsonValue, model_validator
 
 from . import control_plane as cp
-from . import editor_publication, publications
+from . import editor_publication, publications, recovery_journal
 from . import execution_journal as journal
 from .editor_drafts import StrictDocument, _identity
 from .editor_values import bounded
@@ -106,14 +106,17 @@ def access(identity, payload: Target, agent, *, enabled=None):
                 "enabled": all(cp.is_scoped(caller, scope) for scope in required), "required_scopes": required}
 
 
-def _response(row):
-    record = journal.get(row["action_id"])
+def _reply(row, record):
     if record:
         return journal.response(record)
     if row["response"]:
         return json.loads(row["response"])
     return {"action_id": row["action_id"], "code": "OUTCOME_UNKNOWN",
             "message": "The run request is recorded; its outcome is not yet confirmed. Do not repeat it."}
+
+
+def _response(row):
+    return _reply(row, journal.get(row["action_id"]))
 
 
 def begin(identity, payload: Run, agent):
@@ -155,6 +158,13 @@ def history(identity, agent):
         rows = [dict(row) for row in conn.execute(
             "SELECT * FROM v2_editor_runs WHERE draft_id=? AND actor_id=? ORDER BY created_at DESC LIMIT 30",
             (identity, agent["id"]))]
-    return {"items": [{"action_id": row["action_id"], "version": row["version"], "digest": row["digest"],
-                       "created_at": row["created_at"], "args": json.loads(row["args"]),
-                       "response": _response(row)} for row in rows]}
+        journal.initialize(conn)
+        # A run still waiting on approval has no journal row; its stored response stands in.
+        records = {}
+        for row in rows:
+            found = recovery_journal.lookup(conn, row["action_id"])
+            records[row["action_id"]] = journal._row(found) if found is not None else None
+        items = [{"action_id": row["action_id"], "version": row["version"], "digest": row["digest"],
+                  "created_at": row["created_at"], "args": json.loads(row["args"]),
+                  "response": _reply(row, records[row["action_id"]])} for row in rows]
+    return {"items": items}
