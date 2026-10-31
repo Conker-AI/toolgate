@@ -86,12 +86,17 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
     domain = source_domain or _requested_site_domain(query)
     scoped_query = f"site:{domain} {query}" if source_domain else query
     base_url = control_plane.settings().get("research_searxng_url", "http://toolgate-searxng:8080").rstrip("/")
+    headers = {"Accept": "application/json"}
+    # The bundled instance has no proxy in front of it and wants a client address; any other
+    # instance sees ToolGate as it is, so its own rate limits still apply.
+    if urlsplit(base_url).hostname == "toolgate-searxng":
+        headers |= {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
     response = httpx.get(
         f"{base_url}/search",
         params={"q": scoped_query, "format": "json", "language": tool_settings.search_language(),
                 "safesearch": tool_settings.safe_search(), "categories": "general",
                 **({"time_range": "day" if recency_days <= 1 else "month"} if recency_days <= 45 else {})},
-        headers={"Accept": "application/json", "X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"},
+        headers=headers,
         timeout=timeout,
     )
     response.raise_for_status()
