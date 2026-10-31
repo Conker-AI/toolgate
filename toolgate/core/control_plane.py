@@ -45,6 +45,7 @@ def _conn():
       subject_type TEXT, subject_id TEXT, actor TEXT, payload TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS v2_events_newest ON v2_events(created_at);
     CREATE TABLE IF NOT EXISTS v2_definition_versions (
       kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
       body TEXT NOT NULL, PRIMARY KEY(kind,id,version)

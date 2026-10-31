@@ -5,6 +5,10 @@
 - **A workflow's run history no longer opens a connection per run.** Reading the recent runs of one
   editor workflow now reads every receipt on the connection it already had, instead of opening one
   connection per run (up to 30 a page). The history itself is unchanged.
+- **Reading the newest events no longer sorts the whole event log.** The event log carries an index
+  on its time column, so `events()` (the admin activity view and `GET /v2/agent/events`) reads the
+  newest rows from the index instead of scanning and sorting every recorded event. Results are
+  unchanged.
 
 - **A service lists the automations that call its tools inside a branch.** The service's linked
   automations only saw a tool called as a top-level workflow step, so a tool used inside a
