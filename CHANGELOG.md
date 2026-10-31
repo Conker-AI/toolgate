@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A service lists the automations that call its tools inside a branch.** The service's linked
+  automations only saw a tool called as a top-level workflow step, so a tool used inside a
+  condition, switch, loop, retry, parallel or editor-graph step left the service looking unused by
+  that automation. Every nested tool call now counts, and each automation's tools are walked once
+  instead of once per step of every automation.
 - **A search no longer reads every cached page to clear old ones.** Purging expired research
   results reads only each result's id and expiry and deletes them on one connection, instead of
   loading every cached page (up to 20,000 characters each) and opening a connection per deletion.
