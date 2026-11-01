@@ -59,7 +59,14 @@ def test_an_out_of_scope_tool_answers_no_such_tool_and_queues_nothing(api):
     _, key = cp.issue_agent_key("scoped_agent", ["other-tool"])
 
     # Define the agent identity
-    client.put("/v2/agent/identities/scoped_agent", json={"scopes": ["other-tool"]}, headers=headers(key))
+    assert (
+        client.put(
+            "/v2/agent/identities/scoped_agent",
+            json={"scopes": ["other-tool"]},
+            headers=headers(key),
+        ).status_code
+        == 200
+    )
 
     # Try to invoke the out-of-scope tool
     response = invoke(client, key, "secure-tool", "scoped_agent")
@@ -85,7 +92,14 @@ def test_the_refusal_is_identical_to_a_missing_tool(api):
     _, key = cp.issue_agent_key("scoped_agent", ["other-tool"])
 
     # Define the agent identity
-    client.put("/v2/agent/identities/scoped_agent", json={"scopes": ["other-tool"]}, headers=headers(key))
+    assert (
+        client.put(
+            "/v2/agent/identities/scoped_agent",
+            json={"scopes": ["other-tool"]},
+            headers=headers(key),
+        ).status_code
+        == 200
+    )
 
     # Try to invoke the out-of-scope tool
     out_of_scope_response = invoke(client, key, "secure-tool", "scoped_agent")
@@ -111,7 +125,14 @@ def test_the_refusal_is_identical_to_a_disabled_tool(api):
     _, key = cp.issue_agent_key("scoped_agent", ["disabled-tool"])
 
     # Define the agent identity
-    client.put("/v2/agent/identities/scoped_agent", json={"scopes": ["disabled-tool"]}, headers=headers(key))
+    assert (
+        client.put(
+            "/v2/agent/identities/scoped_agent",
+            json={"scopes": ["disabled-tool"]},
+            headers=headers(key),
+        ).status_code
+        == 200
+    )
 
     # Try to invoke the disabled tool
     disabled_response = invoke(client, key, "disabled-tool", "scoped_agent")
@@ -137,7 +158,14 @@ def test_the_same_tool_in_scope_queues_exactly_one_request(api):
     _, key = cp.issue_agent_key("scoped_agent", ["secure-tool"])
 
     # Define the agent identity
-    client.put("/v2/agent/identities/scoped_agent", json={"scopes": ["secure-tool"]}, headers=headers(key))
+    assert (
+        client.put(
+            "/v2/agent/identities/scoped_agent",
+            json={"scopes": ["secure-tool"]},
+            headers=headers(key),
+        ).status_code
+        == 200
+    )
 
     # Invoke the in-scope tool
     response = invoke(client, key, "secure-tool", "scoped_agent")
