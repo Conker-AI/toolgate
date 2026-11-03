@@ -63,7 +63,8 @@ def _request(method: str, path: str, body: dict | None = None) -> Any:
         return response.json()
     except httpx.HTTPStatusError as exc:
         try:
-            detail = exc.response.json().get("detail")
+            body = exc.response.json()
+            detail = body.get("detail") if isinstance(body, dict) else None
         except ValueError:
             detail = None
         raise RuntimeError(
