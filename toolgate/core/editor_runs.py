@@ -133,6 +133,8 @@ def begin(identity, payload: Run, agent):
             response = json.loads(row["response"]) if row["response"] else {}
             if not (row["state"] == "approval" and payload.approval_request_id
                     and payload.approval_request_id == response.get("request_id")):
+                if row["state"] == "held" and row["response"] is None and journal.get(row["action_id"]) is None:
+                    return publication, None, True
                 return publication, dict(row), False
             conn.execute("UPDATE v2_editor_runs SET state='held',response=NULL WHERE action_id=?", (payload.action_id,))
         else:
