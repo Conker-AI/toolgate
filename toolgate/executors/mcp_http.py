@@ -331,9 +331,9 @@ class Session:
             with self.client.stream(
                 "POST", self.url, json=body, headers=headers, timeout=min(10, remaining)
             ) as response:
-                if response.status_code != (202 if notification else 200) and not (
-                    probe and response.status_code in {400, 404, 405}
-                ):
+                if response.status_code not in (
+                    {200, 202, 204} if notification else {200}
+                ) and not (probe and response.status_code in {400, 404, 405}):
                     _error(
                         "upstream_http",
                         "The MCP server rejected the request; no retry was attempted.",
