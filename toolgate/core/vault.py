@@ -32,6 +32,7 @@ import os
 import re
 import secrets
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -118,15 +119,41 @@ def _install_secret() -> str:
                 if existing:
                     return existing
             path.parent.mkdir(parents=True, exist_ok=True)
-            generated = secrets.token_urlsafe(48)
-            path.write_text(generated + "\n", encoding="utf-8")
-            os.chmod(path, 0o600)
-            return generated
+            return _create_key_file(path)
     except OSError as exc:
         raise VaultError(
             f"No vault key is available: {path} is unreadable ({type(exc).__name__}). "
             "Set TOOLGATE_VAULT_SECRET, or point TOOLGATE_VAULT_KEY_FILE at a writable path."
         ) from exc
+
+
+def _create_key_file(path: Path) -> str:
+    """Create the key file unless another process already has, and return the key that won.
+
+    Two first starts at once would otherwise each write their own key, and values sealed
+    under the first could never be opened again.
+    """
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        for _ in range(40):
+            existing = path.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+            time.sleep(0.05)
+        # Still empty: a start that crashed before writing, so nothing was sealed with it.
+        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(secrets.token_urlsafe(48) + "\n", encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        return path.read_text(encoding="utf-8").strip()
+    generated = secrets.token_urlsafe(48)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(generated + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(path, 0o600)
+    return generated
 
 
 def _salt() -> bytes:

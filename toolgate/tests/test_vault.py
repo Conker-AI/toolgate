@@ -203,3 +203,24 @@ class VaultEncryptionTests(unittest.TestCase):
         os.environ.pop(vault._SALT_KEY, None)
         for name in names:
             self.assertEqual(vault.get_key(name), f"value-{name}")
+
+    def test_a_key_another_start_created_first_is_the_one_used(self):
+        self.key_file.parent.mkdir(parents=True)
+        self.key_file.write_text("key-from-the-other-start\n", encoding="utf-8")
+
+        self.assertEqual(vault._create_key_file(self.key_file), "key-from-the-other-start")
+        self.assertEqual(
+            self.key_file.read_text(encoding="utf-8").strip(), "key-from-the-other-start"
+        )
+
+    def test_an_empty_key_file_left_by_a_crashed_start_is_replaced(self):
+        self.key_file.parent.mkdir(parents=True)
+        self.key_file.write_text("", encoding="utf-8")
+
+        with patch.object(vault.time, "sleep"):
+            key = vault._create_key_file(self.key_file)
+
+        self.assertTrue(key)
+        self.assertEqual(self.key_file.read_text(encoding="utf-8").strip(), key)
+        vault.set_secret("GITHUB_TOKEN", "ghp_value")
+        self.assertEqual(vault.get_key("GITHUB_TOKEN"), "ghp_value")
