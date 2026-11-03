@@ -6,7 +6,9 @@ nothing, so nothing here may be mocked.
 """
 import os
 import stat
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
@@ -183,3 +185,21 @@ class VaultEncryptionTests(unittest.TestCase):
         os.chmod(self.env_path, 0o644)
         vault.ensure_control_keys()
         self.assertEqual(self._mode() & 0o077, 0)
+
+    def test_concurrent_first_writes_keep_every_secret_readable(self):
+        # Fresh install: no key file, no salt. Each thread may be the one that creates them, and
+        # every write rewrites the whole values file.
+        names = [f"SECRET_{index}" for index in range(16)]
+        barrier = threading.Barrier(len(names))
+
+        def write(name):
+            barrier.wait()
+            vault.set_secret(name, f"value-{name}")
+
+        with ThreadPoolExecutor(len(names)) as pool:
+            list(pool.map(write, names))
+
+        vault._derived_keys.clear()
+        os.environ.pop(vault._SALT_KEY, None)
+        for name in names:
+            self.assertEqual(vault.get_key(name), f"value-{name}")

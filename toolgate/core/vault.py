@@ -31,6 +31,7 @@ import hashlib
 import os
 import re
 import secrets
+import threading
 import uuid
 from pathlib import Path
 
@@ -74,6 +75,10 @@ _SCRYPT_N = 2 ** 14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _derived_keys: dict[tuple[str, str], "Fernet"] = {}
+# python-dotenv rewrites the whole file per call, so two writers in the request thread pool
+# would each keep only their own change (and two first-run salts would leave values encrypted
+# under the one that lost). Every write, and the read it depends on, holds this lock.
+_write_lock = threading.RLock()
 
 
 class VaultError(KeyError):
@@ -107,15 +112,16 @@ def _install_secret() -> str:
 
     path = key_file_path()
     try:
-        if path.exists():
-            existing = path.read_text(encoding="utf-8").strip()
-            if existing:
-                return existing
-        path.parent.mkdir(parents=True, exist_ok=True)
-        generated = secrets.token_urlsafe(48)
-        path.write_text(generated + "\n", encoding="utf-8")
-        os.chmod(path, 0o600)
-        return generated
+        with _write_lock:
+            if path.exists():
+                existing = path.read_text(encoding="utf-8").strip()
+                if existing:
+                    return existing
+            path.parent.mkdir(parents=True, exist_ok=True)
+            generated = secrets.token_urlsafe(48)
+            path.write_text(generated + "\n", encoding="utf-8")
+            os.chmod(path, 0o600)
+            return generated
     except OSError as exc:
         raise VaultError(
             f"No vault key is available: {path} is unreadable ({type(exc).__name__}). "
@@ -125,12 +131,16 @@ def _install_secret() -> str:
 
 def _salt() -> bytes:
     value = _load().get(_SALT_KEY) or os.environ.get(_SALT_KEY)
-    if not value:
-        value = secrets.token_hex(16)
-        if not ENV_PATH.exists():
-            ENV_PATH.touch()
-        set_key(str(ENV_PATH), _SALT_KEY, value, quote_mode="never")
-        os.environ[_SALT_KEY] = value
+    if value:
+        return bytes.fromhex(value)
+    with _write_lock:
+        value = _load().get(_SALT_KEY) or os.environ.get(_SALT_KEY)
+        if not value:
+            value = secrets.token_hex(16)
+            if not ENV_PATH.exists():
+                ENV_PATH.touch()
+            set_key(str(ENV_PATH), _SALT_KEY, value, quote_mode="never")
+            os.environ[_SALT_KEY] = value
     return bytes.fromhex(value)
 
 
@@ -206,19 +216,21 @@ def set_secret(name: str, value: str, *, allow_existing: bool = True) -> None:
         raise ValueError(f"{name} is runtime configuration, not a vault secret; set it in the environment")
     if not _NAME_PATTERN.match(name):
         raise ValueError("Key name must be SCREAMING_SNAKE_CASE (e.g. GITHUB_TOKEN)")
-    if not allow_existing and name in _load():
-        raise ValueError(f"{name} already exists")
-
-    _ensure_env_file()
-    set_key(str(ENV_PATH), name, _encrypt(value), quote_mode="never")
+    sealed = _encrypt(value)
+    with _write_lock:
+        if not allow_existing and name in _load():
+            raise ValueError(f"{name} already exists")
+        _ensure_env_file()
+        set_key(str(ENV_PATH), name, sealed, quote_mode="never")
 
 
 def delete_secret(name: str) -> None:
     if name in _CONFIG_KEYS:
         raise ValueError(f"{name} is runtime configuration, not a vault secret; it cannot be deleted here")
-    if name not in _load():
-        raise KeyError(name)
-    unset_key(str(ENV_PATH), name)
+    with _write_lock:
+        if name not in _load():
+            raise KeyError(name)
+        unset_key(str(ENV_PATH), name)
 
 
 def encrypt_values_at_rest() -> int:
@@ -228,11 +240,12 @@ def encrypt_values_at_rest() -> int:
     provider keys in the clear the first time it is restarted.
     """
     moved = 0
-    for name, value in _load().items():
-        if name in _CONFIG_KEYS or not value or value.startswith(ENCRYPTED_PREFIX):
-            continue
-        set_key(str(ENV_PATH), name, _encrypt(value), quote_mode="never")
-        moved += 1
+    with _write_lock:
+        for name, value in _load().items():
+            if name in _CONFIG_KEYS or not value or value.startswith(ENCRYPTED_PREFIX):
+                continue
+            set_key(str(ENV_PATH), name, _encrypt(value), quote_mode="never")
+            moved += 1
     return moved
 
 
@@ -273,19 +286,20 @@ def ensure_control_keys() -> dict:
     with contextlib.suppress(OSError):
         os.chmod(ENV_PATH, 0o600)
 
-    values = _load()
     generated = {}
-    for name in ("TOOLGATE_ADMIN_KEY",):
-        if values.get(name):
-            continue
-        configured = os.environ.get(name, "").strip()
-        if configured:
-            set_key(str(ENV_PATH), name, configured, quote_mode="never")
-            continue
-        new_value = uuid.uuid4().hex
-        set_key(str(ENV_PATH), name, new_value, quote_mode="never")
-        os.environ[name] = new_value
-        generated[name] = new_value
+    with _write_lock:
+        values = _load()
+        for name in ("TOOLGATE_ADMIN_KEY",):
+            if values.get(name):
+                continue
+            configured = os.environ.get(name, "").strip()
+            if configured:
+                set_key(str(ENV_PATH), name, configured, quote_mode="never")
+                continue
+            new_value = uuid.uuid4().hex
+            set_key(str(ENV_PATH), name, new_value, quote_mode="never")
+            os.environ[name] = new_value
+            generated[name] = new_value
 
     return generated
 
@@ -294,7 +308,8 @@ def rotate_control_key(name: str) -> str:
     if name != "TOOLGATE_ADMIN_KEY":
         raise ValueError(f"Cannot rotate {name}")
     new_value = uuid.uuid4().hex
-    _ensure_env_file()
-    set_key(str(ENV_PATH), name, new_value, quote_mode="never")
-    os.environ[name] = new_value
+    with _write_lock:
+        _ensure_env_file()
+        set_key(str(ENV_PATH), name, new_value, quote_mode="never")
+        os.environ[name] = new_value
     return new_value
