@@ -170,3 +170,11 @@ def test_invalid_urls_never_connect(url, monkeypatch):
     with pytest.raises((httpx.HTTPError, httpx.InvalidURL)), public_https.public_client() as client:
         client.get(url)
     assert not connections
+
+
+def test_missing_url_template_argument_is_a_validation_error():
+    with pytest.raises(HTTPException) as denied:
+        dispatch._execute_http_json({"url": "https://example.com/items/{item_id}",
+                                     "allowed_hosts": ["example.com"]}, {})
+    assert denied.value.status_code == 422
+    assert denied.value.detail["code"] == "VALIDATION_ERROR"

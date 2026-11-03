@@ -66,6 +66,8 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
     placeholders = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", template))
     url = template
     for name in placeholders:
+        if name not in args:
+            deny("VALIDATION_ERROR", f"Missing template argument '{name}'", 422)
         url = url.replace(f"{{{name}}}", quote(str(args[name]), safe=""))
     parsed = urlsplit(url)
     allowed_hosts = {str(host).lower() for host in execution["allowed_hosts"]}
