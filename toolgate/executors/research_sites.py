@@ -339,9 +339,18 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
         except (httpx.HTTPError, ResearchError):
             continue
         for wrapper in comment_rows:
-            top_level = wrapper.get("snippet", {}).get("topLevelComment", {})
+            if not isinstance(wrapper, dict):
+                continue
+            wrapper_snippet = wrapper.get("snippet", {})
+            if not isinstance(wrapper_snippet, dict):
+                continue
+            top_level = wrapper_snippet.get("topLevelComment", {})
+            if not isinstance(top_level, dict):
+                continue
             comment_id = str(top_level.get("id") or "")
             snippet = top_level.get("snippet", {})
+            if not isinstance(snippet, dict):
+                continue
             comment = clean_text(snippet.get("textOriginal") or snippet.get("textDisplay"), 2400)
             if not comment or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", comment_id):
                 continue
