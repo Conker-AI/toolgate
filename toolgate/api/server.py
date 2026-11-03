@@ -4,7 +4,6 @@ import os
 import sqlite3
 
 from fastapi import FastAPI, Request
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -100,7 +99,17 @@ async def validation_error(request: Request, error: RequestValidationError):
             },
             status_code=422,
         )
-    return await request_validation_exception_handler(request, error)
+    # FastAPI's default reply repeats the refused input (for a missing field, the whole body),
+    # and a vault write carries the secret itself: say where and why, never what was sent.
+    return JSONResponse(
+        {
+            "detail": [
+                {"loc": list(item["loc"]), "msg": item["msg"], "type": item["type"]}
+                for item in error.errors()
+            ]
+        },
+        status_code=422,
+    )
 
 
 app.add_middleware(
