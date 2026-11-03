@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.12.0
+
+- **Refused request bodies are never echoed back.** A 422 lists only `loc`, `msg` and `type` for
+  each error. FastAPI's default repeated the input, so a vault secret sent without a name came
+  straight back in the error, and from there into logs and the dashboard's error toasts.
+- **Vault writes are serialised and the key file is created exclusively.** Two secret writes at
+  the same moment could each keep only their own change, so one secret disappeared, and two first
+  starts could each write a key and lose every value sealed under the first. Writes run under one
+  process lock with the salt and key re-checked under it; the key file is created with
+  `O_CREAT | O_EXCL` (0600), a start that loses the race reads the winner's key, and an empty
+  file left by a crash is replaced.
+- **Smaller fixes.** A URL template naming an input the caller left out is a 422 naming it, not
+  a 500; the dashboard's file fallback serves nothing outside its built folder; an unknown
+  charset falls back to UTF-8; malformed App Store, GitHub, YouTube and Discourse items read as
+  empty or are skipped instead of failing the search; the MCP stdio adapter reports the HTTP
+  status for an error body that is not an object; an MCP notification answered with 200, 202 or
+  204 is accepted.
+- **Tests.** An out-of-scope invoke is proven refused before any approval is queued (F-5); every
+  MCP schema refusal and every research text rule has a test.
+
 - **A workflow's run history no longer opens a connection per run.** Reading the recent runs of one
   editor workflow now reads every receipt on the connection it already had, instead of opening one
   connection per run (up to 30 a page). The history itself is unchanged.
