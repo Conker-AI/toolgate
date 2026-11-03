@@ -72,7 +72,8 @@ def _github_repositories(query: str, _source: str, limit: int, recency_days: int
         description = clean_text(row.get("description") or "", 1200)
         topics = [clean_text(topic, 80) for topic in row.get("topics", [])[:12] if clean_text(topic, 80)]
         stars = max(0, int(row.get("stargazers_count") or 0))
-        license_name = clean_text((row.get("license") or {}).get("spdx_id") or "unknown", 80)
+        license_value = row.get("license") if isinstance(row.get("license"), dict) else {}
+        license_name = clean_text(license_value.get("spdx_id") or "unknown", 80)
         document = clean_text(
             f"GitHub repository: {full_name}\nDescription: {description}\n"
             f"Topics: {', '.join(topics)}\nStars: {stars}\nLicense: {license_name}",
@@ -204,11 +205,11 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
     for entry in entries if isinstance(entries, list) else []:
         if len(results) >= limit or not isinstance(entry, dict):
             break
-        rating = clean_text(entry.get("im:rating", {}).get("label"), 2)
-        content = clean_text(entry.get("content", {}).get("label"), 6000)
-        title = clean_text(entry.get("title", {}).get("label"), 300)
-        updated = clean_text(entry.get("updated", {}).get("label"), 80)
-        review_id = clean_text(entry.get("id", {}).get("label"), 40)
+        rating = clean_text(entry.get("im:rating").get("label") if isinstance(entry.get("im:rating"), dict) else "", 2)
+        content = clean_text(entry.get("content").get("label") if isinstance(entry.get("content"), dict) else "", 6000)
+        title = clean_text(entry.get("title").get("label") if isinstance(entry.get("title"), dict) else "", 300)
+        updated = clean_text(entry.get("updated").get("label") if isinstance(entry.get("updated"), dict) else "", 80)
+        review_id = clean_text(entry.get("id").get("label") if isinstance(entry.get("id"), dict) else "", 40)
         if not rating or not rating.isdigit() or int(rating) > 3 or not content or not updated:
             continue
         try:
@@ -321,7 +322,8 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
     ranked: list[tuple[int, dict]] = []
     comments_per_video = min(20, max(5, (limit * 2 + max(len(videos), 1) - 1) // max(len(videos), 1)))
     for video in videos:
-        video_id = str(video.get("id", {}).get("videoId") or "")
+        video_id_value = video.get("id") if isinstance(video.get("id"), dict) else {}
+        video_id = str(video_id_value.get("videoId") or "")
         video_title = clean_text(video.get("snippet", {}).get("title"), 240)
         if not re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
             continue
