@@ -23,8 +23,8 @@ if (DIST_DIR / "assets").exists():
 def spa(full_path: str):
     if not DIST_DIR.exists():
         raise HTTPException(503, "dashboard/dist not built yet - run `npm run build` in dashboard/")
-    candidate = DIST_DIR / full_path
-    if full_path and candidate.is_file():
+    candidate = (DIST_DIR / full_path).resolve()
+    if full_path and candidate.is_file() and DIST_DIR.resolve() in candidate.parents:
         return FileResponse(candidate)
     return FileResponse(DIST_DIR / "index.html")
 
