@@ -238,7 +238,10 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
                     break
     except httpx.HTTPError as exc:
         raise ResearchError(f"research page fetch failed: {type(exc).__name__}") from exc
-    raw = bytes(body).decode(encoding, errors="replace")
+    try:
+        raw = bytes(body).decode(encoding, errors="replace")
+    except LookupError:
+        raw = bytes(body).decode("utf-8", errors="replace")
     published_at = record.get("published_at")
     recency_provenance = record.get("recency_provenance")
     if content_type == "text/html" and not published_at:
