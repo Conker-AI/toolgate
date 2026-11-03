@@ -137,8 +137,7 @@ def _salt() -> bytes:
         value = _load().get(_SALT_KEY) or os.environ.get(_SALT_KEY)
         if not value:
             value = secrets.token_hex(16)
-            if not ENV_PATH.exists():
-                ENV_PATH.touch()
+            _ensure_env_file()
             set_key(str(ENV_PATH), _SALT_KEY, value, quote_mode="never")
             os.environ[_SALT_KEY] = value
     return bytes.fromhex(value)
