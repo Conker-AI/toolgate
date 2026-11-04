@@ -80,6 +80,14 @@ def test_a_tool_it_cannot_find_asks_for_the_password(api):
     assert request["payload"]["level"] == 3
 
 
+@pytest.mark.parametrize("shown,expected", [("do", 1), ("send", 2), ("pay", 3), ("odd", 3)])
+def test_the_level_is_never_below_the_card_the_inbox_shows(api, shown, expected):
+    # The card is copied from the caller; whatever buttons it shows, the level is at least as strong.
+    request = approvals.create_verification_request("Run", "exact", "Pi", "tool", "echo.ask", {}, 1,
+                                                    card=shown)
+    assert request["payload"]["level"] == expected
+
+
 def publish_workflow(identity, *tool_ids):
     steps = [(f"call{i}", "tool_call", {"tool": tool_id, "args": {}}) for i, tool_id in enumerate(tool_ids)]
     save(identity, linear(*steps, ("result", "return", {"value": "$last"})))

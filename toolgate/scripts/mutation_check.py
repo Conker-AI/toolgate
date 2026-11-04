@@ -379,7 +379,7 @@ MUTANTS.extend([
     ("request level ignores the card", "toolgate/core/approvals.py",
      "level = max(level, approval_levels.CARD_LEVELS.get(card, approval_levels.SERIOUS))",
      "level = level",
-     LEVELS + "test_his_card_for_the_tool_sets_the_level[pay-3]"),
+     LEVELS + "test_the_level_is_never_below_the_card_the_inbox_shows[pay-3]"),
     ("tool level ignores its name", "toolgate/core/approval_levels.py",
      "level = max(CARD_LEVELS.get(card, SERIOUS), _named(tool))",
      "level = CARD_LEVELS.get(card, SERIOUS)",
