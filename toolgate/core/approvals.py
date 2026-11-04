@@ -153,7 +153,12 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
     """A request for the owner's decision on one exact action. A positive expiry bounds the wait
     (15 to 900 seconds); 0 means it waits until he answers, and the action then has the owner's
     run window (at most EXECUTION_WINDOW) from the approval to run. `card` is the tool's button
-    template, copied now so the Inbox shows the buttons he chose when he was asked."""
+    template, copied now so the Inbox shows the buttons he chose when he was asked. The request's
+    approval level (core/approval_levels.py) is worked out here from what the action may run, never
+    taken from the caller; a workflow shows the strongest card among its tools."""
+    from toolgate.core import approval_levels, ask_cards
+    cards = ask_cards.chosen()  # before the write lock: it may create its table
+    level = approval_levels.SERIOUS
     expiry = (
         datetime.now(UTC) + timedelta(seconds=max(15, min(expiry_seconds, 900)))
         if expiry_seconds > 0
@@ -178,13 +183,25 @@ def create_verification_request(title: str, details: str, actor: str, subject_ty
             binding["publication_digest"] = publication_digest
             binding["child_tools"] = child_bindings(publication["tools"])
             binding["child_automations"] = publications.automation_bindings(publication)
+            level = approval_levels.for_publication(publication, cards)
+            if subject_type == "automation":
+                card = ask_cards.for_workflow(
+                    {tool for member in publications.members(publication) for tool in member["tools"]}, cards)
         elif subject_type == "automation":
-            binding["child_tools"] = child_bindings(automation_tool_snapshot(conn, subject_id, version))
+            snapshot = automation_tool_snapshot(conn, subject_id, version)
+            binding["child_tools"] = child_bindings(snapshot)
+            row = conn.execute("SELECT * FROM v2_objects WHERE kind='automation' AND id=?", (subject_id,)).fetchone()
+            level = approval_levels.for_automation(_row(row) if row else None, snapshot, cards)
+            card = ask_cards.for_workflow(snapshot, cards)
+        elif subject_type == "tool":
+            row = conn.execute("SELECT * FROM v2_objects WHERE kind='tool' AND id=?", (subject_id,)).fetchone()
+            level = approval_levels.for_tool(_row(row) if row else None, cards)
+        level = max(level, approval_levels.CARD_LEVELS.get(card, approval_levels.SERIOUS))
         record = _insert_request(conn, {
             "kind": "verification", "title": title, "details": details, "actor": actor,
             "payload": {"subject_type": subject_type, "subject_id": subject_id,
                         "args": args, "binding": binding, "created_by_agent_key": actor_id,
-                        "card": card},
+                        "card": card, "level": level},
             "severity": "warning",
         })
         conn.execute("INSERT INTO v2_verification_origins(request_id,fingerprint) VALUES(?,?)",

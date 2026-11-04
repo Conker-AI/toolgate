@@ -374,6 +374,34 @@ MUTANTS.extend([
 ])
 
 
+LEVELS = "toolgate/tests/test_approval_levels.py::"
+MUTANTS.extend([
+    ("request level ignores the card", "toolgate/core/approvals.py",
+     "level = max(level, approval_levels.CARD_LEVELS.get(card, approval_levels.SERIOUS))",
+     "level = level",
+     LEVELS + "test_his_card_for_the_tool_sets_the_level[pay-3]"),
+    ("tool level ignores its name", "toolgate/core/approval_levels.py",
+     "level = max(CARD_LEVELS.get(card, SERIOUS), _named(tool))",
+     "level = CARD_LEVELS.get(card, SERIOUS)",
+     LEVELS + "test_a_tool_he_never_labelled_is_judged_by_its_name"),
+    ("host controls not serious", "toolgate/core/approval_levels.py",
+     "    if kind in SERIOUS_EXECUTIONS:\n        return SERIOUS\n", "",
+     LEVELS + "test_what_a_tool_runs_raises_its_level"),
+    ("workflow level skips its tools", "toolgate/core/approval_levels.py",
+     "            level = max(level, for_tool(tool, cards))\n    return level",
+     "            pass\n    return level",
+     LEVELS + "test_a_workflow_that_runs_a_delete_named_tool_is_serious"),
+    ("odd stored level trusted", "toolgate/core/approval_levels.py",
+     "return value if type(value) is int and value in LEVELS else SERIOUS",
+     "return value if value else SERIOUS",
+     LEVELS + "test_a_missing_or_odd_stored_level_is_serious"),
+    ("owner view drops the level", "toolgate/core/owner_channel.py",
+     '"approval_level": approval_levels.stored(payload.get("level")),',
+     '"approval_level": 1,',
+     LEVELS + "test_his_card_for_the_tool_sets_the_level[delete-3]"),
+])
+
+
 def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(

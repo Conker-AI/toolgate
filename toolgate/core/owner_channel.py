@@ -9,7 +9,7 @@ import re
 import secrets
 from datetime import UTC, datetime
 
-from . import approvals, ask_cards, vault
+from . import approval_levels, approvals, ask_cards, vault
 from . import control_plane as cp
 
 OWNER_HASH = "TOOLGATE_OWNER_KEY_SHA256"
@@ -160,6 +160,8 @@ def project(db, record):
         "approval": {"expires_at": expires, "consumed_at": consumed, "origin_valid": origin_valid},
         # The buttons he chose for this tool when he was asked; labels only.
         "card": ask_cards.valid(payload.get("card")),
+        # What approving must prove (core/approval_levels.py); the gateway enforces it.
+        "approval_level": approval_levels.stored(payload.get("level")),
         "reviewable": reason is None, "unavailable_reason": reason,
     }
 
