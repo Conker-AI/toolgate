@@ -69,8 +69,9 @@ def test_fixed_projection_has_full_args_but_no_nonce_originating_key_or_unknown_
     assert view["approval"]["origin_valid"] and view["unavailable_reason"] is None
     assert set(view) == {"id", "kind", "title", "details", "actor", "severity", "status",
                          "created_at", "updated_at", "decision", "action", "approval",
-                         "reviewable", "unavailable_reason", "card"}
-    assert view["card"] == "do"
+                         "reviewable", "unavailable_reason", "card", "approval_level"}
+    # "example" is not a registered tool, so nothing shows it is harmless: the password level.
+    assert view["card"] == "do" and view["approval_level"] == 3
     text = json.dumps(view)
     for hidden in ("nonce", "args_digest", "created_by_agent_key", request["payload"]["binding"]["nonce"],
                    gate[1]["id"], KEY, ADMIN):
