@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.13.0
+
+- **Every owner request states its `approval_level`, decided by ToolGate when the request is
+  made.** 1 normal (do, run, save), 2 outward (send, publish, ship), 3 serious (delete, pay, host
+  controls). It takes the strongest of the Inbox card chosen for the tool, words in the tool's id
+  or name, and what the tool runs (host controls are serious; MCP calls and non-GET HTTP are
+  outward), so a milder card cannot lower what a name like `files.deleteFolder` says. A published
+  workflow counts every tool and nested workflow it pins; an unpublished automation counts its own
+  name and the tools it may call. The level is never below the card the Inbox shows and is sealed
+  into the request fingerprint (a changed stored level makes the request unreviewable, 409). A
+  missing or odd value on an older request reads as 3. Pi's gateway (0.19.0) asks for the
+  password only at level 3.
+- **The image takes Debian's security fixes newer than its base** (apt, CVE-2026-109518).
+
 ## 0.12.0
 
 - **Refused request bodies are never echoed back.** A 422 lists only `loc`, `msg` and `type` for
