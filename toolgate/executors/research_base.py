@@ -116,6 +116,10 @@ def _normalize(title: object, url: object, snippet: object, source: str, publish
     safe_title = (extract_html_text(raw_title, 300) if re.search(r"<[a-z][^>]*>", raw_title, re.I) else clean_text(raw_title, 300)) or urlsplit(target).hostname or "Untitled result"
     safe_snippet = extract_html_text(raw_snippet, 1200) if re.search(r"<[a-z][^>]*>", raw_snippet, re.I) else clean_text(raw_snippet, 1200)
     inspection = inspect_text(f"{safe_title}\n{safe_snippet}")
+    if inspection["risk"] == "high":
+        # The model reads search rows unfenced, so text that tries to steer it never reaches it.
+        safe_title = urlsplit(target).hostname or "Untitled result"
+        safe_snippet = ""
     normalized_published_at = None
     if isinstance(published_at, (int, float)) and not isinstance(published_at, bool):
         try:

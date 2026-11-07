@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Web text hides fewer tricks from the model.** Fetched pages drop text a reader cannot see:
+  zero opacity or size, transparent colour, clipped or pushed far off screen, and screen-reader
+  classes (`sr-only`, `visually-hidden`, ...). A hidden `<input>` or `<img>` no longer hides the
+  rest of the page. Invisible characters that can carry a message (variation selectors, tag
+  characters) are removed. A new signal, `agent_addressing`, flags pages written to "any AI reading
+  this page".
+- **A search result that tries to steer the model keeps only its host.** Titles and snippets are
+  read without a fence, so a high-risk one now shows the site's host name and an empty snippet.
+- Test: a gzip page that expands past 512 KiB is refused after decompression.
+
 ## 0.13.0
 
 - **Every owner request states its `approval_level`, decided by ToolGate when the request is
