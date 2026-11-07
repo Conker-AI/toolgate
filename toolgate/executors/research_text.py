@@ -17,6 +17,8 @@ INJECTION_RULES = (
     ("encoded_blob", re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{96,}={0,2}(?![A-Za-z0-9+/])")),
     ("model_directive", re.compile(r"\b(assistant|agent|model|you)\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b", re.I | re.S)),
     ("prompt_probe", re.compile(r"\b(repeat|show|print|reveal)\b.{0,60}\b(system prompt|hidden instructions?|developer message)\b", re.I | re.S)),
+    # Pages written to agents ("to any AI reading this page") rather than to people.
+    ("agent_addressing", re.compile(r"\b(ai|llm|language model|assistant|agent|bot)s?\b.{0,40}\b(reading|processing|summari[sz]ing|crawling|browsing)\s+(this|these)\s+(page|text|document|content|site|website|message|post|email|article|file)s?\b", re.I | re.S)),
 )
 
 
@@ -36,7 +38,25 @@ BLOCK_TAGS = {
 BOILERPLATE_MARKERS = {
     "advertisement", "cookie", "cookie-banner", "cookie-consent", "modal",
     "newsletter", "paywall", "popup", "privacy-banner", "subscribe",
+    # Text a reader never sees but a model would: a common place to hide orders for agents.
+    "sr-only", "visually-hidden", "screen-reader-text", "d-none", "invisible",
 }
+
+
+# Inline styles that hide text from a reader: zero opacity or size, transparent colour,
+# clipped away, or pushed far off screen. Matched on the style with spaces removed.
+HIDDEN_STYLE = re.compile(
+    r"display:none|visibility:hidden|opacity:0?\.?0*(?:;|!|$)|font-size:0(?:\.0*)?[a-z%]*(?:;|!|$)"
+    r"|color:transparent|clip:rect\(0|clip-path:inset\(50%|(?:left|top|text-indent|margin-left):-\d{4,}"
+)
+
+
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+
+
+# Invisible code points that can carry a hidden message (emoji smuggling in variation
+# selectors) and that NFKC and the "C" categories do not remove.
+INVISIBLE = re.compile("[\u115f\u1160\u180b-\u180f\u3164\ufe00-\ufe0f\uffa0\U000e0000-\U000e0fff]")
 
 
 class _TextExtractor(HTMLParser):
@@ -53,10 +73,14 @@ class _TextExtractor(HTMLParser):
         hidden = (
             "hidden" in attributes
             or attributes.get("aria-hidden") == "true"
-            or "display:none" in attributes.get("style", "").replace(" ", "")
-            or "visibility:hidden" in attributes.get("style", "").replace(" ", "")
+            or bool(HIDDEN_STYLE.search(re.sub(r"\s+", "", attributes.get("style", ""))))
             or bool(identity_tokens & BOILERPLATE_MARKERS)
         )
+        # A void element has no end tag, so suppressing it would hide the rest of the page.
+        if tag in VOID_TAGS:
+            if tag in BLOCK_TAGS and not self.suppressed:
+                self.parts.append("\n")
+            return
         if self.suppressed or tag in SUPPRESSED_TAGS or hidden:
             self.suppressed.append(tag)
             return
@@ -100,6 +124,7 @@ class _PublishedAtExtractor(HTMLParser):
 
 def clean_text(value: object, limit: int = 4000) -> str:
     text = unicodedata.normalize("NFKC", html.unescape(str(value or "")))
+    text = INVISIBLE.sub("", text)
     text = "".join(
         char for char in text
         if char in "\n\t" or not unicodedata.category(char).startswith("C")

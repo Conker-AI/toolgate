@@ -134,6 +134,17 @@ def test_public_fetch_still_returns_content(monkeypatch):
     assert "public" in research_base.fetch("issued-handle")["content"]
 
 
+def test_compressed_page_is_capped_after_decompression(monkeypatch):
+    import gzip
+    body = gzip.compress(b"a" * (2 * 1024 * 1024))
+    bomb = (b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n"
+            + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers("93.184.216.34"))
+    network(monkeypatch, [bomb])
+    handle(monkeypatch)
+    with pytest.raises(research.ResearchError, match="512 KiB decompressed"):
+        research_base.fetch("issued-handle")
+
 def test_public_health_probe_cannot_rebind_into_tailnet(monkeypatch):
     replies = [answers("93.184.216.34"), answers("100.64.0.1")]
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: replies.pop(0))
