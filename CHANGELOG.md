@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.14.0
+
 - **Agent installs pass an install guard first** (`sandbox/guard.py`), before any approval is
   asked for and again just before the runner installs. It refuses a name that looks like a popular
   package without being it and names the one probably meant (`reqeusts` -> `requests`); a package
