@@ -11,6 +11,7 @@ import httpx
 
 from toolgate.core import control_plane, research_cache, tool_settings, web_hosts
 from toolgate.core.public_https import public_client, public_url
+from toolgate.core.untrusted_text import fenced
 from toolgate.executors.research_text import (
     clean_text,
     extract_html_text,
@@ -163,13 +164,8 @@ def _requested_site_domain(query: str) -> str | None:
     return domain
 
 
-# A page that writes the fence's own tokens could close it early or open one of its own.
-FENCE_TOKEN = re.compile(r"\[(\s*/?\s*)UNTRUSTED_WEB_CONTENT", re.I)
-
-
 def _fenced(result_id: str, text: str) -> str:
-    text = FENCE_TOKEN.sub(r"(\1UNTRUSTED_WEB_CONTENT", text)
-    return f"[UNTRUSTED_WEB_CONTENT id={result_id}]\n{text}\n[/UNTRUSTED_WEB_CONTENT]"
+    return fenced("WEB", f"id={result_id}", text)
 
 
 def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
