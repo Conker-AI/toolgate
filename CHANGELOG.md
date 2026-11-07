@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.15.0
 
+- **MCP results are cleaned and fenced like web text** (`toolgate/core/untrusted_text.py`). One
+  shared rule removes invisible and direction-changing code points (zero-width and bidi controls,
+  tag characters, variation selectors, Hangul fillers, private use, unassigned) from research text
+  and from MCP results, keys and `structuredContent` included. MCP text and resource text are
+  wrapped in an `UNTRUSTED_MCP_CONTENT` fence that outside text cannot open or close, with a notice
+  that it is data, not instructions. The removed set is pinned by a fingerprint that Pi's copy of
+  the rule checks too.
 - **Research refuses lookalike and threat-listed hosts** (`toolgate/core/web_hosts.py`), in
   search results, page fetches and redirects, before any DNS lookup. Lookalikes: a label that
   mixes scripts (a Cyrillic letter inside a Latin name), one made only of Cyrillic or Greek letters
