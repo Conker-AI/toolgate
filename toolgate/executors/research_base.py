@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from toolgate.core import control_plane, research_cache, tool_settings
+from toolgate.core import control_plane, research_cache, tool_settings, web_hosts
 from toolgate.core.public_https import public_client, public_url
 from toolgate.executors.research_text import (
     clean_text,
@@ -104,7 +104,8 @@ REDDIT_FEED_ALLOWLIST = {
 
 
 def _public_https_url(url: str) -> bool:
-    return public_url(url)
+    # Lookalike and threat-listed hosts are refused first: that needs no DNS answer.
+    return web_hosts.refusal(url) is None and public_url(url)
 
 
 def _normalize(title: object, url: object, snippet: object, source: str, published_at: object = None) -> dict | None:

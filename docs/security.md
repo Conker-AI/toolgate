@@ -28,7 +28,7 @@ ToolGate reduces agent and prompt-injection risk, but it cannot protect a host t
 
 ## Bounded Web Research
 
-Research tools accept typed queries and fixed source names, not arbitrary URLs. Search results become short-lived server-issued handles; the fetch tool resolves only those handles, revalidates every HTTPS redirect and public destination, restricts content types, and stops while streaming once 512 KiB of decompressed content is reached.
+Research tools accept typed queries and fixed source names, not arbitrary URLs. Search results become short-lived server-issued handles; the fetch tool resolves only those handles, revalidates every HTTPS redirect and public destination, restricts content types, and stops while streaming once 512 KiB of decompressed content is reached. Before any DNS lookup, a result, fetch or redirect whose host is a lookalike (mixed scripts, Latin-looking Cyrillic or Greek, symbols, undecodable `xn--`) or is on a downloaded threat list (`TOOLGATE_THREAT_FEEDS`, refreshed every 12 hours, checked locally) is refused.
 
 Public fetches and `http_json` use the same socket-level boundary. Every DNS answer must be
 globally routable; CGNAT/Tailscale, private, loopback, link-local, multicast, reserved and metadata
