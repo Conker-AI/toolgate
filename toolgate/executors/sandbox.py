@@ -15,7 +15,7 @@ import re
 import socket
 
 from toolgate.core import tool_settings
-from toolgate.sandbox import validation
+from toolgate.sandbox import guard, validation
 
 EXECUTIONS = {"sandbox_run": "sandbox.run", "sandbox_install": "sandbox.install"}
 MAX_RUN_SECONDS = tool_settings.TERMINAL_SECONDS
@@ -65,7 +65,9 @@ def check(tool: dict, args: dict) -> list[str]:
         else:
             if set(args) - {"manager", "packages"}:
                 return ["Provide only manager and packages."]
-            validation.packages(args.get("manager"), args.get("packages"))
+            manager = args.get("manager")
+            cleaned = validation.packages(manager, args.get("packages"))
+            guard.check(manager, cleaned, tool_settings.trusted_packages())
     except validation.Refused as exc:
         return [str(exc)]
     return []
@@ -138,6 +140,8 @@ def execute(tool: dict, args: dict, agent: str, action_id: str) -> dict:
                 "timeout": seconds,
                 "request_id": action_id[:100],
             }
+            # Again at run time: an approval may be old, and the owner may have untrusted it since.
+            guard.check(request["manager"], request["packages"], tool_settings.trusted_packages())
     except validation.Refused as exc:
         return {"ok": False, "error": str(exc), "error_code": exc.code}
     limits = tool_settings.terminal_limits(install=kind == "sandbox_install")

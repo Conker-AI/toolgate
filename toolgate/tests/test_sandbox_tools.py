@@ -16,6 +16,7 @@ from toolgate.api import definitions, dispatch, server
 from toolgate.core import control_plane as cp
 from toolgate.core import identities, tool_settings
 from toolgate.executors import sandbox
+from toolgate.sandbox import validation
 from toolgate.sandbox.tools import ensure_builtin_sandbox_capabilities
 
 ADMIN = "sandbox-admin-key"
@@ -55,6 +56,14 @@ def gate(tmp_path, monkeypatch):
         return answer
 
     monkeypatch.setattr(sandbox, "_send", send)
+    checked = answer.setdefault("checked", [])
+
+    def check(manager, packages, trusted):  # the install guard; test_sandbox_guard.py covers it
+        checked.append((manager, list(packages), list(trusted)))
+        if "reqeusts" in packages:
+            raise validation.Refused("package_lookalike", "Did you mean 'requests'?")
+
+    monkeypatch.setattr(sandbox.guard, "check", check)
     client = TestClient(server.app)
     yield client, key, calls, answer
     client.close()
@@ -339,3 +348,22 @@ def test_no_runner_is_unavailable_not_unknown(tmp_path, monkeypatch):
     with pytest.raises(sandbox.SandboxError) as refused:
         sandbox._send({"v": 1}, 5)
     assert refused.value.code == "unavailable"
+
+
+def test_the_install_guard_refuses_before_any_approval_and_again_at_run_time(gate):
+    client, _, calls, answer = gate
+    response = invoke(
+        client, {"manager": "pip", "packages": ["reqeusts"]}, tool="sandbox.install", action="g1"
+    )
+    assert response.status_code == 422 and "Did you mean 'requests'?" in response.text
+    assert calls == []
+    choose(install_trusted_packages=["pip:Typing_Extensions"])
+    auto("sandbox.install")
+    ok = invoke(client, {"manager": "pip", "packages": ["six"]}, tool="sandbox.install", action="g2")
+    assert ok.json()["code"] == "OK"
+    # Checked before approval and again just before sending, with the owner's trusted packages.
+    assert answer["checked"][-2:] == [("pip", ["six"], ["pip:typing-extensions"])] * 2
+    tool = cp.get("tool", "sandbox.install")
+    late = sandbox.execute(tool, {"manager": "pip", "packages": ["reqeusts"]}, "a", "g3")
+    assert late == {"ok": False, "error": "Did you mean 'requests'?", "error_code": "package_lookalike"}
+    assert len(calls) == 1
