@@ -22,6 +22,9 @@ What each one changes:
 - `web_skip_sites`: sites never used as sources, added to the built-in ones; their pages are not
   fetched either.
 - `web_page_characters`: the most text one fetched page gives the model.
+- `install_trusted_packages`: packages the owner trusts, as `pip:name` or `npm:name`. The install
+  guard (sandbox/guard.py) then skips its lookalike, age and download checks for them; it still
+  refuses known malware.
 - `run_window_minutes`: once the owner approves a request that waited for them, how long that
   exact action has to start; it still runs once. Only shorter than today's 15 minutes. It applies
   to approvals decided after the change: each approval keeps the window recorded when it was
@@ -53,6 +56,8 @@ PAGE_CHARACTERS = 20000  # the most text one fetched page gives the model
 SKIP_SITES = 50
 RUN_WINDOW_MINUTES = approvals.MAX_RUN_WINDOW_MINUTES  # an approved action has 15 minutes today
 SAFE_SEARCH = {"off": 0, "moderate": 1, "strict": 2}  # SearXNG's levels
+TRUSTED_PACKAGES = 100
+TRUSTED = re.compile(r"(pip|npm):((?:@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9][a-z0-9._~-]{0,99})")
 SITE = r"(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"
 
 
@@ -72,6 +77,7 @@ class Settings(StrictDocument):
     web_skip_sites: Annotated[list[str], Field(max_length=SKIP_SITES)] = []
     web_page_characters: Annotated[int, Field(ge=1000, le=PAGE_CHARACTERS)] | None = None
     run_window_minutes: Annotated[int, Field(ge=1, le=RUN_WINDOW_MINUTES)] | None = None
+    install_trusted_packages: Annotated[list[str], Field(max_length=TRUSTED_PACKAGES)] = []
 
     @field_validator("web_region", mode="before")
     @classmethod
@@ -88,6 +94,21 @@ class Settings(StrictDocument):
                 raise ValueError(f"{site[:80]!r} is not a site name such as example.com")
             if name not in named:
                 named.append(name)
+        return named
+
+    @field_validator("install_trusted_packages")
+    @classmethod
+    def package_names(cls, entries: list[str]) -> list[str]:
+        named = []
+        for entry in entries:
+            found = TRUSTED.fullmatch(entry.strip().lower())
+            if not found:
+                raise ValueError(f"{entry[:80]!r} is not a package such as pip:requests or npm:lodash")
+            manager, name = found.groups()
+            if manager == "pip":  # PEP 503: runs of - _ . are one -
+                name = re.sub(r"[-_.]+", "-", name)
+            if f"{manager}:{name}" not in named:
+                named.append(f"{manager}:{name}")
         return named
 
 
@@ -230,6 +251,10 @@ def skipped(url: str, sites: list[str] | None = None) -> bool:
     host = (urlsplit(str(url)).hostname or "").lower().rstrip(".")
     sites = skip_sites() if sites is None else sites
     return any(host == site or host.endswith("." + site) for site in sites)
+
+
+def trusted_packages() -> list[str]:
+    return current().install_trusted_packages
 
 
 def page_characters() -> int:

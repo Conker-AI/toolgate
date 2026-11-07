@@ -68,6 +68,8 @@ def main(argv):
             f"{VENV}/bin/python", "-m", "pip", "install",
             "--no-input", "--disable-pip-version-check", "--no-warn-script-location",
             "--progress-bar", "off",
+            # Wheels only: building a source package runs its setup code, whoever wrote it.
+            "--only-binary", ":all:",
             "--index-url", f"{base}/pypi/simple/", "--trusted-host", "127.0.0.1",
             "--", *packages,
         ]
@@ -75,6 +77,8 @@ def main(argv):
         command = [
             "npm", "install", "--prefix", "/workspace",
             "--no-audit", "--no-fund", "--no-update-notifier",
+            # No preinstall/install/postinstall scripts: the usual way a bad package runs code.
+            "--ignore-scripts",
             "--registry", f"{base}/npm/",
             "--", *packages,
         ]

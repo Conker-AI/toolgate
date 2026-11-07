@@ -31,6 +31,7 @@ TODAY = {
     "web_skip_sites": [],
     "web_page_characters": None,
     "run_window_minutes": None,  # covered in test_run_window.py
+    "install_trusted_packages": [],
 }
 CEILINGS = {
     "tool_seconds": 180,
