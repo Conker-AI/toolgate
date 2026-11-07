@@ -8,6 +8,8 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 
+from toolgate.core.untrusted_text import strip_invisible
+
 INJECTION_RULES = (
     ("instruction_override", re.compile(r"\b(ignore|disregard|override|forget)\b.{0,80}\b(previous|prior|system|developer|instructions?|prompt)\b", re.I | re.S)),
     ("role_impersonation", re.compile(r"\b(system|developer|assistant)\s*(message|prompt|instruction)?\s*:", re.I)),
@@ -52,11 +54,6 @@ HIDDEN_STYLE = re.compile(
 
 
 VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
-
-
-# Invisible code points that can carry a hidden message (emoji smuggling in variation
-# selectors) and that NFKC and the "C" categories do not remove.
-INVISIBLE = re.compile("[\u115f\u1160\u180b-\u180f\u3164\ufe00-\ufe0f\uffa0\U000e0000-\U000e0fff]")
 
 
 class _TextExtractor(HTMLParser):
@@ -124,11 +121,7 @@ class _PublishedAtExtractor(HTMLParser):
 
 def clean_text(value: object, limit: int = 4000) -> str:
     text = unicodedata.normalize("NFKC", html.unescape(str(value or "")))
-    text = INVISIBLE.sub("", text)
-    text = "".join(
-        char for char in text
-        if char in "\n\t" or not unicodedata.category(char).startswith("C")
-    )
+    text = strip_invisible(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" *\n *", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
