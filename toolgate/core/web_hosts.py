@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001, RUF002  -- lookalike letters here are the point
 """Web hosts that research never shows or opens: lookalike names and hosts on public threat lists.
 
 Both checks run inside ToolGate before any DNS answer is needed, and no per-host question leaves it:

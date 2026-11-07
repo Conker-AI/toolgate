@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001, RUF003  -- lookalike letters here are the point
 """Lookalike hosts and threat-listed hosts never reach research results or page fetches."""
 
 from __future__ import annotations
