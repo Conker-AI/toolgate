@@ -28,6 +28,9 @@ _EXEMPT = {"__pycache__", ".pytest_cache"}
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC
 
 _running: list[str] = []  # node id of the test in progress, if any
+
+# Threat lists download from the internet into the data folder; a test turns them on itself.
+os.environ.setdefault("TOOLGATE_THREAT_FEEDS", "")
 _writes: dict[str, list[str]] = {}
 
 

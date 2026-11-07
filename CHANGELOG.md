@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Research refuses lookalike and threat-listed hosts** (`toolgate/core/web_hosts.py`), in
+  search results, page fetches and redirects, before any DNS lookup. Lookalikes: a label that
+  mixes scripts (a Cyrillic letter inside a Latin name), one made only of Cyrillic or Greek letters
+  that look Latin under a TLD that is not Cyrillic or Greek, one with symbols or control
+  characters, and an `xn--` label that does not decode; Japanese, Chinese and Korean mixes with
+  Latin stay allowed, as in browsers. Threat lists: the malware-filter URLhaus and phishing host
+  lists are downloaded every 12 hours into `TOOLGATE_DATA_DIR/threat-lists/` and checked locally
+  (a listed host or any of its subdomains). `TOOLGATE_THREAT_FEEDS` sets the feed URLs
+  (comma-separated; empty or `off` turns them off). A failed download keeps the last list; with
+  no list yet nothing is refused.
+
 ## 0.14.0
 
 - **Agent installs pass an install guard first** (`sandbox/guard.py`), before any approval is
