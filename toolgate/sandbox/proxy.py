@@ -5,7 +5,9 @@ A read-only pull-through to three fixed upstreams: PyPI's simple index (pypi.org
 package metadata and archives under fixed path shapes and nothing else, so an install can
 download from the official registries but cannot upload, publish, reach another host or tunnel.
 It listens on a Unix socket that install containers mount read-only and admits only the sandbox
-UID (SO_PEERCRED). Every request is logged as one JSON line. Usage:
+UID (SO_PEERCRED). Package metadata passes through the cooldown (cooldown.py), so releases
+younger than PROXY_COOLDOWN_DAYS (default 7) are hidden and pip and npm pick an older one. Every
+request is logged as one JSON line. Usage:
 `python -m toolgate.sandbox.proxy serve`.
 """
 
@@ -23,6 +25,8 @@ import ssl
 import struct
 import sys
 import time
+
+from toolgate.sandbox import cooldown
 
 PYPI = "pypi.org"
 FILES = "files.pythonhosted.org"
@@ -134,6 +138,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         accept = self.headers.get("Accept", "")
         if accept and ACCEPT.fullmatch(accept):
             headers["Accept"] = accept
+        if kind == "pypi-index":  # only the JSON page carries upload times to filter by
+            headers["Accept"] = cooldown.PYPI_JSON
+        elif kind == "npm-metadata":  # the full document: the abbreviated one has no times
+            headers["Accept"] = "application/json"
         started = time.monotonic()
         connection = http.client.HTTPSConnection(host, 443, timeout=30, context=self.server.tls)
         try:
@@ -176,11 +184,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             connection.close()
 
+    def _cool(self, kind: str, body: bytes) -> bytes | None:
+        keep = cooldown.filter_pypi if kind == "pypi-index" else cooldown.filter_npm
+        try:
+            kept, removed = keep(body, time.time(), self.server.cooldown_days)
+        except ValueError as exc:
+            raise OSError("bad metadata") from exc
+        if removed:
+            log(event="package_cooldown", kind=kind, path=self.path[:300], removed=removed)
+        return kept
+
     def _relay(self, response, kind, head, cap, content_type, length) -> int:
         if kind in ("pypi-index", "npm-metadata"):
             body = response.read(cap + 1) if not head else b""
             if len(body) > cap:
                 raise OSError("metadata too large")
+            if not head:
+                body = self._cool(kind, body)
+                if body is None:
+                    self._deny(404, "cooldown")
+                    return 0
+            content_type = cooldown.PYPI_JSON if kind == "pypi-index" else "application/json"
             body = rewrite(kind, body, self.headers.get("Host", ""))
             self.send_response(200)
             self.send_header("Content-Type", content_type)
@@ -209,8 +233,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
 
-    def __init__(self, path: str, clients: set[int]):
+    def __init__(self, path: str, clients: set[int], cooldown_days: int = cooldown.DAYS):
         self.clients = clients
+        self.cooldown_days = cooldown_days
         self.tls = ssl.create_default_context()
         with contextlib.suppress(FileNotFoundError):
             os.unlink(path)
@@ -238,9 +263,14 @@ def serve() -> int:
     except ValueError:
         print("PROXY_CLIENT_UIDS must list numeric UIDs", file=sys.stderr)
         return 2
+    try:
+        days = cooldown.days()
+    except ValueError:
+        print(f"PROXY_COOLDOWN_DAYS must be 0..{cooldown.MAX_DAYS}", file=sys.stderr)
+        return 2
     path = os.environ.get("PROXY_SOCKET", DEFAULT_SOCKET)
-    with Server(path, clients) as server:
-        log(event="package_proxy_ready", upstreams=list(UPSTREAMS))
+    with Server(path, clients, days) as server:
+        log(event="package_proxy_ready", upstreams=list(UPSTREAMS), cooldown_days=days)
         server.serve_forever()
     return 0
 

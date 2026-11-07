@@ -845,6 +845,15 @@
       "Settings": {
         "additionalProperties": false,
         "properties": {
+          "install_trusted_packages": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Install Trusted Packages",
+            "type": "array"
+          },
           "run_window_minutes": {
             "anyOf": [
               {

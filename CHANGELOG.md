@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Agent installs pass an install guard first** (`sandbox/guard.py`), before any approval is
+  asked for and again just before the runner installs. It refuses a name that looks like a popular
+  package without being it and names the one probably meant (`reqeusts` -> `requests`); a package
+  OSV lists as malware (`MAL-`), always; a name the registry does not know; a package first
+  published less than 30 days ago; and, on npm, one with fewer than 1000 downloads last week. A
+  lookup that fails refuses the install (fail closed); answers are kept for an hour. The owner can
+  trust packages by name in the new tool setting `install_trusted_packages` (`pip:name`,
+  `npm:name`, up to 100), which skips the lookalike, age and download checks but never the malware
+  check. Each install's packages are already kept in the action journal with its arguments.
+- **The package proxy hides releases younger than 7 days** from pip and npm, for dependencies too
+  (`PROXY_COOLDOWN_DAYS`, 0..90, 0 turns it off). npm's `latest` moves back to the newest version
+  left; a release with no date is hidden. The proxy now asks PyPI for its JSON index (PEP 691).
+- **Installs run no package code**: pip installs wheels only (`--only-binary :all:`) and npm runs
+  no install scripts (`--ignore-scripts`). The sandbox image changes, so Conker pins its new digest
+  at the next release.
 - **Web text hides fewer tricks from the model.** Fetched pages drop text a reader cannot see:
   zero opacity or size, transparent colour, clipped or pushed far off screen, and screen-reader
   classes (`sr-only`, `visually-hidden`, ...). A hidden `<input>` or `<img>` no longer hides the
