@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "UTC",
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "7 days",
+  "automerge": false,
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "One weekly pull request for every minor, patch and digest update.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "weekly minor and patch updates",
+      "groupSlug": "weekly-minor-patch"
+    },
+    {
+      "description": "Major updates stay one pull request per package, reviewed one at a time.",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}

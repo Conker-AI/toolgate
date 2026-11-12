@@ -22,3 +22,5 @@ dashboard/.env
 
 .test-runs/
 .pytest_cache/
+.coverage
+.coverage.*

@@ -1,0 +1,32 @@
+# The same checks CI runs, with the same pinned tools (requirements-dev.txt), so a commit
+# that passes here passes the lint stage there. Install once: pip install pre-commit &&
+# pre-commit install --install-hooks -t pre-commit -t pre-push
+default_install_hook_types: [pre-commit, pre-push]
+repos:
+- repo: local
+  hooks:
+  - id: ruff-check
+    name: ruff check
+    entry: python -m ruff check .
+    language: system
+    pass_filenames: false
+    types: [python]
+  - id: file-sizes
+    name: file sizes (600 lines)
+    entry: python toolgate/scripts/check_file_sizes.py
+    language: system
+    pass_filenames: false
+    always_run: true
+  - id: package-boundaries
+    name: package boundaries
+    entry: python toolgate/scripts/check_package_boundaries.py
+    language: system
+    pass_filenames: false
+    types: [python]
+  - id: types
+    name: pyright basic, baseline only shrinks
+    entry: python toolgate/scripts/check_types.py
+    language: system
+    pass_filenames: false
+    types: [python]
+    stages: [pre-push]
