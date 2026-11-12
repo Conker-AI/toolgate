@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Each tag gets a GitHub Release page and an SBOM.** The Release page's notes are the
+  version's CHANGELOG section. Every image carries an SPDX SBOM (BuildKit attestation) inside
+  the image index, and the signed build provenance covers that index digest. Check one with
+  `gh attestation verify oci://IMAGE@DIGEST --owner Conker-AI`.
+
 ## 0.15.1
 
 - **The image takes Debian's zlib security fix** (zlib1g CVE-2026-76844 and CVE-2026-85091,
