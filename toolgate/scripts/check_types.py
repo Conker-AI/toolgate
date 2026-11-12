@@ -63,7 +63,8 @@ def baseline() -> dict[str, int]:
 
 def write(counts: Counter[str]) -> None:
     lines = [f"{path} {count}" for path, count in sorted(counts.items())]
-    BASELINE.write_text(HEADER + "".join(f"{line}\n" for line in lines), encoding="utf-8")
+    text = HEADER + "".join(f"{line}\n" for line in lines)
+    BASELINE.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {BASELINE}: {sum(counts.values())} errors in {len(counts)} files")
 
 
