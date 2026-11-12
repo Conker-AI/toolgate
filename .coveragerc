@@ -1,0 +1,11 @@
+# Coverage for CI's floor (pytest --cov --cov-fail-under=N in ci.yml).
+[run]
+source =
+    toolgate
+    integrations
+omit =
+    */tests/*
+    toolgate/scripts/*
+
+[report]
+skip_empty = true

@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --quiet --upgrade pip
           pip install --quiet -r toolgate/requirements.txt
-          pip install --quiet pytest httpx
+          pip install --quiet pytest httpx pytest-cov==7.1.0 pyright==1.1.414
 
       - name: Lint
         # Same pinned ruff and policy as Pi (ruff.toml).
@@ -71,8 +71,15 @@ jobs:
         # docs/openapi.json is the API reference; written by hand, it fell versions behind.
         run: python toolgate/scripts/export_openapi.py --check
 
+      - name: Types
+        # pyright basic mode (pyrightconfig.json). Errors that predate the check are counted
+        # per file in type-baseline.txt; a count may only go down.
+        run: python toolgate/scripts/check_types.py
+
       - name: Tests
-        run: python -m pytest toolgate/tests/ --ignore=toolgate/tests/test_module_contract.py -q
+        # The coverage floor is the coverage measured when it arrived, rounded down, so it
+        # only stops coverage from falling (.coveragerc names what is measured).
+        run: python -m pytest toolgate/tests/ --ignore=toolgate/tests/test_module_contract.py -q --cov --cov-report=term --cov-fail-under=83
 
       - name: Approval and spending mutation drill
         # Proves the boundary tests still catch broken authority, approval and spending code.
