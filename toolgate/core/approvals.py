@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 from toolgate.core.control_plane import _conn, _now, _row
 
@@ -269,7 +270,7 @@ def consume_verification_in_transaction(conn, request_id: str | None, subject_ty
     binding["consumed_by"] = actor
     record["payload"]["binding"] = binding
     _save_request(conn, record)
-    _request_event(conn, "verification_consumed", "info", request_id, actor,
+    _request_event(conn, "verification_consumed", "info", cast(str, request_id), actor,
                    {"subject_type": subject_type, "subject_id": subject_id})
     return True, "approved"
 

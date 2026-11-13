@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from typing import cast
 
 import httpcore
 import httpx
@@ -45,7 +46,7 @@ def resolve_public(host: str, port: int = 443) -> list[str]:
         raise DestinationDenied("Destination must be public HTTPS on port 443")
     try:
         addresses = list(dict.fromkeys(
-            answer[4][0] for answer in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            cast(str, answer[4][0]) for answer in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         ))
     except OSError as exc:
         raise DestinationDenied("Public destination could not be resolved") from exc

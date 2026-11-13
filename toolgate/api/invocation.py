@@ -3,6 +3,7 @@
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import cast
 
 from toolgate.api.deps import deny
 from toolgate.api.dispatch import (
@@ -216,7 +217,7 @@ def invoke_tool(
             f"Run {tool['name']}",
             (
                 "Replace the container using this exact inspected port change: "
-                + json.dumps(port_review["preview"])
+                + json.dumps(cast(dict, port_review)["preview"])
             )
             if is_port
             else "Owner confirmation is required for this exact immutable tool invocation.",
@@ -350,7 +351,7 @@ def invoke_tool(
         result = {"ok": False, "error": refused["message"], "error_code": refused["code"]}
     except Exception:
         journal.unknown(action_id)
-        return journal.response(journal.get(action_id))
+        return journal.response(cast(dict, journal.get(action_id)))
     envelope = {
         "code": "OK" if result["ok"] else refused["code"] if refused else "TOOL_UNAVAILABLE",
         "message": "Tool completed" if result["ok"] else result["error"],

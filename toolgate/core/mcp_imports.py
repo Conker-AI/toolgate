@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -193,7 +194,7 @@ def access(identity, agent, payload: State | None = None):
     return tool_access.access(
         identity,
         agent,
-        payload,
+        cast("tool_access.State | None", payload),
         accept=lambda tool: tool.get("execution", {}).get("type") == "mcp_http",
         not_found=not_found,
         event_prefix="mcp_access",

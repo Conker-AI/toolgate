@@ -1,6 +1,7 @@
 """Owner automation catalogue and the agent's automation run route."""
 
 import time
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -229,7 +230,7 @@ def run_automation(automation_id: str, payload: V2Invoke, agent: dict = Depends(
         )
     except Exception:
         journal.unknown(payload.action_id)
-        return journal.response(journal.get(payload.action_id))
+        return journal.response(cast(dict, journal.get(payload.action_id)))
     failed = isinstance(final, dict) and final.get("code") == "WORKFLOW_FAILED"
     envelope = {
         "code": "WORKFLOW_FAILED" if failed else "OK",

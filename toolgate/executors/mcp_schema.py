@@ -7,7 +7,7 @@ import hashlib
 import json
 import math
 import re
-from typing import NoReturn
+from typing import Any, NoReturn, cast
 
 
 class MCPError(ValueError):
@@ -243,7 +243,7 @@ def validate_arguments(schema, value):
     bounded(value)
     visits = 0
 
-    def visit(node, item):
+    def visit(node, item: Any):
         nonlocal visits
         visits += 1
         if visits > 16384:
@@ -271,25 +271,28 @@ def validate_arguments(schema, value):
             _error("invalid_arguments", "An argument does not match the schema's const value.")
         if kind in {"object", "array", "string"}:
             suffix = {"object": "Properties", "array": "Items", "string": "Length"}[kind]
-            if len(item) < node.get("min" + suffix, 0) or len(item) > node.get(
+            sized = cast("dict | list | str", item)
+            if len(sized) < node.get("min" + suffix, 0) or len(sized) > node.get(
                 "max" + suffix, 32768
             ):
                 _error("invalid_arguments", "An argument exceeds the schema's size constraints.")
         if kind == "object":
+            fields = cast(dict, item)
             props = node.get("properties", {})
-            if set(node.get("required", [])) - set(item) or (
-                node.get("additionalProperties") is False and set(item) - set(props)
+            if set(node.get("required", [])) - set(fields) or (
+                node.get("additionalProperties") is False and set(fields) - set(props)
             ):
                 _error(
                     "invalid_arguments", "Arguments omit required or contain disallowed properties."
                 )
-            for key, child in item.items():
+            for key, child in fields.items():
                 if key in props:
                     visit(props[key], child)
         elif kind == "array":
-            if node.get("uniqueItems") and len({_value_key(child) for child in item}) != len(item):
+            entries = cast(list, item)
+            if node.get("uniqueItems") and len({_value_key(child) for child in entries}) != len(entries):
                 _error("invalid_arguments", "Arguments require unique array items.")
-            for child in item:
+            for child in entries:
                 visit(node["items"], child)
         elif kind in {"integer", "number"}:
             if (
