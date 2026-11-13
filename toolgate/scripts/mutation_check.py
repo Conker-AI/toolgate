@@ -407,6 +407,22 @@ MUTANTS.extend([
 ])
 
 
+FORGET = "toolgate/tests/test_forget_records.py::"
+MUTANTS.extend([
+    ("forget reaches another key's actions", "toolgate/core/forgetting.py",
+     'if agent_id is not None and row["actor_id"] != agent_id:',
+     "if False:",
+     FORGET + "test_another_keys_records_and_unknown_ids_look_the_same_and_stay"),
+    ("forget blanks a waiting request", "toolgate/core/forgetting.py",
+     'elif record.get("status") == "pending" and record.get("kind") == "verification":',
+     "elif False:",
+     FORGET + "test_a_waiting_request_and_a_running_action_are_refused_and_left_as_they_are"),
+    ("forget blanks a running action", "toolgate/core/forgetting.py",
+     'if "dispatching" in statuses:', "if False:",
+     FORGET + "test_a_waiting_request_and_a_running_action_are_refused_and_left_as_they_are"),
+])
+
+
 def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedProcess:
     env = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(

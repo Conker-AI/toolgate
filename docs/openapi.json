@@ -377,6 +377,31 @@
         "title": "EditorDocument",
         "type": "object"
       },
+      "ForgetRecords": {
+        "additionalProperties": false,
+        "properties": {
+          "action_ids": {
+            "items": {
+              "pattern": "^[A-Za-z0-9_.:/-]{1,160}$",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Action Ids",
+            "type": "array"
+          },
+          "request_ids": {
+            "items": {
+              "pattern": "^[A-Za-z0-9_.:/-]{1,160}$",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Request Ids",
+            "type": "array"
+          }
+        },
+        "title": "ForgetRecords",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1897,6 +1922,60 @@
         "summary": "List Actions"
       }
     },
+    "/v2/admin/forget": {
+      "post": {
+        "operationId": "forget_any_records_v2_admin_forget_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-ToolGate-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetRecords"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Forget Any Records"
+      }
+    },
     "/v2/admin/requests": {
       "post": {
         "operationId": "create_admin_request_v2_admin_requests_post",
@@ -2429,6 +2508,77 @@
           }
         },
         "summary": "Agent Events"
+      }
+    },
+    "/v2/agent/forget": {
+      "post": {
+        "description": "Blank this key's own requests and actions of a forgotten chat. Allowed in lockdown: it\nonly removes. Another key's ids and unknown ids both come back as `unknown`.",
+        "operationId": "forget_own_records_v2_agent_forget_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-ToolGate-Execution-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Execution-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ToolGate-Agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Agent"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgetRecords"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Forget Own Records"
       }
     },
     "/v2/agent/identities": {

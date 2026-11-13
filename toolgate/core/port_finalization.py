@@ -134,6 +134,9 @@ def _recover(action_id, actor_id, *, authorize, transport):
             if not lineage:
                 conn.execute("INSERT INTO v2_container_lineage VALUES (?,?,?,?)",
                              (action_id, cid, created[0], container_lineage._digest(configuration[0])))
+        # A forgotten action keeps only the forgotten receipt, even when its outcome arrives late.
+        receipt = (journal.FORGOTTEN_RESPONSE if journal.forgotten(conn, action_id)
+                   else json.dumps(envelope, allow_nan=False))
         conn.execute("UPDATE v2_actions SET status='completed',response=?,updated_at=? WHERE action_id=?",
-                     (json.dumps(envelope, allow_nan=False), time.time(), action_id))
+                     (receipt, time.time(), action_id))
         return journal._row(conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone())
