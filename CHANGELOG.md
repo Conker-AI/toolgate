@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.16.0
+
 - **A forgotten chat's tool records are forgotten here too.** `POST /v2/agent/forget` (the
   caller's own requests and actions) and `POST /v2/admin/forget` blank their arguments, results
   and words and keep who, when, what kind and the decision. A forgotten action can never run
