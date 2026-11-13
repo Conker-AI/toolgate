@@ -123,7 +123,7 @@ class ResearchSearchTests(unittest.TestCase):
         self.assertIn("encoded_blob", encoded["flags"])
         self.assertEqual("medium", impersonation["risk"])
         self.assertIn("role_impersonation", impersonation["flags"])
-        self.assertIn("model_directive", impersonation["flags"])
+        self.assertIn("reader_directive", impersonation["flags"])
         self.assertEqual("high", prompt_probe["risk"])
         self.assertIn("prompt_probe", prompt_probe["flags"])
 
