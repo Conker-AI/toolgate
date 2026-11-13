@@ -5,7 +5,7 @@ and sandbox/verify (the real Docker Engine)."""
 
 import sqlite3
 import time
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, nullcontext
 from unittest.mock import Mock
 
 import pytest
@@ -257,9 +257,8 @@ def test_web_api_memory_and_ai_calls_wait_no_longer_than_the_limit(store, monkey
     @contextmanager
     def client(timeout, headers):
         waits.append(("http_json", timeout))
-        answer = Mock(status_code=200, content=b"{}")
-        answer.json.return_value = {}
-        yield Mock(request=Mock(return_value=answer))
+        answer = Mock(status_code=200, iter_bytes=Mock(return_value=iter([b"{}"])))
+        yield Mock(stream=Mock(return_value=nullcontext(answer)))
 
     def post(*_args, timeout, **_kwargs):
         waits.append(("post", timeout))

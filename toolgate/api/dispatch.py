@@ -1,6 +1,7 @@
 """Dispatch of one approved tool call to its backend (HTTP, MemoryGate, Ollama, Gemini, research, system executors)."""
 
 import hashlib
+import json
 import os
 import re
 from typing import NoReturn
@@ -114,15 +115,22 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
     # Rendered before the client opens, so a missing body argument is refused before any send.
     body = _render_template(execution["body"], args) if execution.get("body") is not None else None
     try:
-        with public_client(timeout=timeout, headers=headers) as client:
-            response = client.request(str(execution.get("method", "GET")).upper(), url, json=body)
-        if 300 <= response.status_code < 400:
-            deny("DESTINATION_DENIED", "The upstream attempted an unapproved redirect", 502)
-        if response.status_code >= 400:
-            deny("UPSTREAM_ERROR", f"The upstream returned HTTP {response.status_code}", 502)
-        if len(response.content) > max_bytes:
-            deny("RESPONSE_TOO_LARGE", "The upstream response exceeded this tool's byte limit", 502)
-        value = response.json()
+        method = str(execution.get("method", "GET")).upper()
+        with (
+            public_client(timeout=timeout, headers=headers) as client,
+            client.stream(method, url, json=body) as response,
+        ):
+            if 300 <= response.status_code < 400:
+                deny("DESTINATION_DENIED", "The upstream attempted an unapproved redirect", 502)
+            if response.status_code >= 400:
+                deny("UPSTREAM_ERROR", f"The upstream returned HTTP {response.status_code}", 502)
+            # Read up to the cap and stop: a huge or endless body never sits in memory whole.
+            content = bytearray()
+            for chunk in response.iter_bytes():
+                content.extend(chunk)
+                if len(content) > max_bytes:
+                    deny("RESPONSE_TOO_LARGE", "The upstream response exceeded this tool's byte limit", 502)
+        value = json.loads(bytes(content))
     except HTTPException:
         raise
     except (httpx.HTTPError, ValueError) as exc:
