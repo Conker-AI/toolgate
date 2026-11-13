@@ -40,7 +40,7 @@ agent > tool default, the floor, Handled; see access-policy.md) and agent identi
 
 | Setting | Value |
 |---|---|
-| Image | `SANDBOX_IMAGE`, pinned by digest (`sandbox/Dockerfile`: Debian, Python 3.11, Node 22, git, numpy, pandas, requests, pyyaml, beautifulsoup4, python-dateutil, openpyxl; no setuid programs) |
+| Image | `SANDBOX_IMAGE`, pinned by digest (`sandbox/Dockerfile`: Debian 13, Python 3.13, Node 22, git, numpy, pandas, requests, pyyaml, beautifulsoup4, python-dateutil, openpyxl; no setuid programs) |
 | Network | `none`: loopback only, for runs and installs |
 | Mounts | the agent's folder (a subpath of the workspaces volume) at `/workspace`; installs add the package proxy's socket volume read-only at `/run/conker-proxy`. Nothing else: no Docker socket, no host paths |
 | User | `65533:65533` (`SANDBOX_UID`, `SANDBOX_GID`), umask 007 |
