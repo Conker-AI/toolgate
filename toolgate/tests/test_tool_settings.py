@@ -319,6 +319,24 @@ def test_a_research_search_runs_within_the_limit(store, monkeypatch):
     assert timeouts and all(0 < timeout <= 5 for timeout in timeouts)
 
 
+def test_a_provider_making_many_calls_cannot_outlast_the_search(store, monkeypatch):
+    calls = []
+
+    def slow_provider(_query, _source, _limit, _recency_days, timeout):
+        for _ in range(3):  # each call stays inside its own timeout; together they do not
+            calls.append(timeout)
+            time.sleep(1.0)
+        return [{"url": "https://example.com/late", "title": "late"}]
+
+    for name in ("_reddit_subreddit_feed", "_reddit_subreddit_searx", "_reddit_subreddit_tavily"):
+        monkeypatch.setattr(research, name, slow_provider)
+    started = time.monotonic()
+    with pytest.raises(research.ResearchError, match="shared deadline exhausted"):
+        research.search("subreddit:accounting", "reddit", 5, 14, until=started + 0.5)
+    assert time.monotonic() - started < 2.0
+    assert len(calls) < 3
+
+
 def test_a_research_bundle_stops_when_the_limit_is_reached(store, monkeypatch):
     now = [0.0]
     deadlines = []
