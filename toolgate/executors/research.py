@@ -94,7 +94,8 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
                 provider_used = provider_name
                 break
             failures.append(f"{provider_name}: no results")
-        except (ResearchError, httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        # AttributeError: a provider's JSON with a list or null where an object belongs.
+        except (ResearchError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
             failures.append(f"{provider_name}: {type(exc).__name__}")
     if not rows and not completed_providers:
         raise ResearchError("all configured search providers failed: " + "; ".join(failures))

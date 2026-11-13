@@ -157,7 +157,9 @@ class Session:
                         "clientInfo": {"name": "Conker ToolGate", "version": "1"},
                     },
                 )
-                if result.get("protocolVersion") not in VERSIONS:
+                version = result.get("protocolVersion")
+                # The server picks this value: a list or object must refuse, not raise TypeError.
+                if not isinstance(version, str) or version not in VERSIONS:
                     _error(
                         "unsupported_server",
                         "The server does not support a configured MCP protocol version.",
