@@ -81,6 +81,25 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
     return item
 
 
+def _searx_time_range(recency_days: int) -> dict:
+    """SearXNG's narrowest window that still covers recency_days (it knows day/week/month/year)."""
+    for days, name in ((1, "day"), (7, "week"), (31, "month"), (366, "year")):
+        if recency_days <= days:
+            return {"time_range": name}
+    return {}
+
+
+def _older_than(item: dict, recency_days: int) -> bool:
+    """True when the row carries a publication date before the requested window."""
+    try:
+        published = datetime.fromisoformat(str(item.get("published_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=UTC)
+    return published < datetime.now(UTC) - timedelta(days=recency_days)
+
+
 def _searx(query: str, source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
     deadline = time.monotonic() + max(1.0, timeout)
     source_domain = SOURCE_DOMAINS[source]
@@ -96,7 +115,7 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
         f"{base_url}/search",
         params={"q": scoped_query, "format": "json", "language": tool_settings.search_language(),
                 "safesearch": tool_settings.safe_search(), "categories": "general",
-                **({"time_range": "day" if recency_days <= 1 else "month"} if recency_days <= 45 else {})},
+                **_searx_time_range(recency_days)},
         headers=headers,
         timeout=timeout,
     )
@@ -107,6 +126,9 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
         if len(results) >= limit:
             break
         item = _normalize(row.get("title"), row.get("url"), row.get("content"), source, row.get("publishedDate"))
+        # SearXNG's windows are coarse (a week for "last 3 days"), so dated rows are checked too.
+        if item and _older_than(item, recency_days):
+            continue
         hostname = urlsplit(item["url"]).hostname.lower() if item and urlsplit(item["url"]).hostname else ""
         if source == "general" and not domain and any(
             hostname == blocked or hostname.endswith(f".{blocked}")
