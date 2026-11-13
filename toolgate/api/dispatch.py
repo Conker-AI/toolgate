@@ -111,15 +111,11 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
             )
     timeout = tool_settings.seconds(min(float(execution.get("timeout_seconds", 10)), 30))
     max_bytes = min(int(execution.get("max_response_bytes", 262144)), 1048576)
+    # Rendered before the client opens, so a missing body argument is refused before any send.
+    body = _render_template(execution["body"], args) if execution.get("body") is not None else None
     try:
         with public_client(timeout=timeout, headers=headers) as client:
-            response = client.request(
-                str(execution.get("method", "GET")).upper(),
-                url,
-                json=_render_template(execution.get("body"), args)
-                if execution.get("body") is not None
-                else None,
-            )
+            response = client.request(str(execution.get("method", "GET")).upper(), url, json=body)
         if 300 <= response.status_code < 400:
             deny("DESTINATION_DENIED", "The upstream attempted an unapproved redirect", 502)
         if response.status_code >= 400:

@@ -63,6 +63,18 @@ def test_a_destination_outside_the_allowlist_is_refused_before_any_request(http_
     assert (result["status"], result["code"]) == ("completed", "DESTINATION_DENIED")
 
 
+def test_a_missing_body_argument_is_refused_before_the_client_opens(http_tool, monkeypatch):
+    def no_client(**kwargs):
+        raise AssertionError("no client may open")
+
+    monkeypatch.setattr(dispatch, "public_url", lambda url: True)
+    monkeypatch.setattr(dispatch, "public_client", no_client)
+    execution = {**http_tool["execution"], "method": "POST", "body": {"note": "{text}"}}
+    result = call({**http_tool, "execution": execution}, "no-body-arg", {"place": "home"})
+    assert (result["status"], result["code"]) == ("completed", "VALIDATION_ERROR")
+    assert result["message"] == "Missing template argument 'text'"
+
+
 def test_a_refusal_after_the_request_was_sent_stays_unknown(http_tool, monkeypatch):
     sent = []
 
