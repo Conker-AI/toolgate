@@ -5,11 +5,37 @@
 - **A forgotten chat's tool records are forgotten here too.** `POST /v2/agent/forget` (the
   caller's own requests and actions) and `POST /v2/admin/forget` blank their arguments, results
   and words and keep who, when, what kind and the decision. A forgotten action can never run
-  again; a waiting approval or a running action is refused until it is withdrawn or done.
+  again; a waiting approval or a running action is refused until it is withdrawn or done. (#105)
 - **Each tag gets a GitHub Release page and an SBOM.** The Release page's notes are the
   version's CHANGELOG section. Every image carries an SPDX SBOM (BuildKit attestation) inside
   the image index, and the signed build provenance covers that index digest. Check one with
-  `gh attestation verify oci://IMAGE@DIGEST --owner Conker-AI`.
+  `gh attestation verify oci://IMAGE@DIGEST --owner Conker-AI`. (#83)
+- **The sandbox image moves to Debian 13** (node:22-trixie-slim, Python 3.13), because
+  soupsieve's fix for CVE-2026-126190 needs Python 3.11.5 or newer. Conker pins the new
+  sandbox digest with this release. (#86)
+- **Research reads technical pages again.** A fetched page is withheld only for rules that
+  address the model (instruction overrides, secret requests, prompt probes, orders to the
+  assistant). Weaker flags (role labels, base64, "run this in your terminal") deliver the page
+  fenced with its flags. SearXNG searches keep the owner's recency window; filler words never
+  shrink a query to nothing; a slow provider cannot outlast the search deadline; the Google key
+  goes in a header, never the URL. (#87, #90, #96, #102, #103)
+- **Fewer unknown outcomes and 500s.** A refusal before anything was sent is a known failure,
+  and its spending hold is released, never OUTCOME_UNKNOWN. A malformed MCP or provider answer is
+  a refusal or a fallback, not a 500. An HTTP tool stops reading an answer at its byte cap.
+  (#88, #92, #95)
+- **Tighter boundaries.** ToolGate's own `TOOLGATE_` settings never resolve as tool secrets
+  (except the callback secret); the live verifier never lifts a lockdown the owner set, removes
+  its unsafe test tool and names what is missing; `$last` works only as a whole reference and a
+  required input cannot be null; the sandbox guard reads quotes and heredocs before it cuts a
+  command; the package proxy reports healthy only when its serving loop answers. (#89, #91, #93,
+  #99, #100, #101)
+- **Every pending Inbox card can be rejected or dismissed.** (#97)
+- **Deleting a configuration name from the vault is a 400**, not a 500. (#85)
+- **Repository tooling, no behaviour change.** The shared .editorconfig, pre-commit hooks,
+  CODEOWNERS and Renovate config; pyright with its baseline now at zero; the 600-line check
+  covers .jsx, .css, shell and shebang scripts; the mutation drill's stale-decision mutant
+  changes behaviour instead of crashing; refusal and error-path tests raise the coverage floor
+  from 86 to 90. (#82, #84, #85, #94, #98, #104, #106)
 
 ## 0.15.1
 
