@@ -49,7 +49,7 @@ def test_a_public_http_tool_still_sends_an_ordinary_vault_secret(configured, mon
         def __exit__(self, *_exc):
             return False
 
-        def request(self, method, url, json=None):
+        def stream(self, method, url, json=None):
             raise dispatch.httpx.ConnectError("stop here")
 
     monkeypatch.setattr(dispatch, "public_url", lambda _url: True)
