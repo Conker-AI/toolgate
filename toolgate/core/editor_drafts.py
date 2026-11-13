@@ -71,7 +71,7 @@ class EditorDocument(StrictDocument):
             raise ValueError("Give the draft a name")
         body = self.model_dump(exclude_unset=True)
         # Bounds apply to drafts too, even before graph/execution validation.
-        pending = [(body, 0)]
+        pending: list[tuple[object, int]] = [(body, 0)]
         count = 0
         while pending:
             value, depth = pending.pop()

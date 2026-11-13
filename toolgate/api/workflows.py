@@ -3,6 +3,7 @@
 import hashlib
 import math
 import time
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -23,7 +24,7 @@ from toolgate.core import (
 from toolgate.core import execution_journal as journal
 
 
-def _lookup_path(value, path: str):
+def _lookup_path(value, path: str) -> Any:
     for part in path.split(".") if path else []:
         if isinstance(value, dict) and part in value:
             value = value[part]
@@ -34,7 +35,7 @@ def _lookup_path(value, path: str):
     return value
 
 
-def _workflow_value(value, state: dict):
+def _workflow_value(value, state: dict) -> Any:
     if isinstance(value, str) and value.startswith("$args."):
         return _lookup_path(state["args"], value[6:])
     if isinstance(value, str) and value.startswith("$vars."):

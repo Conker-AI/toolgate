@@ -20,6 +20,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from typing import cast
 
 import httpx
 from dotenv import dotenv_values
@@ -55,8 +56,9 @@ def main() -> None:
         raise AssertionError(f"required local credentials are missing or unreadable: {exc}") from exc
     check(bool(owner_key and execution_key and callback_secret and memory_secret), "required local credentials are missing")
 
-    owner = {"X-ToolGate-Key": owner_key}
-    agent = {"X-ToolGate-Execution-Key": execution_key}
+    # check() above raised unless both keys are non-empty strings.
+    owner = {"X-ToolGate-Key": cast(str, owner_key)}
+    agent = {"X-ToolGate-Execution-Key": cast(str, execution_key)}
     temporary_key_ids: list[str] = []
     pending_request_ids: list[str] = []
     client = httpx.Client(base_url=API, timeout=190)

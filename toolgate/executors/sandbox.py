@@ -13,6 +13,7 @@ import json
 import os
 import re
 import socket
+from typing import cast
 
 from toolgate.core import tool_settings
 from toolgate.sandbox import guard, validation
@@ -67,7 +68,8 @@ def check(tool: dict, args: dict) -> list[str]:
                 return ["Provide only manager and packages."]
             manager = args.get("manager")
             cleaned = validation.packages(manager, args.get("packages"))
-            guard.check(manager, cleaned, tool_settings.trusted_packages())
+            # validation.packages refused anything but "pip" or "npm".
+            guard.check(cast(str, manager), cleaned, tool_settings.trusted_packages())
     except validation.Refused as exc:
         return [str(exc)]
     return []

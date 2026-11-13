@@ -14,6 +14,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
+from typing import Literal, overload
 
 from toolgate.core.paths import DB_PATH
 
@@ -107,9 +108,18 @@ class DefinitionConflict(ValueError):
         self.current_version = current_version
 
 
+@overload
+def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
+         require_existing: Literal[False] = False, require_absent: bool = False,
+         connection=None) -> dict: ...
+@overload
+def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
+         require_existing: bool, require_absent: bool = False,
+         connection=None) -> dict | None: ...
 def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
          require_existing: bool = False, require_absent: bool = False,
          connection=None) -> dict | None:
+    # None only when require_existing finds no row; the overloads say so to the type checker.
     now = _now()
     body = {**body, "id": obj_id}
     with (nullcontext(connection) if connection is not None else _conn()) as conn:
@@ -160,6 +170,10 @@ def retain_definition(conn, kind: str, definition: dict) -> None:
         conn.execute("INSERT INTO v2_definition_versions VALUES(?,?,?,?)", (*key, json.dumps(definition)))
 
 
+@overload
+def _change(kind: str, obj_id: str, change, default: dict) -> dict: ...
+@overload
+def _change(kind: str, obj_id: str, change, default: None = None) -> dict | None: ...
 def _change(kind: str, obj_id: str, change, default: dict | None = None) -> dict | None:
     """Read, change and write one object under one write lock, so two writers never undo each other."""
     with _conn() as conn:
@@ -495,6 +509,12 @@ def with_default_limits(policy: dict | None) -> dict:
     return policy
 
 
+@overload
+def create_tool(body: dict, *, require_existing: Literal[False] = False,
+                require_absent: bool = False) -> dict: ...
+@overload
+def create_tool(body: dict, *, require_existing: bool,
+                require_absent: bool = False) -> dict | None: ...
 def create_tool(body: dict, *, require_existing: bool = False,
                 require_absent: bool = False) -> dict | None:
     tool_id = body["id"]
@@ -511,6 +531,12 @@ def update_tool(tool_id: str, body: dict) -> dict | None:
     return create_tool({**body, "id": tool_id}, require_existing=True)
 
 
+@overload
+def create_automation(body: dict, *, require_existing: Literal[False] = False,
+                      require_absent: bool = False) -> dict: ...
+@overload
+def create_automation(body: dict, *, require_existing: bool,
+                      require_absent: bool = False) -> dict | None: ...
 def create_automation(body: dict, *, require_existing: bool = False,
                       require_absent: bool = False) -> dict | None:
     automation_id = body["id"]

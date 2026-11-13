@@ -245,7 +245,7 @@ def skip_sites() -> list[str]:
     return current().web_skip_sites
 
 
-def skipped(url: str, sites: list[str] | None = None) -> bool:
+def skipped(url: str | None, sites: list[str] | None = None) -> bool:
     """Whether `url` is on a site the owner never wants used as a source. Pass `sites` (from
     `skip_sites`) when checking many URLs, so the settings are read once."""
     host = (urlsplit(str(url)).hostname or "").lower().rstrip(".")

@@ -219,7 +219,7 @@ def consume_verification(request_id: str, subject_type: str, subject_id: str,
             conn, request_id, subject_type, subject_id, args, version, actor, actor_id)
 
 
-def consume_verification_in_transaction(conn, request_id: str, subject_type: str, subject_id: str,
+def consume_verification_in_transaction(conn, request_id: str | None, subject_type: str, subject_id: str,
                                         args: dict, version: int | None, actor: str,
                                         actor_id: str | None = None, *,
                                         publication_digest: str | None = None) -> tuple[bool, str]:
@@ -317,7 +317,7 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
             guard(conn, record)
         if record.get("status") != "pending":
             raise ValueError(f"request is already {record.get('status')}")
-        decision = {"actor": actor, "note": note, "at": _now()}
+        decision: dict[str, object] = {"actor": actor, "note": note, "at": _now()}
         if record.get("kind") == "verification":
             if not _verification_origin_valid(conn, record):
                 raise ValueError("Approval was not issued intact by ToolGate; request fresh confirmation")
