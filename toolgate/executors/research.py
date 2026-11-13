@@ -6,6 +6,8 @@ handles rather than arbitrary URLs.
 """
 from __future__ import annotations
 
+import contextvars
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -38,6 +40,33 @@ from toolgate.executors.research_text import (
     clean_text,
 )
 from toolgate.executors.research_web import _searx, _tavily
+
+
+class _OutOfTime(Exception):
+    pass
+
+
+def _within(seconds: float, provider, *args):
+    """Run one provider, giving up after `seconds`. A provider makes several calls, each with
+    its own timeout, so only a wall clock keeps it inside the search's deadline. A provider
+    still running is left to finish on its own; its calls end at their own timeouts and its
+    answer is dropped."""
+    outcome: dict = {}
+
+    def run():
+        try:
+            outcome["rows"] = provider(*args)
+        except BaseException as exc:  # handed back to the caller below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=contextvars.copy_context().run, args=(run,), daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise _OutOfTime
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["rows"]
 
 
 def search(query: str, source: str, limit: int, recency_days: int, until: float | None = None) -> dict:
@@ -86,7 +115,7 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
             failures.append(f"{provider_name}: shared deadline exhausted")
             break
         try:
-            rows = provider(clean_query, source, limit, recency_days, min(8.0, remaining))
+            rows = _within(remaining, provider, clean_query, source, limit, recency_days, min(8.0, remaining))
             # Sites the owner skips are never sources, whichever provider found them.
             rows = [row for row in rows if not tool_settings.skipped(row.get("url"), skip_sites)]
             completed_providers.append(provider_name)
@@ -94,6 +123,9 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
                 provider_used = provider_name
                 break
             failures.append(f"{provider_name}: no results")
+        except _OutOfTime:
+            failures.append(f"{provider_name}: shared deadline exhausted")
+            break
         # AttributeError: a provider's JSON with a list or null where an object belongs.
         except (ResearchError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
             failures.append(f"{provider_name}: {type(exc).__name__}")
