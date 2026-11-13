@@ -28,11 +28,23 @@ CREATE TABLE IF NOT EXISTS v2_actions (
 );
 CREATE INDEX IF NOT EXISTS v2_actions_usage_window
 ON v2_actions(subject_type, subject_id, created_at);
-CREATE TRIGGER IF NOT EXISTS v2_action_identity_immutable BEFORE UPDATE ON v2_actions
+-- Forgetting (core/forgetting.py) is the one change an identity takes: its arguments become {}.
+CREATE TABLE IF NOT EXISTS v2_forgotten (
+    object_type TEXT NOT NULL CHECK(object_type IN ('request','action')),
+    object_id TEXT NOT NULL,
+    forgotten_at TEXT NOT NULL,
+    forgotten_by TEXT NOT NULL,
+    PRIMARY KEY (object_type, object_id)
+);
+CREATE TRIGGER IF NOT EXISTS v2_forgotten_permanent BEFORE DELETE ON v2_forgotten
+BEGIN SELECT RAISE(ABORT, 'forgetting is permanent'); END;
+CREATE TRIGGER IF NOT EXISTS v2_action_identity_fixed BEFORE UPDATE ON v2_actions
 WHEN NEW.action_id IS NOT OLD.action_id OR NEW.fingerprint IS NOT OLD.fingerprint
   OR NEW.actor_id IS NOT OLD.actor_id OR NEW.subject_type IS NOT OLD.subject_type
   OR NEW.subject_id IS NOT OLD.subject_id OR NEW.version IS NOT OLD.version
-  OR NEW.args IS NOT OLD.args OR NEW.job_id IS NOT OLD.job_id
+  OR (NEW.args IS NOT OLD.args AND NOT (NEW.args = '{}' AND EXISTS (SELECT 1 FROM v2_forgotten
+      WHERE object_type = 'action' AND object_id = OLD.action_id)))
+  OR NEW.job_id IS NOT OLD.job_id
   OR NEW.parent_action_id IS NOT OLD.parent_action_id OR NEW.created_at IS NOT OLD.created_at
 BEGIN SELECT RAISE(ABORT, 'action identity is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS v2_actions_no_delete BEFORE DELETE ON v2_actions
@@ -40,10 +52,42 @@ BEGIN SELECT RAISE(ABORT, 'execution records are permanent'); END;
 CREATE TRIGGER IF NOT EXISTS v2_actions_no_replace BEFORE INSERT ON v2_actions
 WHEN EXISTS (SELECT 1 FROM v2_actions WHERE action_id=NEW.action_id)
 BEGIN SELECT RAISE(ABORT, 'action identity already exists'); END;
-CREATE TRIGGER IF NOT EXISTS v2_action_result_immutable BEFORE UPDATE ON v2_actions
-WHEN OLD.status='completed'
+CREATE TRIGGER IF NOT EXISTS v2_action_result_fixed BEFORE UPDATE ON v2_actions
+WHEN OLD.status='completed' AND NOT (NEW.status = 'completed' AND NEW.response = '@FORGOTTEN@'
+  AND EXISTS (SELECT 1 FROM v2_forgotten WHERE object_type = 'action' AND object_id = OLD.action_id))
 BEGIN SELECT RAISE(ABORT, 'completed execution records are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS v2_action_forgotten_stays BEFORE UPDATE ON v2_actions
+WHEN EXISTS (SELECT 1 FROM v2_forgotten WHERE object_type = 'action' AND object_id = OLD.action_id)
+  AND NOT (NEW.args = '{}' AND (
+      (NEW.status IS OLD.status AND (NEW.response IS OLD.response OR NEW.response = '@FORGOTTEN@'))
+      OR (OLD.status = 'outcome_unknown' AND NEW.status = 'completed' AND NEW.response = '@FORGOTTEN@')))
+BEGIN SELECT RAISE(ABORT, 'a forgotten action stays forgotten'); END;
 """
+# The one result a forgotten completed action keeps; the triggers above accept nothing else.
+FORGOTTEN_RESPONSE = json.dumps(
+    {"ok": False, "code": "FORGOTTEN",
+     "message": "The arguments and result of this action were forgotten with its chat."},
+    sort_keys=True, separators=(",", ":"))
+SCHEMA = SCHEMA.replace("@FORGOTTEN@", FORGOTTEN_RESPONSE)
+# Before forgetting existed these two refused every change; the triggers above replaced them.
+OLD_TRIGGERS = ("v2_action_identity_immutable", "v2_action_result_immutable")
+
+
+def _retire_old_triggers(conn) -> None:
+    """Once per database, in one transaction: the replacements already exist, so no moment
+    leaves a row unguarded, and a database without the old names never takes a write lock."""
+    present = "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN (?,?)"
+    if not conn.execute(present, OLD_TRIGGERS).fetchone():
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    for (name,) in conn.execute(present, OLD_TRIGGERS).fetchall():
+        conn.execute(f"DROP TRIGGER {name}")
+    conn.commit()
+
+
+def forgotten(conn, action_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM v2_forgotten WHERE object_type='action' AND object_id=?",
+                        (action_id,)).fetchone() is not None
 
 
 class ExecutionConflict(ValueError):
@@ -109,6 +153,7 @@ def initialize(conn) -> None:
                  "ON v2_events(event_type,subject_type,subject_id,created_at)")
     conn.executescript(recovery_journal.SCHEMA)
     conn.executescript(container_admission.SCHEMA)
+    _retire_old_triggers(conn)
     # Additive upgrade: legacy identities keep their exact original fingerprint.
     if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
         conn.execute("BEGIN IMMEDIATE")

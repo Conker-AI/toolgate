@@ -17,6 +17,12 @@ def lookup(conn, action_id):
         "SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
 
 
+def _forgotten(conn) -> set[str]:
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_forgotten'").fetchone():
+        return set()
+    return {row[0] for row in conn.execute("SELECT object_id FROM v2_forgotten WHERE object_type='action'")}
+
+
 def assert_not_held(conn):
     exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_recovery_hold'").fetchone()
     if exists and conn.execute("SELECT 1 FROM v2_recovery_hold").fetchone():
@@ -41,11 +47,15 @@ def reconcile(source_path, target_path):
             if source.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Authoritative journal integrity check failed.")
             newer = {row["action_id"]: dict(row) for row in source.execute("SELECT * FROM v2_actions")}
+            # A forgotten action keeps its fingerprint but not the arguments that made it.
+            forgotten = _forgotten(source)
             for row in newer.values():
                 expected = journal.fingerprint(row["subject_type"], row["subject_id"],
                     json.loads(row["args"]), row["actor_id"], row["job_id"], row["parent_action_id"],
                     row["publication_digest"])
-                if expected != row["fingerprint"] or row["status"] not in ("completed", "dispatching", "outcome_unknown"):
+                # Only a row actually blanked ({} arguments) may skip the arguments check.
+                blanked = row["action_id"] in forgotten and row["args"] == "{}"
+                if (expected != row["fingerprint"] and not blanked) or row["status"] not in ("completed", "dispatching", "outcome_unknown"):
                     raise ValueError("Authoritative action identity is inconsistent.")
                 if row["status"] == "completed" and not isinstance(json.loads(row["response"]), dict):
                     raise ValueError("Authoritative completed receipt is missing.")
@@ -60,8 +70,10 @@ def reconcile(source_path, target_path):
                     raise ValueError("Authoritative journal does not cover the restored identities.")
                 if current["updated_at"] < row["updated_at"]:
                     raise ValueError("Supplied journal is older than restored evidence.")
-                if row["status"] == "completed" and (current["status"] != "completed" or
-                        json.loads(row["response"]) != json.loads(current["response"])):
+                if row["status"] == "completed" and (
+                        current["status"] != "completed"
+                        or (identity not in forgotten
+                            and json.loads(row["response"]) != json.loads(current["response"]))):
                     raise ValueError("Completed action receipts conflict.")
             for identity, row in newer.items():
                 if row["status"] == "dispatching":

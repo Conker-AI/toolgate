@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A forgotten chat's tool records are forgotten here too.** `POST /v2/agent/forget` (the
+  caller's own requests and actions) and `POST /v2/admin/forget` blank their arguments, results
+  and words and keep who, when, what kind and the decision. A forgotten action can never run
+  again; a waiting approval or a running action is refused until it is withdrawn or done.
 - **Each tag gets a GitHub Release page and an SBOM.** The Release page's notes are the
   version's CHANGELOG section. Every image carries an SPDX SBOM (BuildKit attestation) inside
   the image index, and the signed build provenance covers that index digest. Check one with

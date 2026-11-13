@@ -76,7 +76,7 @@ def test_conflicting_completed_receipts_fail(databases, monkeypatch):
     journal.finish("before", {"receipt": "two"})
     # Ensure freshness is not the reason for rejection.
     with sqlite3.connect(source) as db:
-        db.execute("DROP TRIGGER v2_action_result_immutable")
+        db.execute("DROP TRIGGER v2_action_result_fixed")
         db.execute("UPDATE v2_actions SET updated_at=updated_at+60")
     with pytest.raises(ValueError, match="conflict"):
         recovery_journal.reconcile(source, target)
