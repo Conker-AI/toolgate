@@ -228,6 +228,44 @@ class TestPosixOnly:
             server.shutdown()
             socket_path.unlink(missing_ok=True)
 
+    def _serve(self, socket_path, clients):
+        server = proxy.Server(str(socket_path), clients)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def test_health_fails_without_a_socket(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PROXY_SOCKET", str(tmp_path / "missing.sock"))
+        assert proxy.health() == 1
+
+    def test_health_fails_on_a_socket_file_left_by_a_crash(self, tmp_path, monkeypatch):
+        stale = tmp_path / "stale.sock"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as left:
+            left.bind(str(stale))
+        assert stale.exists()
+        monkeypatch.setenv("PROXY_SOCKET", str(stale))
+        assert proxy.health() == 1
+
+    def test_health_fails_when_nothing_answers(self, tmp_path, monkeypatch):
+        hung = tmp_path / "hung.sock"
+        monkeypatch.setattr(proxy, "HEALTH_SECONDS", 0.5)
+        monkeypatch.setenv("PROXY_SOCKET", str(hung))
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(str(hung))
+            listener.listen(1)  # connections queue, nothing ever accepts them
+            assert proxy.health() == 1
+
+    @pytest.mark.parametrize("client", [True, False])
+    def test_health_passes_when_the_proxy_answers(self, tmp_path, monkeypatch, client):
+        socket_path = tmp_path / "test.sock"
+        uid = os.getuid()
+        server = self._serve(socket_path, {uid} if client else {uid + 1})
+        monkeypatch.setenv("PROXY_SOCKET", str(socket_path))
+        try:
+            assert proxy.health() == 0
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def _make_http_request(self, socket_path, method, path):
         """Helper to make HTTP request over Unix socket."""
 

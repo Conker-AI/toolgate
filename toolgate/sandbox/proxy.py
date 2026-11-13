@@ -276,8 +276,25 @@ def serve() -> int:
     return 0
 
 
+HEALTH_SECONDS = 5.0
+
+
 def health() -> int:
-    return 0 if os.path.exists(os.environ.get("PROXY_SOCKET", DEFAULT_SOCKET)) else 1
+    """Healthy only when the serving loop answers: a socket file left by a crash refuses the
+    connection, and a hung loop never answers. The health check's user is usually not a sandbox
+    client, so the peer check closing the connection counts as an answer."""
+    path = os.environ.get("PROXY_SOCKET", DEFAULT_SOCKET)
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(HEALTH_SECONDS)
+            connection.connect(path)
+            connection.sendall(b"GET /health HTTP/1.0\r\n\r\n")
+            connection.recv(1)
+    except (ConnectionResetError, BrokenPipeError):
+        return 0
+    except OSError:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
