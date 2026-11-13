@@ -117,10 +117,13 @@ class ResearchSearchTests(unittest.TestCase):
         self.assertIn("instruction_override", hostile["flags"])
         self.assertIn("secret_request", hostile["flags"])
         self.assertEqual("high", zero_width["risk"])
-        self.assertEqual("high", encoded["risk"])
+        # Role labels, directives and long tokens also fill ordinary docs: flagged, delivered
+        # fenced, never withheld on their own (search rows still drop them).
+        self.assertEqual("medium", encoded["risk"])
         self.assertIn("encoded_blob", encoded["flags"])
-        self.assertEqual("high", impersonation["risk"])
+        self.assertEqual("medium", impersonation["risk"])
         self.assertIn("role_impersonation", impersonation["flags"])
+        self.assertIn("reader_directive", impersonation["flags"])
         self.assertEqual("high", prompt_probe["risk"])
         self.assertIn("prompt_probe", prompt_probe["flags"])
 

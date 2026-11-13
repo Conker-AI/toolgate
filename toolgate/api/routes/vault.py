@@ -45,6 +45,8 @@ def delete_secret(name: str, _tier: str = Depends(require_admin)):
         vault.delete_secret(name)
     except KeyError:
         raise HTTPException(404, "secret not found") from None
+    except ValueError as exc:  # a runtime configuration name, never a vault secret
+        raise HTTPException(400, str(exc)) from None
     control_plane.event("secret_deleted", "warning", "secret", name, "admin")
     return {"name": name}
 
