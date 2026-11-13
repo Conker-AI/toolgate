@@ -5,7 +5,12 @@ import uuid
 from datetime import UTC, datetime
 
 from toolgate.api.deps import deny
-from toolgate.api.dispatch import _dispatch_tool, _render_template, _shape_tool_result
+from toolgate.api.dispatch import (
+    RefusedBeforeSend,
+    _dispatch_tool,
+    _render_template,
+    _shape_tool_result,
+)
 from toolgate.api.models import DEFAULT_CONFIRMATION_EXPIRY_SECONDS
 from toolgate.core import (
     access_policy,
@@ -20,6 +25,9 @@ from toolgate.core import (
 )
 from toolgate.core import execution_journal as journal
 from toolgate.executors import container_control, mcp_http, port_control, sandbox
+
+# Reported usage of a call that never left ToolGate: reconciles its spending hold to zero.
+NOTHING_SENT = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "thought_tokens": 0}
 
 
 def enforce_usage_limits(subject_type: str, subject: dict, event_type: str):
@@ -298,6 +306,7 @@ def invoke_tool(
         deny("ACTION_CONFLICT", str(exc), 409)
     if not dispatch:
         return journal.response(record)
+    refused: dict[str, str] | None = None
     try:
         if is_port:
 
@@ -335,14 +344,20 @@ def invoke_tool(
                 result = _shape_tool_result(tool, sandbox.execute(tool, args, agent, action_id))
         else:
             result = _dispatch_tool(tool, args)
+    except RefusedBeforeSend as exc:
+        # Nothing left ToolGate: a known failure that names its reason, and no spending.
+        refused = exc.refusal
+        result = {"ok": False, "error": refused["message"], "error_code": refused["code"]}
     except Exception:
         journal.unknown(action_id)
         return journal.response(journal.get(action_id))
     envelope = {
-        "code": "OK" if result["ok"] else "TOOL_UNAVAILABLE",
+        "code": "OK" if result["ok"] else refused["code"] if refused else "TOOL_UNAVAILABLE",
         "message": "Tool completed" if result["ok"] else result["error"],
         "result": result,
     }
+    if refused:
+        envelope["next_action"] = refused["next_action"] or "Nothing was sent; fix the cause and ask again"
     if publication:
         envelope["publication"] = {
             "kind": publication["kind"],
@@ -353,6 +368,8 @@ def invoke_tool(
     usage = (
         result.get("result", {}).get("usage") if isinstance(result.get("result"), dict) else None
     )
+    if refused:
+        usage = NOTHING_SENT
     record = journal.finish(
         action_id,
         envelope,
