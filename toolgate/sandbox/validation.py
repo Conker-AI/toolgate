@@ -107,7 +107,10 @@ def command(value) -> str:
 
 # --- the guard ---------------------------------------------------------------------------------
 
-SEPARATORS = re.compile(r"\|\||&&|[;|&\n(){}`]|\$\(")
+# Outside quotes these end one command; `$(` and backticks start one, even inside double
+# quotes and unquoted heredocs, because the shell runs them there.
+SEPARATORS = ";|&\n(){}"
+HEREDOC = re.compile(r"<<(-?)[ \t]*([^\s;|&<>()]+)")
 SHUTDOWN = {"shutdown", "reboot", "halt", "poweroff", "telinit", "kexec", "killall5"}
 SYSTEMCTL_STOPS = {"poweroff", "reboot", "halt", "kexec", "emergency", "rescue", "suspend"}
 WRAPPERS = {"sudo", "doas", "exec", "nohup", "time", "env", "command", "builtin", "nice", "timeout"}
@@ -179,13 +182,115 @@ def _segment_reason(words: list[str]) -> str | None:
     return None
 
 
+class _Scanner:
+    """Cuts a command line into the commands the shell would run, keeping quoted text and
+    heredoc bodies as data: `grep -E "a|halt" log` is one command, `echo "$(reboot)"` is two."""
+
+    def __init__(self, text: str, mode: str = "cmd"):
+        self.text, self.i = text, 0
+        self.modes = [mode]  # cmd, sub ($(...)), bt (`...`), sq, dq, hd (heredoc body)
+        self.buffers: list[list[str]] = [[]]
+        self.out: list[str] = []
+        self.heredocs: list[tuple[str, bool, bool]] = []  # delimiter, quoted, strip tabs
+
+    def cut(self) -> None:
+        self.out.append("".join(self.buffers[-1]))
+        self.buffers[-1] = []
+
+    def enter(self, mode: str) -> None:
+        self.modes.append(mode)
+        self.buffers.append([])
+
+    def leave(self) -> None:
+        self.modes.pop()
+        self.out.append("".join(self.buffers.pop()))
+
+    def keep(self, chunk: str) -> None:
+        self.buffers[-1].append(chunk)
+        self.i += len(chunk)
+
+    def segments(self) -> list[str]:
+        while self.i < len(self.text):
+            self.step()
+        while len(self.buffers) > 1:
+            self.leave()
+        if self.modes[0] != "hd":  # a heredoc body's own text is data, not a command
+            self.cut()
+        return self.out
+
+    def step(self) -> None:
+        text, i, mode = self.text, self.i, self.modes[-1]
+        char, pair = text[i], text[i:i + 2]
+        if mode == "sq":
+            if char == "'":
+                self.modes.pop()
+            self.keep(char)
+        elif char == "\\":
+            self.keep(pair)
+        elif pair == "$(":
+            self.i += 2
+            self.enter("sub")
+        elif char == "`":
+            self.i += 1
+            if mode == "bt":
+                self.leave()
+            else:
+                self.enter("bt")
+        elif mode in ("dq", "hd"):
+            if char == '"' and mode == "dq":
+                self.modes.pop()
+            self.keep(char)
+        else:
+            self.command_step(i, mode, char, pair)
+
+    def command_step(self, i: int, mode: str, char: str, pair: str) -> None:
+        text = self.text
+        heredoc = HEREDOC.match(text, i) if pair == "<<" and text[i + 2:i + 3] != "<" else None
+        if char in "'\"":
+            self.modes.append("sq" if char == "'" else "dq")
+            self.keep(char)
+        elif char == ")" and mode == "sub":
+            self.i += 1
+            self.leave()
+        elif heredoc:
+            word = heredoc.group(2)
+            delimiter = re.sub(r"['\"\\]", "", word)
+            self.heredocs.append((delimiter, delimiter != word, heredoc.group(1) == "-"))
+            self.keep(heredoc.group(0))
+        elif pair in ("||", "&&"):
+            self.cut()
+            self.i += 2
+        elif char in SEPARATORS:
+            self.cut()
+            self.i += 1
+            if char == "\n" and self.heredocs:
+                self.bodies()
+        else:
+            self.keep(char)
+
+    def bodies(self) -> None:
+        text = self.text
+        for delimiter, quoted, strip in self.heredocs:
+            lines = []
+            while self.i < len(text):
+                end = text.find("\n", self.i)
+                end = len(text) if end < 0 else end
+                line, self.i = text[self.i:end], end + 1
+                if (line.lstrip("\t") if strip else line) == delimiter:
+                    break
+                lines.append(line)
+            if not quoted:  # the shell still runs $(...) and `...` in an unquoted body
+                self.out += _Scanner("\n".join(lines), "hd").segments()
+        self.heredocs = []
+
+
 def guard(text: str) -> str | None:
     """Why this command is refused, or None. Best effort; the container limits are the boundary."""
     if FORK_BOMB.search(text):
         return "a fork bomb"
     if DEVICE_WRITE.search(text):
         return "overwriting a device"
-    for segment in SEPARATORS.split(text):
+    for segment in _Scanner(text).segments():
         reason = _segment_reason(_words(segment))
         if reason:
             return reason

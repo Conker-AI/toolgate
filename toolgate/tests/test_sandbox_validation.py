@@ -72,6 +72,46 @@ class TestGuard:
         assert reason is None, f"Command should be accepted: {command}"
 
 
+class TestGuardQuotes:
+    """Separators inside quotes or heredoc bodies are data (hunt toolgate-5 F9); code the shell
+    still runs there is checked."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'grep -E "error|halt|panic" log',
+            'echo "done; reboot now"',
+            "echo 'a && poweroff'",
+            'echo "$(date) reboot now"',
+            'printf "%s\\n" "x (shutdown) y"',
+            "cat <<EOF > notes.py\ndef stop():\n    shutdown()\nreboot\nEOF",
+            "cat <<'EOF' > run.sh\n$(reboot)\nEOF\necho written",
+            "cat <<-EOF\n\thalt\n\tEOF\nls",
+            "cat <<< 'reboot'",
+        ],
+    )
+    def test_quoted_and_heredoc_text_is_not_a_command(self, command):
+        assert validation.guard(command) is None, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo "$(reboot)"',
+            "echo `halt`",
+            'echo "`poweroff`"',
+            "cat <<EOF\n$(reboot)\nEOF",
+            "cat <<'EOF' > f\nshutdown()\nEOF\nreboot",
+            "cat <<EOF\nok\nEOF\nrm -rf /",
+            '"reboot"',
+            "echo 'x'; shutdown -h now",
+            'echo "a" && "/sbin/halt"',
+            "echo $(echo $(reboot))",
+        ],
+    )
+    def test_commands_around_and_inside_quotes_are_still_checked(self, command):
+        assert validation.guard(command) is not None, command
+
+
 class TestCommand:
     """Test command validation."""
 
