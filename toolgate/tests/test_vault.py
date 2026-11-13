@@ -157,6 +157,16 @@ class VaultEncryptionTests(unittest.TestCase):
                 with self.subTest(name=name), self.assertRaises(KeyError):
                     vault.get_key(name)
 
+    def test_toolgate_service_credentials_never_resolve_from_the_environment_or_file(self):
+        # ToolGate reads these itself (SystemGate's key, its own execution key, host roots); a
+        # tool's secret_headers or an MCP server's secret_ref must never send them elsewhere.
+        names = ["TOOLGATE_SYSTEMGATE_KEY", "TOOLGATE_EXECUTION_KEY", "TOOLGATE_FILE_ROOTS"]
+        vault.set_secret("TOOLGATE_EXECUTION_KEY", "in-the-file")
+        with patch.dict(os.environ, {name: "private-service-value" for name in names}):
+            for name in names:
+                with self.subTest(name=name), self.assertRaises(KeyError):
+                    vault.get_key(name)
+
     def test_service_credentials_kept_in_the_vault_still_resolve(self):
         vault.set_secret("MEMORYGATE_READ_KEY", "read-value")
         vault.set_secret("TOOLGATE_CALLBACK_SECRET", "callback-value")

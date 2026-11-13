@@ -70,6 +70,11 @@ _CONFIG_KEYS = _CONTROL_KEYS | {
     "TOOLGATE_VAULT_SECRET",
     "X_AGENT_ID",
 }
+# ToolGate's own settings and service credentials (the SystemGate key, execution key, sockets,
+# file roots) share this prefix and sit in the same environment and .env file. Only the
+# integrity callback's secret is a vault secret, so no tool can name the rest.
+_OWN_PREFIX = "TOOLGATE_"
+_OWN_SECRETS = {"TOOLGATE_CALLBACK_SECRET"}
 _NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 _SCRYPT_N = 2 ** 14
@@ -223,6 +228,8 @@ def get_key(placeholder: str) -> str:
     if placeholder in _CONFIG_KEYS:
         # A tool's secret_headers or secret_ref would otherwise send the admin key, the
         # bootstrap execution key or the vault secret itself to the tool's host.
+        raise KeyError(f"{placeholder} is ToolGate's own configuration, not a tool secret")
+    if placeholder.startswith(_OWN_PREFIX) and placeholder not in _OWN_SECRETS:
         raise KeyError(f"{placeholder} is ToolGate's own configuration, not a tool secret")
     value = _load().get(placeholder) or os.environ.get(placeholder)
     if not value:
