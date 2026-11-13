@@ -73,6 +73,13 @@ def main() -> None:
         response = admin("DELETE", path)
         check(response.status_code in {200, 404}, f"cleanup failed for {path}: {response.status_code}")
 
+    # The owner's lockdown is an emergency stop: never run over it, and lift only the one this
+    # run sets itself.
+    status = admin("GET", "/v2/status")
+    if status.status_code != 200 or status.json().get("lockdown") is not False:
+        client.close()
+        raise AssertionError("ToolGate is in lockdown (or its status is unreadable); lift it yourself first")
+    lockdown_set = False
     try:
         delete_if_present(f"/v2/tools/{TOOL_ID}")
         delete_if_present(f"/v2/tools/{AI_TOOL_ID}")
@@ -220,6 +227,7 @@ def main() -> None:
                               "services": admin("GET", "/v2/services").json()})
         check(memory_secret not in exposed and callback_secret not in exposed, "a vault value leaked into an API response or event")
 
+        lockdown_set = True
         response = admin("POST", "/v2/settings/lockdown?enabled=true&reason=end-to-end-verification")
         check(response.status_code == 200 and response.json()["lockdown"], "lockdown did not activate")
         check(execute("POST", "/v2/tools/github-repos-count/invoke", json={"args": {"username": "alexeybe1kin"}}).status_code == 423,
@@ -230,11 +238,13 @@ def main() -> None:
               "verification callback was accepted during lockdown")
         response = admin("POST", "/v2/settings/lockdown?enabled=false&reason=end-to-end-verification-complete")
         check(response.status_code == 200 and not response.json()["lockdown"], "lockdown did not clear")
+        lockdown_set = False
 
         print("ToolGate v2 live verification passed: executors, workflows, scopes, approvals, callbacks, redaction, and lockdown.")
     finally:
         try:
-            admin("POST", "/v2/settings/lockdown?enabled=false&reason=verification-cleanup")
+            if lockdown_set:
+                admin("POST", "/v2/settings/lockdown?enabled=false&reason=verification-cleanup")
             for request_id in pending_request_ids:
                 request = next((item for item in admin("GET", "/v2/requests").json() if item["id"] == request_id), None)
                 if request and request.get("status") == "pending":
