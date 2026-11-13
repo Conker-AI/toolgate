@@ -223,10 +223,12 @@ def decide(identity, status, note):
         if record.get("kind") != "verification":
             raise OwnerError("not_found", "Owner request not found.", 404)
         _gone(record)
+        if status != "approved":
+            # Saying no grants nothing, so every pending card can be closed, even one whose
+            # arguments, origin or publication cannot be shown; it never stays in the Inbox.
+            return
         view = project(db, record)
-        permitted = (view["reviewable"] if status == "approved" else
-                     view["unavailable_reason"] in {None, "expired", "unsupported_subject", "publication_unavailable"})
-        if not view["approval"]["origin_valid"] or not permitted:
+        if not view["approval"]["origin_valid"] or not view["reviewable"]:
             raise OwnerError("not_reviewable", "This exact action cannot be approved from this view.")
     try:
         record = approvals.decide_request(identity, status, "gateway-owner", note, guard=guard)

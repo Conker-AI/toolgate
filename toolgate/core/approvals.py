@@ -318,25 +318,25 @@ def decide_request(request_id: str, status: str, actor: str, note: str = "", *, 
         if record.get("status") != "pending":
             raise ValueError(f"request is already {record.get('status')}")
         decision: dict[str, object] = {"actor": actor, "note": note, "at": _now()}
-        if record.get("kind") == "verification":
+        if record.get("kind") == "verification" and status == "approved":
+            # Only a yes needs an intact origin; a no or a dismissal closes any pending card.
             if not _verification_origin_valid(conn, record):
                 raise ValueError("Approval was not issued intact by ToolGate; request fresh confirmation")
-            if status == "approved":
-                binding = record.get("payload", {}).get("binding", {})
-                if "expires_at" not in binding:
-                    raise ValueError("Approval expiry is invalid; request fresh confirmation")
-                if binding["expires_at"] is None:
-                    # The window in force now stays with this approval; a later change never
-                    # moves it.
-                    from toolgate.core import tool_settings
-                    decision["run_window_minutes"] = tool_settings.run_window(conn)
-                else:
-                    try:
-                        expires_at = datetime.fromisoformat(binding["expires_at"])
-                    except (TypeError, ValueError) as exc:
-                        raise ValueError("Approval expiry is invalid; request fresh confirmation") from exc
-                    if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
-                        raise ValueError("Approval has expired; request fresh confirmation")
+            binding = record.get("payload", {}).get("binding", {})
+            if "expires_at" not in binding:
+                raise ValueError("Approval expiry is invalid; request fresh confirmation")
+            if binding["expires_at"] is None:
+                # The window in force now stays with this approval; a later change never
+                # moves it.
+                from toolgate.core import tool_settings
+                decision["run_window_minutes"] = tool_settings.run_window(conn)
+            else:
+                try:
+                    expires_at = datetime.fromisoformat(binding["expires_at"])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Approval expiry is invalid; request fresh confirmation") from exc
+                if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
+                    raise ValueError("Approval has expired; request fresh confirmation")
         record["status"] = status
         record["decision"] = decision
         _save_request(conn, record)

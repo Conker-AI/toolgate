@@ -86,14 +86,16 @@ def test_fixed_projection_has_full_args_but_no_nonce_originating_key_or_unknown_
 @pytest.mark.parametrize("args", [{"text": "x" * 32768}, {str(i): i for i in range(1100)},
                                   {"invalid": float("nan")}, {"n": 9007199254740993},
                                   {"nested": [{"n": -9007199254740993}]}])
-def test_withheld_arguments_never_authorize_a_decision(gate, args):
+@pytest.mark.parametrize("no", ["rejected", "dismissed"])
+def test_withheld_arguments_never_approve_but_the_card_can_be_closed(gate, args, no):
     request = mint(gate, args)
     view = detail(gate, request["id"]).json()
     assert view["action"]["args"] is None and not view["reviewable"]
     assert view["unavailable_reason"] == "arguments_unavailable"
-    for status in ("approved", "rejected", "dismissed"):
-        assert decide(gate, request["id"], status).status_code == 409
+    assert decide(gate, request["id"], "approved").status_code == 409
     assert cp.get("request", request["id"])["status"] == "pending"
+    assert decide(gate, request["id"], no).status_code == 200
+    assert cp.get("request", request["id"])["status"] == no
 
 
 def test_origin_tampering_between_review_and_decision_fails_closed(gate):
@@ -108,6 +110,9 @@ def test_origin_tampering_between_review_and_decision_fails_closed(gate):
     view = detail(gate, request["id"]).json()
     assert view["unavailable_reason"] == "invalid_origin" and view["action"]["args"] is None
     assert cp.get("request", request["id"])["status"] == "pending"
+    # Saying no grants nothing, so a card with a broken origin still leaves the Inbox.
+    assert decide(gate, request["id"], "rejected").status_code == 200
+    assert cp.get("request", request["id"])["status"] == "rejected"
 
 
 def test_legacy_malformed_binding_is_read_only_not_server_error(gate):
@@ -116,6 +121,8 @@ def test_legacy_malformed_binding_is_read_only_not_server_error(gate):
     view = detail(gate, record["id"])
     assert view.status_code == 200 and view.json()["unavailable_reason"] == "invalid_origin"
     assert decide(gate, record["id"]).status_code == 409
+    assert decide(gate, record["id"], "dismissed").status_code == 200
+    assert cp.get("request", record["id"])["status"] == "dismissed"
 
 
 def test_expired_pending_remains_pending_but_can_only_be_rejected_or_dismissed(gate, monkeypatch):
