@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FILE_SIZES = SCRIPTS / "check_file_sizes.py"
 BOUNDARIES = SCRIPTS / "check_package_boundaries.py"
@@ -61,6 +63,29 @@ class TestCheckFileSizes:
         result = run_script(FILE_SIZES, tmp_path)
         assert result.returncode == 1
         assert "mod.py: 601 lines, limit 600. Split it by concern." in result.stdout
+
+    @pytest.mark.parametrize("name", ["App.jsx", "theme.css", "run.sh", "tool.cjs"])
+    def test_dashboard_styles_and_shell_files_are_measured(self, tmp_path, name):
+        write(tmp_path, name, source_file(601))
+        track_everything(tmp_path)
+        result = run_script(FILE_SIZES, tmp_path)
+        assert result.returncode == 1
+        assert f"{name}: 601 lines, limit 600." in result.stdout
+
+    def test_a_script_without_a_suffix_is_measured_by_its_shebang(self, tmp_path):
+        write(tmp_path, "bin/toolgate", "#!/usr/bin/env python3\n" + source_file(600))
+        write(tmp_path, "LICENSE", source_file(900))
+        track_everything(tmp_path)
+        result = run_script(FILE_SIZES, tmp_path)
+        assert result.returncode == 1
+        assert result.stdout.strip() == "bin/toolgate: 601 lines, limit 600. Split it by concern."
+
+    def test_a_last_line_without_a_newline_counts(self, tmp_path):
+        write(tmp_path, "mod.py", source_file(600) + "# line 601 without a newline")
+        track_everything(tmp_path)
+        result = run_script(FILE_SIZES, tmp_path)
+        assert result.returncode == 1
+        assert "mod.py: 601 lines, limit 600." in result.stdout
 
     def test_allowlisted_file_at_its_ceiling_passes(self, tmp_path):
         write(tmp_path, "big.py", source_file(700))
