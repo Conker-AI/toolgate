@@ -4,7 +4,9 @@
 # command, with no network, a read-only root, user 65533, no capabilities and hard limits. The
 # image itself carries no secret and no setuid program. Built from the repository root:
 #   docker build -f sandbox/Dockerfile sandbox
-FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
+# Debian 13: its Python 3.13 takes fixed releases that need >= 3.11.5 (bookworm has 3.11.2;
+# soupsieve 4, CVE-2026-126190).
+FROM node:22-trixie-slim@sha256:68c76cfad89921b927eae28ba21407475e29d0ce450afcdbe70c1532db042b64
 
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
