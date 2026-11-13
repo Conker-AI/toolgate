@@ -94,6 +94,7 @@ def log(**fields) -> None:
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    server: Server
     protocol_version = "HTTP/1.0"
     server_version = "conker-package-proxy"
     sys_version = ""
@@ -242,7 +243,7 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         super().__init__(path, Handler)
         os.chmod(path, 0o666)
 
-    def verify_request(self, request, client_address) -> bool:
+    def verify_request(self, request: socket.socket, client_address) -> bool:
         raw = request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
         uid = struct.unpack("3i", raw)[1]
         if uid not in self.clients:

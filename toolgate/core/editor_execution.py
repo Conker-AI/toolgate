@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import cast
 
 from .editor_drafts import EditorDocument
 from .editor_graph import validate_graph
@@ -22,7 +24,7 @@ class Budget:
     steps: int = 0
     items: int = 0
     frames: list = field(default_factory=list)
-    clock: object = time.monotonic
+    clock: Callable[[], float] = time.monotonic
 
     def check(self):
         for frame in self.frames:
@@ -82,7 +84,7 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
                     raise GraphValueError("Cannot divide by zero.")
                 operations = {"add": lambda: left + right, "subtract": lambda: left - right,
                               "multiply": lambda: left * right, "divide": lambda: left / right}
-                output = operations[config["operator"]]()
+                output = operations[cast(str, config["operator"])]()
             elif current.type == "condition":
                 output = compare(config["operator"], value(config["left"], config["operator"] == "exists"),
                                  value(config["right"]) if "right" in config else None)
@@ -91,7 +93,7 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
                 items = value(config["items"])
                 if not isinstance(items, list):
                     raise GraphValueError("Loop input must be an array.")
-                if len(items) > config["limit"]:
+                if len(items) > cast(int, config["limit"]):
                     raise GraphValueError("Loop input exceeds its item limit; no partial list was processed.")
                 mapped = []
                 for item in items:

@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import uuid
+from typing import cast
 
 from toolgate.sandbox import spec, validation
 from toolgate.sandbox.docker_api import Docker, DockerError
@@ -175,7 +176,8 @@ class Runner:
                 )
             else:
                 argv = spec.install_argv(
-                    request.get("manager"),
+                    # validation.packages (run before this call) refused anything but pip/npm.
+                    cast(str, request.get("manager")),
                     validation.packages(request.get("manager"), request.get("packages")),
                 )
         except validation.Refused as exc:
@@ -290,6 +292,8 @@ class Runner:
 
 
 class Handler(socketserver.StreamRequestHandler):
+    server: Server
+
     def handle(self):
         server: Server = self.server
         try:

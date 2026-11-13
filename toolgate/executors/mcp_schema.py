@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import re
+from typing import NoReturn
 
 
 class MCPError(ValueError):
@@ -15,7 +16,7 @@ class MCPError(ValueError):
         self.code, self.status = code, status
 
 
-def _error(code, message, status=422):
+def _error(code, message, status=422) -> NoReturn:
     raise MCPError(code, message, status)
 
 

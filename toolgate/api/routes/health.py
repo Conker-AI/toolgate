@@ -5,6 +5,7 @@ import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from fastapi import APIRouter
@@ -93,7 +94,7 @@ def _run_dependency_checks() -> dict:
         generation_configured = False
 
     # name -> the arguments of _probe_http for that check
-    probes = {
+    probes: dict[str, tuple[Any, ...]] = {
         "searxng": (
             settings.get("research_searxng_url", "http://toolgate-searxng:8080"),
             "/healthz",

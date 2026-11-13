@@ -2,7 +2,7 @@
 import hashlib
 import json
 import math
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from pydantic import Field
 
@@ -107,7 +107,7 @@ def _let_conker_use(conn, publication, agent):
     editor_runs.change(conn, publication, editor_runs.caller_key(conn, agent), True)
 
 
-def publish_draft(identity, payload: PublishDraft, *, validate, validate_tool, agent=None):
+def publish_draft(identity, payload: PublishDraft, *, validate, validate_tool, agent=None) -> dict:
     """Publish the saved revision; with conkerMayUse, grant `agent`'s key in the same transaction."""
     from . import publications
     editor_drafts._identity(identity)
@@ -148,8 +148,8 @@ def publish_draft(identity, payload: PublishDraft, *, validate, validate_tool, a
         validate(stored)
         saved = cp._put("automation", registry_id, stored,
                         expected_version=latest_version or None, connection=conn)
-        publication = publications.publish("automation", registry_id, saved["version"],
-                                            validate_tool=validate_tool, connection=conn)
+        publication = cast(dict, publications.publish("automation", registry_id, saved["version"],
+                                            validate_tool=validate_tool, connection=conn))
         conn.execute("INSERT INTO v2_editor_publications VALUES(?,?,?,?,?)",
             (identity, payload.expected_revision, registry_id, saved["version"], payload.authorization))
         if payload.conkerMayUse:

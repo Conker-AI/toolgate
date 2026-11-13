@@ -14,7 +14,7 @@ class PublicationInvalid(ValueError):
     pass
 
 
-def _kind(kind: str) -> None:
+def _kind(kind: str | None) -> None:
     if kind not in {"tool", "automation"}:
         raise ValueError("Only tools and automations have definition versions")
 
@@ -57,8 +57,11 @@ def history(kind: str, obj_id: str) -> list[dict]:
             for version, definition in sorted(definitions.items(), reverse=True)]
 
 
-def for_execution(conn, kind: str, obj_id: str, version: int) -> dict:
-    """Resolve only the requested publication and enforce current owner revocations."""
+def for_execution(conn, kind: str | None, obj_id: str | None, version: int | None) -> dict:
+    """Resolve only the requested publication and enforce current owner revocations.
+
+    Missing identity parts are refused here: an unknown kind raises ValueError and a missing
+    id or version matches no publication row."""
     _kind(kind)
     row = conn.execute("SELECT body FROM v2_publications WHERE kind=? AND id=? AND version=?",
                        (kind, obj_id, version)).fetchone()

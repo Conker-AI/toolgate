@@ -14,6 +14,7 @@ import json
 import re
 import time
 import uuid
+from typing import cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -231,7 +232,7 @@ class Session:
 
         def contains_secret(item):
             if isinstance(item, str):
-                return self.secret in item
+                return cast(str, self.secret) in item
             if isinstance(item, dict):
                 return any(
                     self.secret in key or contains_secret(child) for key, child in item.items()
@@ -319,7 +320,7 @@ class Session:
         if self.modern:
             headers["Mcp-Method"] = method
             if method == "tools/call":
-                headers["Mcp-Name"] = _header_value(params["name"])
+                headers["Mcp-Name"] = _header_value(cast(dict, params)["name"])
         if extra_headers:
             headers.update(extra_headers)
         if self.secret:

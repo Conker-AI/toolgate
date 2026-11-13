@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import re
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import httpx
 
@@ -205,11 +206,11 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
     for entry in entries if isinstance(entries, list) else []:
         if len(results) >= limit or not isinstance(entry, dict):
             break
-        rating = clean_text(entry.get("im:rating").get("label") if isinstance(entry.get("im:rating"), dict) else "", 2)
-        content = clean_text(entry.get("content").get("label") if isinstance(entry.get("content"), dict) else "", 6000)
-        title = clean_text(entry.get("title").get("label") if isinstance(entry.get("title"), dict) else "", 300)
-        updated = clean_text(entry.get("updated").get("label") if isinstance(entry.get("updated"), dict) else "", 80)
-        review_id = clean_text(entry.get("id").get("label") if isinstance(entry.get("id"), dict) else "", 40)
+        rating = clean_text(cast(dict, entry.get("im:rating")).get("label") if isinstance(entry.get("im:rating"), dict) else "", 2)
+        content = clean_text(cast(dict, entry.get("content")).get("label") if isinstance(entry.get("content"), dict) else "", 6000)
+        title = clean_text(cast(dict, entry.get("title")).get("label") if isinstance(entry.get("title"), dict) else "", 300)
+        updated = clean_text(cast(dict, entry.get("updated")).get("label") if isinstance(entry.get("updated"), dict) else "", 80)
+        review_id = clean_text(cast(dict, entry.get("id")).get("label") if isinstance(entry.get("id"), dict) else "", 40)
         if not rating or not rating.isdigit() or int(rating) > 3 or not content or not updated:
             continue
         try:

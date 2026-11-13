@@ -1,6 +1,7 @@
 """Caller authentication dependencies and the structured denial shared by every route module."""
 
 import secrets
+from typing import NoReturn
 
 from fastapi import Header, HTTPException
 
@@ -44,5 +45,5 @@ def require_owner_or_agent(
         require_agent(x_toolgate_execution_key, x_toolgate_agent)
 
 
-def deny(code: str, message: str, status: int = 403, next_action: str = ""):
+def deny(code: str, message: str, status: int = 403, next_action: str = "") -> NoReturn:
     raise HTTPException(status, {"code": code, "message": message, "next_action": next_action})

@@ -5,6 +5,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -238,7 +239,7 @@ def _discourse(query: str, _source: str, limit: int, recency_days: int, timeout:
         except (httpx.HTTPError, ResearchError) as exc:
             last_error = exc
             continue
-        topics = {int(topic.get("id")): topic for topic in payload.get("topics", []) if isinstance(topic, dict) and topic.get("id")}
+        topics = {int(cast(Any, topic.get("id"))): topic for topic in payload.get("topics", []) if isinstance(topic, dict) and topic.get("id")}
         host_rows = []
         for post in payload.get("posts", []):
             if not isinstance(post, dict):
