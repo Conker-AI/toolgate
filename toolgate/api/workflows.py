@@ -40,8 +40,11 @@ def _workflow_value(value, state: dict) -> Any:
         return _lookup_path(state["args"], value[6:])
     if isinstance(value, str) and value.startswith("$vars."):
         return _lookup_path(state["vars"], value[6:])
-    if isinstance(value, str) and value.startswith("$last"):
-        return _lookup_path(state.get("last"), value[6:] if value.startswith("$last.") else "")
+    # Exactly "$last" or "$last.<path>": text such as "$lastname" or "$last week" stays text.
+    if value == "$last":
+        return state.get("last")
+    if isinstance(value, str) and value.startswith("$last."):
+        return _lookup_path(state.get("last"), value[6:])
     if isinstance(value, list):
         return [_workflow_value(item, state) for item in value]
     if isinstance(value, dict):
