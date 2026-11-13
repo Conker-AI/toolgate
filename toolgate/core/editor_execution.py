@@ -82,8 +82,9 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
                     raise GraphValueError("Calculation requires numeric operands.")
                 if config["operator"] == "divide" and right == 0:
                     raise GraphValueError("Cannot divide by zero.")
-                operations = {"add": lambda: left + right, "subtract": lambda: left - right,
-                              "multiply": lambda: left * right, "divide": lambda: left / right}
+                a, b = cast(float, left), cast(float, right)
+                operations = {"add": lambda: a + b, "subtract": lambda: a - b,
+                              "multiply": lambda: a * b, "divide": lambda: a / b}
                 output = operations[cast(str, config["operator"])]()
             elif current.type == "condition":
                 output = compare(config["operator"], value(config["left"], config["operator"] == "exists"),
