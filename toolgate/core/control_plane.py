@@ -398,7 +398,8 @@ def validate_inputs(schema: list[dict], args: dict) -> list[str]:
             errors.append(f"'{key}' is not an allowed argument")
     for field in schema:
         name, value = field.get("name"), args.get(field.get("name"))
-        if field.get("required") and name not in args:
+        # A required field sent as null is as missing as one left out.
+        if field.get("required") and value is None:
             errors.append(f"'{name}' is required")
             continue
         if value is None:
