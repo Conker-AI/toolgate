@@ -23,6 +23,13 @@ INJECTION_RULES = (
     ("agent_addressing", re.compile(r"\b(ai|llm|language model|assistant|agent|bot)s?\b.{0,40}\b(reading|processing|summari[sz]ing|crawling|browsing)\s+(this|these)\s+(page|text|document|content|site|website|message|post|email|article|file)s?\b", re.I | re.S)),
 )
 
+# Rules that speak to the model itself. The others (role labels such as "System:", "base64",
+# long hex digests or tokens, "run ... in your terminal", "you should ... open") match most READMEs,
+# docs and Q&A answers, so on their own they do not withhold a page.
+STRONG_RULES = frozenset(
+    {"instruction_override", "secret_request", "prompt_probe", "agent_addressing"}
+)
+
 
 SUPPRESSED_TAGS = {
     "aside", "dialog", "footer", "form", "head", "header", "menu", "nav",
@@ -173,7 +180,12 @@ def extract_published_metadata(value: object) -> tuple[str | None, dict | None]:
 
 
 def inspect_text(value: str) -> dict:
+    """`risk` is "high" when a rule that addresses the model matched, "medium" when only rules
+    that ordinary technical writing also trips matched, else "low". Callers decide what each
+    level withholds: a fetched page is withheld only at "high" (otherwise it is delivered inside
+    its untrusted fence with the flags); a search row, read unfenced, is cut to its host at any
+    flag."""
     normalized = clean_text(value, max(len(value), 1))
     flags = [name for name, pattern in INJECTION_RULES if pattern.search(normalized)]
-    risk = "high" if flags else "low"
-    return {"risk": risk, "flags": flags}
+    strong = any(flag in STRONG_RULES for flag in flags)
+    return {"risk": "high" if strong else "medium" if flags else "low", "flags": flags}
