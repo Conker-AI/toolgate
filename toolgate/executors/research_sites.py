@@ -302,7 +302,8 @@ def _appstore_catalog(query: str, _source: str, limit: int, _recency_days: int, 
 
 
 def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
-    api_key = vault.get_key("GOOGLE_API_KEY")
+    # In a header, never the URL: URLs reach httpx's request log and every HTTPStatusError text.
+    key_header = {"X-Goog-Api-Key": vault.get_key("GOOGLE_API_KEY")}
     published_after = (datetime.now(UTC) - timedelta(days=recency_days)).isoformat().replace("+00:00", "Z")
     query_terms = [
         term for term in re.findall(r"[a-z0-9]+", query.lower())
@@ -312,10 +313,11 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
     search_response = httpx.get(
         "https://www.googleapis.com/youtube/v3/search",
         params={
-            "key": api_key, "part": "snippet", "type": "video", "q": focused_query,
+            "part": "snippet", "type": "video", "q": focused_query,
             "publishedAfter": published_after, "order": "relevance", "maxResults": min(5, max(1, limit)),
             "safeSearch": "moderate", "relevanceLanguage": "en",
         },
+        headers=key_header,
         timeout=timeout,
     )
     search_response.raise_for_status()
@@ -332,9 +334,10 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
             comments_response = httpx.get(
                 "https://www.googleapis.com/youtube/v3/commentThreads",
                 params={
-                    "key": api_key, "part": "snippet", "videoId": video_id,
+                    "part": "snippet", "videoId": video_id,
                     "maxResults": comments_per_video, "order": "relevance", "textFormat": "plainText",
                 },
+                headers=key_header,
                 timeout=timeout,
             )
             comments_response.raise_for_status()
