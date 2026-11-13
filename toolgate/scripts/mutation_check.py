@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 MCP = "toolgate/tests/test_mcp_adapter.py::"
 ARCHIVE = "toolgate/tests/test_execution_boundary.py::"
 INTEGRITY = "toolgate/tests/test_approval_integrity.py::"
+# Failures from a mutant that cannot run, not from the behaviour it changes.
+BROKEN_MUTANT = ("NameError", "ImportError", "SyntaxError", "IndentationError")
 
 # A mutant counts as caught only when its named behavioral test fails, never
 # when collection fails or the subprocess cannot start.
@@ -93,9 +95,12 @@ MUTANTS = [
         if guard is not None:
             guard(conn, record)
         if record.get("status") != "pending":""",
-        """    record = get("request", request_id)
-    if not record:
+        # A stale read: the row is read outside the write transaction, then decided on.
+        """    with _conn() as read:
+        row = read.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
+    if not row:
         return None
+    record = _row(row)
     with _conn() as conn:
         if guard is not None:
             guard(conn, record)
@@ -472,6 +477,12 @@ def main() -> int:
                 return 1
             finally:
                 path.write_text(original, encoding="utf-8")
+            output = result.stdout + result.stderr
+            if any(crash in output for crash in BROKEN_MUTANT):
+                # A test failing on the mutant's own crash proves nothing about the behaviour.
+                print(output)
+                print(f"BROKEN MUTANT (it crashes instead of changing behaviour): {label}")
+                return 1
             if result.returncode != 1 or f"FAILED {test}" not in result.stdout:
                 print(result.stdout + result.stderr)
                 print(f"NOT CAUGHT: {label}")

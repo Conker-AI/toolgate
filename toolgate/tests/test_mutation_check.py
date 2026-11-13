@@ -65,3 +65,35 @@ def test_mutant_timeout_prints_the_label_and_fails_with_the_file_restored(
     assert drill.main() == 1
     assert calls == ["baseline", "mutant-0"]
     assert "TIMED OUT: drill anchor mutated" in capsys.readouterr().out
+
+
+def test_a_mutant_that_crashes_is_reported_broken_not_caught(drill, monkeypatch, capsys):
+    crash = "E   NameError: name 'get' is not defined\nFAILED some/test - NameError"
+
+    def fake_run_tests(root, tests, name):
+        if name == "baseline":
+            return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        return subprocess.CompletedProcess([], 1, stdout=crash, stderr="")
+
+    monkeypatch.setattr(drill, "run_tests", fake_run_tests)
+    monkeypatch.setattr(
+        drill,
+        "MUTANTS",
+        [("crashing mutant", ANCHOR[1], ANCHOR[0], ANCHOR[0] + "  # mutated", "some/test")],
+    )
+    assert drill.main() == 1
+    out = capsys.readouterr().out
+    assert "BROKEN MUTANT (it crashes instead of changing behaviour): crashing mutant" in out
+    assert "Caught: crashing mutant" not in out
+
+
+def test_the_stale_decision_mutant_reads_the_row_itself():
+    # The stale-decision mutant once called control_plane.get from approvals.py, which does not
+    # import it: the test failed on NameError and the drill printed "Caught".
+    spec = importlib.util.spec_from_file_location("mutation_check_names", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    label, _file, _before, after, _test = next(
+        m for m in module.MUTANTS if m[0] == "stale decision overwrites consumption"
+    )
+    assert 'get("request"' not in after, label
