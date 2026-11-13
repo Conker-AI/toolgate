@@ -14,13 +14,24 @@ import sys
 from pathlib import Path
 
 LIMIT = 600
-SUFFIXES = (".py", ".ts", ".tsx", ".js", ".mjs")
+SUFFIXES = (".py", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".sh")
 ALLOWLIST = Path("file-size-allowlist.txt")
 
 
 def tracked_sources() -> list[str]:
     out = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout
-    return [path for path in out.splitlines() if path.endswith(SUFFIXES)]
+    return [path for path in out.splitlines() if path.endswith(SUFFIXES) or _script(path)]
+
+
+def _script(path: str) -> bool:
+    """A file with no suffix that starts with "#!" is a script (toolgate/cli/toolgate)."""
+    if "." in Path(path).name:
+        return False
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(2) == b"#!"
+    except OSError:
+        return False
 
 
 def allowlist() -> dict[str, int]:
@@ -39,7 +50,8 @@ def main() -> int:
     allowed = allowlist()
     problems = []
     for path in tracked_sources():
-        lines = Path(path).read_text(encoding="utf-8", errors="replace").count("\n")
+        # splitlines also counts a last line that has no final newline.
+        lines = len(Path(path).read_text(encoding="utf-8", errors="replace").splitlines())
         ceiling = allowed.pop(path, None)
         if ceiling is None and lines > LIMIT:
             problems.append(f"{path}: {lines} lines, limit {LIMIT}. Split it by concern.")
