@@ -184,8 +184,13 @@ class ResearchSiteTests(unittest.TestCase):
         }}}]}
         with patch.object(research_web.vault, "get_key", return_value="private-google-key"), \
              patch.object(research_base, "_public_https_url", return_value=True), \
-             patch.object(research.httpx, "get", side_effect=[videos, comments]):
+             patch.object(research.httpx, "get", side_effect=[videos, comments]) as get:
             rows = research._youtube("invoice workflow complaints", "youtube", 5, 30, 5)
+        # The key travels in a header, never in the URL (request logs, HTTPStatusError text).
+        self.assertEqual(2, get.call_count)
+        for call in get.call_args_list:
+            self.assertNotIn("private-google-key", str(call.args) + str(call.kwargs.get("params")))
+            self.assertEqual({"X-Goog-Api-Key": "private-google-key"}, call.kwargs["headers"])
         self.assertEqual(1, len(rows))
         self.assertEqual("youtube", rows[0]["source"])
         self.assertIn("Viewer comment", rows[0]["document"])
