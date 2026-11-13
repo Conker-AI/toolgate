@@ -3,6 +3,7 @@
 import hashlib
 import os
 import re
+from typing import NoReturn
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -23,6 +24,19 @@ from toolgate.executors import (
 )
 
 
+class RefusedBeforeSend(HTTPException):
+    """A refusal raised before anything left ToolGate (bad arguments, a destination outside the
+    allowlist, a missing credential): the action is a known failure, never an unknown outcome."""
+
+    def __init__(self, status: int, refusal: dict[str, str]) -> None:
+        super().__init__(status, refusal)
+        self.refusal = refusal
+
+
+def _refuse(code: str, message: str, status: int = 403, next_action: str = "") -> NoReturn:
+    raise RefusedBeforeSend(status, {"code": code, "message": message, "next_action": next_action})
+
+
 def _public_destination(host: str) -> bool:
     try:
         resolve_public(host)
@@ -36,7 +50,7 @@ def _render_template(value, args: dict):
         rendered = value
         for name in set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", value)):
             if name not in args:
-                deny("VALIDATION_ERROR", f"Missing template argument '{name}'", 422)
+                _refuse("VALIDATION_ERROR", f"Missing template argument '{name}'", 422)
             rendered = rendered.replace(f"{{{name}}}", str(args[name]))
         return rendered
     if isinstance(value, list):
@@ -67,7 +81,7 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
     url = template
     for name in placeholders:
         if name not in args:
-            deny("VALIDATION_ERROR", f"Missing template argument '{name}'", 422)
+            _refuse("VALIDATION_ERROR", f"Missing template argument '{name}'", 422)
         url = url.replace(f"{{{name}}}", quote(str(args[name]), safe=""))
     parsed = urlsplit(url)
     allowed_hosts = {str(host).lower() for host in execution["allowed_hosts"]}
@@ -76,12 +90,12 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
         or not parsed.hostname
         or parsed.hostname.lower() not in allowed_hosts
     ):
-        deny(
+        _refuse(
             "DESTINATION_DENIED",
             "The rendered destination is outside this tool's exact host allowlist",
         )
     if not public_url(url):
-        deny(
+        _refuse(
             "DESTINATION_DENIED",
             "Public HTTP tools cannot reach private or unresolved network destinations",
         )
@@ -90,7 +104,7 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
         try:
             headers[header] = vault.get_key(secret_ref)
         except KeyError:
-            deny(
+            _refuse(
                 "SECRET_UNAVAILABLE",
                 f"Required vault reference '{secret_ref}' is not configured",
                 503,
@@ -126,7 +140,7 @@ def _execute_memorygate(execution: dict, args: dict) -> dict:
     try:
         access_key = vault.get_key(execution["secret_ref"])
     except KeyError:
-        deny("SECRET_UNAVAILABLE", "MemoryGate read credential is not configured", 503)
+        _refuse("SECRET_UNAVAILABLE", "MemoryGate read credential is not configured", 503)
     agent_id = str(execution.get("agent_id", "default"))
     headers = {"X-MemoryGate-Key": access_key, "X-Agent-Id": agent_id}
     if operation == "context":
@@ -160,7 +174,7 @@ def _execute_ollama(execution: dict, args: dict) -> dict:
     if pi:
         # Pi's tool-text role picks the model and temperature; the tool sets the token cap.
         if len(prompt) > pi_inference.PROMPT_LIMIT:
-            deny("VALIDATION_ERROR", "AI tool prompt must be at most 64,000 characters", 422)
+            _refuse("VALIDATION_ERROR", "AI tool prompt must be at most 64,000 characters", 422)
         try:
             text = pi_inference.generate(
                 *pi,
@@ -202,14 +216,14 @@ def _execute_ollama(execution: dict, args: dict) -> dict:
 def _execute_gemini(execution: dict, args: dict) -> dict:
     model = execution["model"]
     if model != spending.MODEL:
-        deny("AI_MODEL_DENIED", "This model has no bounded spending adapter", 422)
+        _refuse("AI_MODEL_DENIED", "This model has no bounded spending adapter", 422)
     prompt = _render_template(execution["prompt_template"], args)
     if not isinstance(prompt, str) or not 1 <= len(prompt) <= 20000:
-        deny("VALIDATION_ERROR", "Hosted AI prompt must contain 1-20,000 characters", 422)
+        _refuse("VALIDATION_ERROR", "Hosted AI prompt must contain 1-20,000 characters", 422)
     try:
         api_key = vault.get_key(execution["secret_ref"])
     except KeyError:
-        deny("SECRET_UNAVAILABLE", "Hosted AI credential is not configured", 503)
+        _refuse("SECRET_UNAVAILABLE", "Hosted AI credential is not configured", 503)
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -456,7 +470,7 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
         # handler. Reusing that action ID can never dispatch the mutation again.
     elif executor_type == "system_inventory":
         if tool["execution"] != {"type": "system_inventory"} or set(args) - {"limit"}:
-            deny("VALIDATION_ERROR", "System inventory accepts only a bounded limit.", 422)
+            _refuse("VALIDATION_ERROR", "System inventory accepts only a bounded limit.", 422)
         try:
             result = {"ok": True, "result": system_inventory.collect(args.get("limit", 100))}
         except system_inventory.InventoryError as exc:
