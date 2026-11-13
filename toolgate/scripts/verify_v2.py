@@ -10,6 +10,11 @@ It reads vault values through ``toolgate.core.vault`` rather than parsing
 somewhere the vault key is reachable -- inside the API container
 (``docker compose exec api python toolgate/scripts/verify_v2.py``) or on a host
 with ``TOOLGATE_VAULT_SECRET`` set.
+
+It also needs objects the owner's install provides and the script does not create: the tools
+``memorygate-context`` and ``github-repos-count`` (billing mode free) and a verification method
+named "Home approval adapter". A run without them stops before it creates anything and names
+what is missing.
 """
 from __future__ import annotations
 
@@ -35,6 +40,11 @@ API = "http://127.0.0.1:8010"
 TOOL_ID = "verify-owner-confirmation"
 AI_TOOL_ID = "verify-local-ai"
 AUTOMATION_ID = "verify-workflow"
+INVALID_POST_ID = "verify-invalid-post"
+REQUIRED_TOOLS = ("memorygate-context", "github-repos-count")
+APPROVAL_METHOD = "Home approval adapter"
+TEMPORARY_PATHS = (f"/v2/tools/{TOOL_ID}", f"/v2/tools/{AI_TOOL_ID}",
+                   f"/v2/tools/{INVALID_POST_ID}", f"/v2/automations/{AUTOMATION_ID}")
 
 
 def check(condition: bool, message: str) -> None:
@@ -81,9 +91,17 @@ def main() -> None:
         raise AssertionError("ToolGate is in lockdown (or its status is unreadable); lift it yourself first")
     lockdown_set = False
     try:
-        delete_if_present(f"/v2/tools/{TOOL_ID}")
-        delete_if_present(f"/v2/tools/{AI_TOOL_ID}")
-        delete_if_present(f"/v2/automations/{AUTOMATION_ID}")
+        missing = [f"tool {tool_id}" for tool_id in REQUIRED_TOOLS
+                   if admin("GET", f"/v2/tools/{tool_id}").status_code != 200]
+        listed = admin("GET", "/v2/verification-methods")
+        methods = listed.json() if listed.status_code == 200 else []
+        method = next((item for item in methods if item.get("name") == APPROVAL_METHOD), None)
+        if method is None:
+            missing.append(f'verification method "{APPROVAL_METHOD}"')
+        check(not missing, "this install lacks what the verifier needs: " + ", ".join(missing))
+        method = cast(dict, method)  # check() above raised unless it was found
+        for path in TEMPORARY_PATHS:
+            delete_if_present(path)
 
         tool = {
             "id": TOOL_ID, "name": "Verification echo", "description": "Temporary exact-approval verifier.",
@@ -133,7 +151,7 @@ def main() -> None:
         check(response.status_code == 200, f"could not create workflow verifier: {response.text}")
 
         invalid_post = {
-            "id": "verify-invalid-post", "name": "Invalid POST", "inputs": [], "outputs": [],
+            "id": INVALID_POST_ID, "name": "Invalid POST", "inputs": [], "outputs": [],
             "execution": {"type": "http_json", "method": "POST", "url": "https://api.github.com/user",
                           "allowed_hosts": ["api.github.com"], "result_path": "id"},
             "authorization": "auto", "status": "active",
@@ -172,8 +190,6 @@ def main() -> None:
             else:
                 check(any(item["id"] == AUTOMATION_ID for item in automations) and not tools, "automation scope crossed into tools")
 
-        methods = admin("GET", "/v2/verification-methods").json()
-        method = next(item for item in methods if item["name"] == "Home approval adapter")
         first_args = {"value": "approved-exactly-once"}
         response = execute("POST", f"/v2/tools/{TOOL_ID}/invoke", json={"args": first_args})
         check(response.status_code == 200 and response.json()["code"] == "CONFIRMATION_REQUIRED", "confirmation was not requested")
@@ -251,9 +267,8 @@ def main() -> None:
                     admin("POST", f"/v2/requests/{request_id}/decision", json={"status": "dismissed", "note": "verification cleanup"})
             for key_id in temporary_key_ids:
                 admin("DELETE", f"/v2/agent-keys/{key_id}")
-            delete_if_present(f"/v2/tools/{TOOL_ID}")
-            delete_if_present(f"/v2/tools/{AI_TOOL_ID}")
-            delete_if_present(f"/v2/automations/{AUTOMATION_ID}")
+            for path in TEMPORARY_PATHS:
+                delete_if_present(path)
         finally:
             client.close()
 
