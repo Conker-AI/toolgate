@@ -83,6 +83,14 @@ QUERY_STOP_WORDS = {
 }
 
 
+
+def topic_terms(query: str, stop_words: set[str], min_length: int = 3) -> list[str]:
+    """The query's words without filler, in order. When every word is filler ("email
+    software"), all of them: the owner's query never shrinks to nothing."""
+    words = list(dict.fromkeys(term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) >= min_length))
+    return [word for word in words if word not in stop_words] or words
+
+
 REDDIT_QUERY_STOP_WORDS = QUERY_STOP_WORDS - {
     "business", "businesses", "manual", "spreadsheet", "spreadsheets", "workflow", "workflows",
 }

@@ -15,6 +15,7 @@ from toolgate.executors.research_base import (
     ResearchError,
     _normalize,
     json_body,
+    topic_terms,
 )
 from toolgate.executors.research_text import clean_text, extract_html_text
 
@@ -49,10 +50,7 @@ def _github_repositories(query: str, _source: str, limit: int, recency_days: int
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "ToolGateResearch/2.0"}
     with contextlib.suppress(KeyError):
         headers["Authorization"] = f"Bearer {vault.get_key('GITHUB_TOKEN')}"
-    terms = [
-        term for term in dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower()))
-        if len(term) >= 3 and term not in QUERY_STOP_WORDS
-    ][:3]
+    terms = topic_terms(query, QUERY_STOP_WORDS)[:3]
     if not terms:
         return []
     request_args = {
@@ -241,10 +239,7 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
 
 def _appstore_catalog(query: str, _source: str, limit: int, _recency_days: int, timeout: float) -> list[dict]:
     """Resolve a bounded market query to public iOS app identities."""
-    terms = {
-        term for term in re.findall(r"[a-z0-9]+", query.lower())
-        if len(term) >= 3 and term not in QUERY_STOP_WORDS
-    }
+    terms = set(topic_terms(query, QUERY_STOP_WORDS))
     if not terms:
         raise ResearchError("App Store catalog query needs a concrete market or workflow term")
     response = httpx.get(
@@ -377,10 +372,7 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
     if not control_plane.settings().get("producthunt_commercial_use_approved", False):
         raise ResearchError("Product Hunt API business-use approval has not been confirmed")
     token = vault.get_key("PRODUCTHUNT_TOKEN")
-    terms = [
-        term for term in dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower()))
-        if len(term) >= 3 and term not in QUERY_STOP_WORDS
-    ][:4]
+    terms = topic_terms(query, QUERY_STOP_WORDS)[:4]
     if not terms:
         raise ResearchError("Product Hunt query has no useful topic terms")
     endpoint = "https://api.producthunt.com/v2/api/graphql"

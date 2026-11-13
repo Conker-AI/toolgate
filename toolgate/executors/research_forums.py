@@ -21,6 +21,7 @@ from toolgate.executors.research_base import (
     _normalize,
     _require_provider_ready,
     json_body,
+    topic_terms,
 )
 from toolgate.executors.research_text import clean_text, extract_html_text
 from toolgate.executors.research_web import _searx, _tavily
@@ -213,10 +214,7 @@ def _reddit_subreddit_tavily(query: str, source: str, limit: int, recency_days: 
 def _discourse(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
     """Search approved public automation communities through Discourse JSON."""
     deadline = time.monotonic() + max(1.0, timeout)
-    terms = [
-        term for term in dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower()))
-        if len(term) >= 3 and term not in QUERY_STOP_WORDS
-    ][:4]
+    terms = topic_terms(query, QUERY_STOP_WORDS)[:4]
     if not terms:
         return []
     after = (datetime.now(UTC) - timedelta(days=recency_days)).date().isoformat()
