@@ -15,13 +15,24 @@ INJECTION_RULES = (
     ("role_impersonation", re.compile(r"\b(system|developer|assistant)\s*(message|prompt|instruction)?\s*:", re.I)),
     ("secret_request", re.compile(r"\b(reveal|print|send|upload|exfiltrate)\b.{0,80}\b(secret|credential|token|api[- _]?key|password|environment)\b", re.I | re.S)),
     ("tool_command", re.compile(r"\b(run|execute|call)\b.{0,60}\b(toolgate|terminal|shell|powershell|bash|curl)\b", re.I | re.S)),
-    ("encoded_payload", re.compile(r"\b(base64|decode this|hidden instruction|jailbreak)\b", re.I)),
+    ("encoded_payload", re.compile(r"\b(base64|jailbreak)\b", re.I)),
+    ("hidden_instruction", re.compile(r"\b(decode this|hidden instructions?)\b", re.I)),
     ("encoded_blob", re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{96,}={0,2}(?![A-Za-z0-9+/])")),
-    ("model_directive", re.compile(r"\b(assistant|agent|model|you)\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b", re.I | re.S)),
+    ("model_directive", re.compile(r"\b(assistant|agent|model|ai|llm)s?\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b", re.I | re.S)),
+    # The same order to "you": how docs address their reader, so weak on its own.
+    ("reader_directive", re.compile(r"\byou\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b", re.I | re.S)),
     ("prompt_probe", re.compile(r"\b(repeat|show|print|reveal)\b.{0,60}\b(system prompt|hidden instructions?|developer message)\b", re.I | re.S)),
     # Pages written to agents ("to any AI reading this page") rather than to people.
     ("agent_addressing", re.compile(r"\b(ai|llm|language model|assistant|agent|bot)s?\b.{0,40}\b(reading|processing|summari[sz]ing|crawling|browsing)\s+(this|these)\s+(page|text|document|content|site|website|message|post|email|article|file)s?\b", re.I | re.S)),
 )
+
+# Rules that speak to the model itself. The others (role labels such as "System:", "base64",
+# "jailbreak", long hex digests or tokens, "run ... in your terminal", "you should ... open") match
+# most READMEs, docs and Q&A answers, so on their own they do not withhold a page.
+STRONG_RULES = frozenset({
+    "instruction_override", "secret_request", "prompt_probe", "agent_addressing",
+    "model_directive", "hidden_instruction",
+})
 
 
 SUPPRESSED_TAGS = {
@@ -173,7 +184,12 @@ def extract_published_metadata(value: object) -> tuple[str | None, dict | None]:
 
 
 def inspect_text(value: str) -> dict:
+    """`risk` is "high" when a rule that addresses the model matched, "medium" when only rules
+    that ordinary technical writing also trips matched, else "low". Callers decide what each
+    level withholds: a fetched page is withheld only at "high" (otherwise it is delivered inside
+    its untrusted fence with the flags); a search row, read unfenced, is cut to its host at any
+    flag."""
     normalized = clean_text(value, max(len(value), 1))
     flags = [name for name, pattern in INJECTION_RULES if pattern.search(normalized)]
-    risk = "high" if flags else "low"
-    return {"risk": risk, "flags": flags}
+    strong = any(flag in STRONG_RULES for flag in flags)
+    return {"risk": "high" if strong else "medium" if flags else "low", "flags": flags}
