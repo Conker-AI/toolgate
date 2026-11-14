@@ -10,6 +10,16 @@
 - **More refusal tests for research.** The forum, site and web search providers are tested on
   quota and server refusals, oversized and malformed answers, and rows that break a rule; the
   CI coverage floor goes up with them. No behaviour change.
+- **Forgetting an action drops the reviewer's reason for it.** The `action_decided` event keeps
+  who decided and how, without the free-text reason, also for an action that asked and never ran.
+- **An editor run that finishes after its forget stays blank.** The run's late write no longer
+  puts its result back.
+- **A workflow child known only by its recovery receipt is forgotten with its root**, and holds
+  the root back while it runs.
+- **A child of a running workflow is refused until the workflow ends** (`still_running`), since
+  the workflow writes its children's results into its own.
+- **A reconcile excuses a forgotten action's changed response only when it is the forgotten
+  receipt.** Any other change still conflicts.
 
 ## 0.16.0
 

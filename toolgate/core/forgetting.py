@@ -96,14 +96,48 @@ def _requests(conn, ids: list[str], agent_id: str | None, by: str) -> dict:
     return result
 
 
-def _tree(conn, action_id: str) -> list[str]:
+def _children(conn, action_id: str) -> list[str]:
+    # A child may exist only as a recovery receipt (a restore older than the run, reconciled).
     return [row[0] for row in conn.execute(
-        "WITH RECURSIVE tree(id) AS (SELECT ? UNION SELECT a.action_id FROM v2_actions a"
-        " JOIN tree ON a.parent_action_id = tree.id) SELECT id FROM tree", (action_id,))]
+        "SELECT action_id FROM v2_actions WHERE parent_action_id=? UNION SELECT action_id"
+        " FROM v2_recovery_receipts WHERE json_extract(record,'$.parent_action_id')=?",
+        (action_id, action_id))]
+
+
+def _tree(conn, action_id: str) -> list[str]:
+    tree, queue = [action_id], [action_id]
+    while queue:
+        for child in _children(conn, queue.pop()):
+            if child not in tree:
+                tree.append(child)
+                queue.append(child)
+    return tree
+
+
+def _ancestors(conn, row) -> list[str]:
+    """Statuses above an action: a running workflow writes its children's results into its own."""
+    statuses, seen, parent = [], set(), row["parent_action_id"]
+    while parent and parent not in seen:
+        seen.add(parent)
+        found = recovery_journal.lookup(conn, parent)
+        if not found:
+            break
+        statuses.append(found["status"])
+        parent = found["parent_action_id"]
+    return statuses
+
+
+def _blank_decisions(conn, action_id: str, actor: str | None = None) -> None:
+    # The policy reason is the reviewer's words about his request; who decided and how stays.
+    # `actor` limits it to one key's events (an action that asked and never ran has no row).
+    conn.execute("UPDATE v2_events SET payload=json_set(payload,'$.reason','')"
+                 " WHERE event_type='action_decided' AND json_extract(payload,'$.action_id')=?"
+                 " AND (? IS NULL OR actor=?)", (action_id, actor, actor))
 
 
 def _blank_action(conn, action_id: str, by: str) -> None:
     _mark(conn, "action", action_id, by)
+    _blank_decisions(conn, action_id)
     conn.execute("UPDATE v2_actions SET args=?, response=CASE WHEN status='completed' THEN ?"
                  " ELSE response END WHERE action_id=?", (EMPTY, journal.FORGOTTEN_RESPONSE, action_id))
     receipt = conn.execute("SELECT record FROM v2_recovery_receipts WHERE action_id=?", (action_id,)).fetchone()
@@ -126,6 +160,8 @@ def _editor_run_only(conn, action_id: str, agent_id: str | None, by: str, result
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_editor_runs'").fetchone():
         run = conn.execute("SELECT * FROM v2_editor_runs WHERE action_id=?", (action_id,)).fetchone()
     if not run or (agent_id is not None and run["actor_id"] != agent_id):
+        # Unknown either way; an action that asked and never ran still loses its reviewer's words.
+        _blank_decisions(conn, action_id, by if agent_id is not None else None)
         result["unknown"].append(action_id)
     elif _already(conn, "action", action_id):
         result["already"].append(action_id)
@@ -155,6 +191,7 @@ def _actions(conn, ids: list[str], agent_id: str | None, by: str) -> dict:
             continue
         tree = _tree(conn, action_id)
         statuses = [recovery_journal.lookup(conn, member)["status"] for member in tree]
+        statuses += _ancestors(conn, row)
         if "dispatching" in statuses:
             result["refused"].append({"id": action_id, "code": "still_running"})
             continue

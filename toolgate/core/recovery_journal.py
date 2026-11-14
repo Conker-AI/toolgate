@@ -72,8 +72,9 @@ def reconcile(source_path, target_path):
                     raise ValueError("Supplied journal is older than restored evidence.")
                 if row["status"] == "completed" and (
                         current["status"] != "completed"
-                        or (identity not in forgotten
-                            and json.loads(row["response"]) != json.loads(current["response"]))):
+                        or (json.loads(row["response"]) != json.loads(current["response"])
+                            and not (identity in forgotten and json.loads(current["response"])
+                                     == json.loads(journal.FORGOTTEN_RESPONSE)))):
                     raise ValueError("Completed action receipts conflict.")
             for identity, row in newer.items():
                 if row["status"] == "dispatching":
