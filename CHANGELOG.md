@@ -7,6 +7,9 @@
   when one is missing (a new database, one from before the ledger, a restore from an older
   snapshot). A control-plane read runs 2 statements instead of 14, a journal begin and finish 23
   instead of 143. The schema itself is unchanged.
+- **More refusal tests for research.** The forum, site and web search providers are tested on
+  quota and server refusals, oversized and malformed answers, and rows that break a rule; the
+  CI coverage floor goes up with them. No behaviour change.
 
 ## 0.16.0
 

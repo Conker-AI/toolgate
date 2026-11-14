@@ -79,7 +79,7 @@ jobs:
       - name: Tests
         # The coverage floor is the coverage measured when it arrived, rounded down, so it
         # only stops coverage from falling (.coveragerc names what is measured).
-        run: python -m pytest toolgate/tests/ --ignore=toolgate/tests/test_module_contract.py -q --cov --cov-report=term --cov-fail-under=90
+        run: python -m pytest toolgate/tests/ --ignore=toolgate/tests/test_module_contract.py -q --cov --cov-report=term --cov-fail-under=91
 
       - name: Approval and spending mutation drill
         # Proves the boundary tests still catch broken authority, approval and spending code.
