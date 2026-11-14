@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **More refusal tests.** Container replacement preparation, editor graph validation, threat-list feeds, research page fetching and MCP over HTTP are tested on malformed or hostile input; the CI coverage floor goes up with them. No behaviour change.
 - **The schema runs once per database, not on every connection.** A schema ledger
   (`v2_schema_migrations`) records the steps a database has; a connection runs the schema only
   when one is missing (a new database, one from before the ledger, a restore from an older
