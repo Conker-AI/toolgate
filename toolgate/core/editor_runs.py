@@ -145,9 +145,12 @@ def begin(identity, payload: Run, agent):
 
 def finish(action_id, response):
     with cp._conn() as conn:
-        conn.execute("UPDATE v2_editor_runs SET state=?,response=? WHERE action_id=?",
+        journal.initialize(conn)
+        # A forget that landed after the journal finished keeps the run blank.
+        conn.execute("UPDATE v2_editor_runs SET state=?,response=? WHERE action_id=? AND NOT EXISTS"
+                     " (SELECT 1 FROM v2_forgotten WHERE object_type='action' AND object_id=?)",
                      ("approval" if response.get("code") == "CONFIRMATION_REQUIRED" else "finished",
-                      json.dumps(response, allow_nan=False), action_id))
+                      json.dumps(response, allow_nan=False), action_id, action_id))
     return response
 
 
