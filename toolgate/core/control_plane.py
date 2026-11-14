@@ -16,6 +16,7 @@ from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import Literal, overload
 
+from toolgate.core import schema_ledger
 from toolgate.core.paths import DB_PATH
 
 
@@ -23,11 +24,8 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-@contextmanager
-def _conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.executescript("""
+# The control plane's own tables and their immutability triggers (schema_ledger.BASELINE).
+SCHEMA = """
     CREATE TABLE IF NOT EXISTS v2_objects (
       kind TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -69,7 +67,15 @@ def _conn():
     CREATE TRIGGER IF NOT EXISTS v2_publications_no_replace BEFORE INSERT ON v2_publications
     WHEN EXISTS(SELECT 1 FROM v2_publications WHERE kind=NEW.kind AND id=NEW.id AND version=NEW.version)
     BEGIN SELECT RAISE(ABORT, 'publication already exists'); END;
-    """)
+"""
+
+
+@contextmanager
+def _conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    # The schema runs once per database (its ledger), not on every connection.
+    schema_ledger.ensure(conn)
     try:
         yield conn
         conn.commit()

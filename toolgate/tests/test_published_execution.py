@@ -188,7 +188,9 @@ def test_unknown_published_receipt_retains_identity_and_never_redispatches(publi
 
 
 def test_journal_upgrade_preserves_legacy_receipts(published):
-    with cp._conn() as conn:
+    with cp._conn() as conn:  # a journal from before publication digests (and the schema ledger)
+        conn.execute("DROP TABLE v2_actions")
+        conn.execute("DROP TABLE v2_schema_migrations")
         conn.executescript(journal.SCHEMA.replace("    publication_digest TEXT,\n", ""))
         conn.execute("INSERT INTO v2_actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (
             "legacy", journal.fingerprint("tool", "child", {}, "caller", None, None),

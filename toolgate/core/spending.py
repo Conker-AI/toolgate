@@ -75,7 +75,16 @@ class BudgetDenied(ValueError):
 
 
 def initialize(conn) -> None:
+    """The schema, once per database (toolgate/core/schema_ledger.py)."""
+    from toolgate.core import schema_ledger
+
+    schema_ledger.ensure(conn)
+
+
+def apply(conn) -> None:
+    """Spending's and allowances' schema (part of ledger step 0001); idempotent."""
     from toolgate.core import spending_allowances
+
     conn.executescript(SCHEMA)
     conn.executescript(spending_allowances.SCHEMA)
 

@@ -55,9 +55,9 @@ BEGIN SELECT RAISE(ABORT, 'root allocation already exists'); END;
 
 
 def initialize(conn) -> None:
-    """Initialize before beginning a transaction; enforcement never calls this."""
+    """Initialize before beginning a transaction; enforcement never calls this. The schema runs
+    once per database (toolgate/core/schema_ledger.py; spending.apply holds this module's)."""
     spending.initialize(conn)
-    conn.executescript(SCHEMA)
 
 
 def _json_value(value) -> bool:

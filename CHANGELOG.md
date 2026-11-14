@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The schema runs once per database, not on every connection.** A schema ledger
+  (`v2_schema_migrations`) records the steps a database has; a connection runs the schema only
+  when one is missing (a new database, one from before the ledger, a restore from an older
+  snapshot). A control-plane read runs 2 statements instead of 14, a journal begin and finish 23
+  instead of 143. The schema itself is unchanged.
+
 ## 0.16.0
 
 - **A forgotten chat's tool records are forgotten here too.** `POST /v2/agent/forget` (the

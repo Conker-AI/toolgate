@@ -7,7 +7,13 @@ import re
 import time
 from datetime import UTC, datetime
 
-from toolgate.core import container_admission, control_plane, recovery_journal, spending
+from toolgate.core import (
+    container_admission,
+    control_plane,
+    recovery_journal,
+    schema_ledger,
+    spending,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS v2_actions (
@@ -70,7 +76,7 @@ FORGOTTEN_RESPONSE = json.dumps(
     sort_keys=True, separators=(",", ":"))
 SCHEMA = SCHEMA.replace("@FORGOTTEN@", FORGOTTEN_RESPONSE)
 # Before forgetting existed these two refused every change; the triggers above replaced them.
-OLD_TRIGGERS = ("v2_action_identity_immutable", "v2_action_result_immutable")
+OLD_TRIGGERS = schema_ledger.RETIRED  # v2_action_identity_immutable, v2_action_result_immutable
 
 
 def _retire_old_triggers(conn) -> None:
@@ -148,6 +154,12 @@ def enforce_usage_limits(conn, subject_type: str, subject_id: str, event_type: s
 
 
 def initialize(conn) -> None:
+    """The schema, once per database (toolgate/core/schema_ledger.py)."""
+    schema_ledger.ensure(conn)
+
+
+def apply(conn) -> None:
+    """The journal's schema (step 0001 of the ledger); idempotent."""
     conn.executescript(SCHEMA)
     conn.execute("CREATE INDEX IF NOT EXISTS v2_events_usage_window "
                  "ON v2_events(event_type,subject_type,subject_id,created_at)")
@@ -165,7 +177,7 @@ def initialize(conn) -> None:
     WHEN NEW.publication_digest IS NOT OLD.publication_digest
     BEGIN SELECT RAISE(ABORT, 'action publication is immutable'); END;
     """)
-    spending.initialize(conn)
+    spending.apply(conn)
 
 
 def fingerprint(subject_type: str, subject_id: str, args: dict, actor_id: str,
