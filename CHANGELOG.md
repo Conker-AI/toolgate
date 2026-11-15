@@ -2,25 +2,25 @@
 
 ## Unreleased
 
-- **More refusal tests.** Container replacement preparation, editor graph validation, threat-list feeds, research page fetching and MCP over HTTP are tested on malformed or hostile input; the CI coverage floor goes up with them. No behaviour change.
+- **More refusal tests.** Container replacement preparation, editor graph validation, threat-list feeds, research page fetching and MCP over HTTP are tested on malformed or hostile input; the CI coverage floor goes up with them. No behaviour change. (#112)
 - **The schema runs once per database, not on every connection.** A schema ledger
   (`v2_schema_migrations`) records the steps a database has; a connection runs the schema only
   when one is missing (a new database, one from before the ledger, a restore from an older
   snapshot). A control-plane read runs 2 statements instead of 14, a journal begin and finish 23
-  instead of 143. The schema itself is unchanged.
+  instead of 143. The schema itself is unchanged. (#109)
 - **More refusal tests for research.** The forum, site and web search providers are tested on
   quota and server refusals, oversized and malformed answers, and rows that break a rule; the
-  CI coverage floor goes up with them. No behaviour change.
+  CI coverage floor goes up with them. No behaviour change. (#110)
 - **Forgetting an action drops the reviewer's reason for it.** The `action_decided` event keeps
-  who decided and how, without the free-text reason, also for an action that asked and never ran.
+  who decided and how, without the free-text reason, also for an action that asked and never ran. (#111)
 - **An editor run that finishes after its forget stays blank.** The run's late write no longer
-  puts its result back.
+  puts its result back. (#111)
 - **A workflow child known only by its recovery receipt is forgotten with its root**, and holds
-  the root back while it runs.
+  the root back while it runs. (#111)
 - **A child of a running workflow is refused until the workflow ends** (`still_running`), since
-  the workflow writes its children's results into its own.
+  the workflow writes its children's results into its own. (#111)
 - **A reconcile excuses a forgotten action's changed response only when it is the forgotten
-  receipt.** Any other change still conflicts.
+  receipt.** Any other change still conflicts. (#111)
 
 ## 0.16.0
 
