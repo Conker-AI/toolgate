@@ -24,7 +24,7 @@ ignore = [
     # that raised instead would take down the very endpoint the owner uses to
     # find out what is wrong. See the truthful-status rule in CLAUDE.md.
     "BLE001",
-    # Line length is left to review until this module adopts `ruff format`.
+    # The formatter owns line length (100); long strings and comments it cannot break are left alone.
     "E501",
 ]
 

@@ -35,6 +35,7 @@ jobs:
         run: |
           pip install --quiet ruff==0.16.6
           python -m ruff check .
+          python -m ruff format --check .
 
       - name: The module contract requires these files to exist
         run: |
