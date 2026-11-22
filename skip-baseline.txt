@@ -1,0 +1,8 @@
+# Test skip/xfail markers per file; counts may only shrink (scripts/check_skips.py).
+# Lower or delete a line when its file improves; never add a line or raise a count.
+toolgate/tests/test_filesystem_inventory.py 1
+toolgate/tests/test_module_contract.py 1
+toolgate/tests/test_sandbox_proxy.py 1
+toolgate/tests/test_sandbox_runner.py 2
+toolgate/tests/test_sandbox_tools.py 2
+toolgate/tests/test_vault.py 3
