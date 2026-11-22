@@ -88,7 +88,9 @@ MUTANTS = [
         "toolgate/core/approvals.py",
         """    with _conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)
+        ).fetchone()
         if not row:
             return None
         record = _row(row)
@@ -97,7 +99,9 @@ MUTANTS = [
         if record.get("status") != "pending":""",
         # A stale read: the row is read outside the write transaction, then decided on.
         """    with _conn() as read:
-        row = read.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)).fetchone()
+        row = read.execute(
+            "SELECT * FROM v2_objects WHERE kind='request' AND id=?", (request_id,)
+        ).fetchone()
     if not row:
         return None
     record = _row(row)
@@ -138,8 +142,8 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_execution_journal.py::test_identity_includes_actor_and_parent_job'),
  ('restart misreports uncertain dispatch',
   'toolgate/core/execution_journal.py',
-  '" WHERE status=\'dispatching\'", (time.time(),)).rowcount',
-  '" WHERE status=\'never\'", (time.time(),)).rowcount',
+  '" WHERE status=\'dispatching\'",\n            (time.time(),),\n        ).rowcount',
+  '" WHERE status=\'never\'",\n            (time.time(),),\n        ).rowcount',
   'toolgate/tests/test_execution_journal.py::test_interruption_after_external_effect_is_unknown_and_never_retried'),
  ('lost cached receipt',
   'toolgate/core/execution_journal.py',
@@ -188,8 +192,8 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_spending.py::test_uncertain_billing_keeps_reservation_across_restart[missing_usage]'),
  ('known actual usage ignored',
   'toolgate/core/spending.py',
-  '(actual, action_id))',
-  '(row["reserved"], action_id))',
+  'WHERE action_id=?", (actual, action_id)',
+  'WHERE action_id=?", (row["reserved"], action_id)',
   'toolgate/tests/test_spending.py::test_reservation_precedes_network_reconciles_and_replay_does_not_charge'),
  ('pricing expiry ignored at quotation',
   'toolgate/core/spending.py',
@@ -198,8 +202,8 @@ MUTANTS.extend([('dispatch without a committed record',
   'toolgate/tests/test_spending.py::test_quote_requires_enabled_policy_and_current_known_price[expired]'),
  ('paid policy ignored at quotation',
   'toolgate/core/spending.py',
-  'if not policy or not policy["enabled"]:\n            raise BudgetDenied("Paid routes',
-  'if not policy:\n            raise BudgetDenied("Paid routes',
+  'if not policy or not policy["enabled"]:\n            raise BudgetDenied(\n                "Paid routes',
+  'if not policy:\n            raise BudgetDenied(\n                "Paid routes',
   'toolgate/tests/test_spending.py::test_quote_requires_enabled_policy_and_current_known_price[disabled]'),
  ('unknown HTTP billing allowed',
   'toolgate/api/invocation.py',
@@ -360,7 +364,7 @@ MUTANTS.extend([
      '"card": cards.get(tool["id"], ask_cards.DEFAULT),', '"card": ask_cards.DEFAULT,',
      CARDS + "test_the_agent_tool_list_carries_the_card_he_picked"),
     ("published workflow drops its tools' cards", "toolgate/core/editor_catalogue.py",
-     "'card': ask_cards.for_workflow(tools, cards)})", "'card': ask_cards.DEFAULT})",
+     '"card": ask_cards.for_workflow(tools, cards),', '"card": ask_cards.DEFAULT,',
      CARDS + "test_a_published_workflow_shows_the_strongest_card_of_the_tools_it_runs"),
     ("owner run without the owner key", "toolgate/api/routes/owner_runs.py",
      '@router.post("/v2/owner/tools/{tool_id}/runs", dependencies=[Depends(require_owner)])',
