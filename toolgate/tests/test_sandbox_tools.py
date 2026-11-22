@@ -44,7 +44,9 @@ def gate(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOLGATE_OWNER_KEY_SHA256", hashlib.sha256(OWNER.encode()).hexdigest())
     monkeypatch.setenv("TOOLGATE_SANDBOX_SOCKET", "/nonexistent/runner.sock")
     monkeypatch.setenv("TOOLGATE_BOOTSTRAP_EXECUTION_KEY", DEPLOYMENT)
-    key = cp.ensure_bootstrap_agent_key(DEPLOYMENT, ["sandbox.run", "sandbox.install", "notes.read"])
+    key = cp.ensure_bootstrap_agent_key(
+        DEPLOYMENT, ["sandbox.run", "sandbox.install", "notes.read"]
+    )
     ensure_builtin_sandbox_capabilities()
     calls = []
     answer = dict(ANSWER)
@@ -107,7 +109,9 @@ def test_registered_only_with_a_runner_and_owner_choices_survive(tmp_path, monke
 
 
 @pytest.mark.parametrize("old_index", [0, 1])
-def test_the_old_terminal_text_is_refreshed_and_an_owner_edit_is_kept(tmp_path, monkeypatch, old_index):
+def test_the_old_terminal_text_is_refreshed_and_an_owner_edit_is_kept(
+    tmp_path, monkeypatch, old_index
+):
     """Small local models broke the JSON on nested double quotes; the new text says how to quote.
     Only ToolGate's own earlier wording is replaced, and nothing but the description changes."""
     from toolgate.sandbox import tools as sandbox_tools
@@ -116,7 +120,10 @@ def test_the_old_terminal_text_is_refreshed_and_an_owner_edit_is_kept(tmp_path, 
     monkeypatch.setenv("TOOLGATE_SANDBOX_SOCKET", "/run/x.sock")
     ensure_builtin_sandbox_capabilities()
     old = sandbox_tools.PREVIOUS_TERMINAL_DESCRIPTIONS[old_index]
-    cp.update_tool("sandbox.run", {**cp.get("tool", "sandbox.run"), "description": old, "authorization": "auto"})
+    cp.update_tool(
+        "sandbox.run",
+        {**cp.get("tool", "sandbox.run"), "description": old, "authorization": "auto"},
+    )
     ensure_builtin_sandbox_capabilities()
     refreshed = cp.get("tool", "sandbox.run")
     assert refreshed["description"] == sandbox_tools.TERMINAL_DESCRIPTION
@@ -138,7 +145,10 @@ def test_the_callers_identity_picks_the_workspace(gate):
     assert invoke(client, {"command": "ls"}, raw=bound, action="b").status_code == 200
     assert [call["agent"] for call in calls] == ["researcher", "companion", "coder"]
     # A bound key cannot present another agent; nothing reaches the runner.
-    assert invoke(client, {"command": "ls"}, raw=bound, agent="researcher", action="x").status_code == 403
+    assert (
+        invoke(client, {"command": "ls"}, raw=bound, agent="researcher", action="x").status_code
+        == 403
+    )
     assert len(calls) == 3
 
 
@@ -187,9 +197,17 @@ def test_results_are_shaped_cleaned_and_bounded(gate):
     body = invoke(client, {"command": "ls"}, action="s1").json()
     run = body["result"]["run"]
     assert body["code"] == "OK"
-    assert (run["exitCode"], run["stdout"], run["timedOut"], run["truncated"]) == (0, "hi\n", False, False)
+    assert (run["exitCode"], run["stdout"], run["timedOut"], run["truncated"]) == (
+        0,
+        "hi\n",
+        False,
+        False,
+    )
     answer["stdout"] = "\x1b[31mred\x1b[0m done"
-    assert invoke(client, {"command": "ls"}, action="s2").json()["result"]["run"]["stdout"] == "red done"
+    assert (
+        invoke(client, {"command": "ls"}, action="s2").json()["result"]["run"]["stdout"]
+        == "red done"
+    )
     answer["stdout"] = "x" * 19999 + "!"
     run = invoke(client, {"command": "ls"}, action="s3").json()["result"]["run"]
     assert len(run["stdout"]) == 16000 and run["stdout"].endswith("!") and run["truncated"] is True
@@ -245,7 +263,9 @@ def test_the_owners_terminal_limit_caps_the_time_and_lowers_the_default(gate):
     assert invoke(client, {"command": "ls"}, action="o2").json()["code"] == "OK"
     assert calls[-1]["timeout"] == 20
     choose(terminal_seconds=60, tool_seconds=10)  # the lower of the two wins
-    assert invoke(client, {"command": "ls", "timeout_seconds": 10}, action="o3").json()["code"] == "OK"
+    assert (
+        invoke(client, {"command": "ls", "timeout_seconds": 10}, action="o3").json()["code"] == "OK"
+    )
     assert invoke(client, {"command": "ls", "timeout_seconds": 11}, action="o4").status_code == 422
     assert len(calls) == 2
 
@@ -269,12 +289,22 @@ def test_the_owners_limits_reach_the_runner_only_when_set(gate):
 def test_install_sends_validated_packages_only(gate):
     client, _, calls, _ = gate
     auto("sandbox.install")
-    ok = invoke(client, {"manager": "pip", "packages": ["six"]}, tool="sandbox.install", action="i1")
+    ok = invoke(
+        client, {"manager": "pip", "packages": ["six"]}, tool="sandbox.install", action="i1"
+    )
     assert ok.json()["code"] == "OK"
-    assert calls[-1] == {**calls[-1], "op": "install", "manager": "pip", "packages": ["six"], "timeout": 100}
+    assert calls[-1] == {
+        **calls[-1],
+        "op": "install",
+        "manager": "pip",
+        "packages": ["six"],
+        "timeout": 100,
+    }
     assert "limits" not in calls[-1]
     for bad in (["git+https://x"], ["x.whl"], ["-r", "reqs.txt"]):
-        response = invoke(client, {"manager": "pip", "packages": bad}, tool="sandbox.install", action="i2")
+        response = invoke(
+            client, {"manager": "pip", "packages": bad}, tool="sandbox.install", action="i2"
+        )
         assert response.status_code == 422
     assert len(calls) == 1
 
@@ -290,8 +320,12 @@ def test_sandbox_executors_are_reserved():
         "outputs": [{"name": "run", "type": "object"}],
         "policy": {"usage_limits": {"max_per_minute": 1, "max_per_hour": 1}},
     }
-    assert definitions.tool_definition_errors({**base, "id": "my.shell", "execution": {"type": "sandbox_run"}})
-    assert definitions.tool_definition_errors({**base, "id": "sandbox.run", "execution": {"type": "local_echo"}})
+    assert definitions.tool_definition_errors(
+        {**base, "id": "my.shell", "execution": {"type": "sandbox_run"}}
+    )
+    assert definitions.tool_definition_errors(
+        {**base, "id": "sandbox.run", "execution": {"type": "local_echo"}}
+    )
     assert not [
         error
         for error in definitions.tool_definition_errors(
@@ -299,7 +333,9 @@ def test_sandbox_executors_are_reserved():
         )
         if "reserved" in error
     ]
-    refused = dispatch._dispatch_tool({**base, "id": "sandbox.run", "execution": {"type": "sandbox_run"}}, {})
+    refused = dispatch._dispatch_tool(
+        {**base, "id": "sandbox.run", "execution": {"type": "sandbox_run"}}, {}
+    )
     assert refused["error_code"] == "invalid_sandbox_dispatch"
 
 
@@ -359,11 +395,17 @@ def test_the_install_guard_refuses_before_any_approval_and_again_at_run_time(gat
     assert calls == []
     choose(install_trusted_packages=["pip:Typing_Extensions"])
     auto("sandbox.install")
-    ok = invoke(client, {"manager": "pip", "packages": ["six"]}, tool="sandbox.install", action="g2")
+    ok = invoke(
+        client, {"manager": "pip", "packages": ["six"]}, tool="sandbox.install", action="g2"
+    )
     assert ok.json()["code"] == "OK"
     # Checked before approval and again just before sending, with the owner's trusted packages.
     assert answer["checked"][-2:] == [("pip", ["six"], ["pip:typing-extensions"])] * 2
     tool = cp.get("tool", "sandbox.install")
     late = sandbox.execute(tool, {"manager": "pip", "packages": ["reqeusts"]}, "a", "g3")
-    assert late == {"ok": False, "error": "Did you mean 'requests'?", "error_code": "package_lookalike"}
+    assert late == {
+        "ok": False,
+        "error": "Did you mean 'requests'?",
+        "error_code": "package_lookalike",
+    }
     assert len(calls) == 1

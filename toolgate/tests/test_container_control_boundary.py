@@ -35,10 +35,13 @@ def setup(tmp_path, monkeypatch):
 
 
 def payload(**changes):
-    return models.V2Invoke(**{
-        "action_id": "container-action-01", "args": {"container_id": ID, "action": "restart"},
-        **changes,
-    })
+    return models.V2Invoke(
+        **{
+            "action_id": "container-action-01",
+            "args": {"container_id": ID, "action": "restart"},
+            **changes,
+        }
+    )
 
 
 def approve(agent):
@@ -97,8 +100,11 @@ def test_reconfiguration_cannot_silently_remove_review_or_change_executor(setup)
     _, calls = setup
     tool = cp.get("tool", TOOL)
     assert definitions.tool_definition_errors(tool) == []
-    for changes in ({"authorization": "auto"}, {"execution": {"type": "echo"}},
-                    {"execution": {"type": "container_control", "socket": "/other"}}):
+    for changes in (
+        {"authorization": "auto"},
+        {"execution": {"type": "echo"}},
+        {"execution": {"type": "container_control", "socket": "/other"}},
+    ):
         changed = {**copy.deepcopy(tool), **changes}
         assert definitions.tool_definition_errors(changed)
         assert invocation._dispatch_tool(changed, payload().args)["ok"] is False
@@ -121,9 +127,19 @@ def test_actual_adapter_through_approval_and_journal(tmp_path, monkeypatch):
 
     class Stream(httpx.SyncByteStream):
         def __iter__(self):
-            yield json.dumps({"Id": ID, "Config": {"Env": ["SECRET=not-for-response"]},
-                              "State": {"Status": "running", "Running": True,
-                                        "Paused": False, "Restarting": False, "Dead": False}}).encode()
+            yield json.dumps(
+                {
+                    "Id": ID,
+                    "Config": {"Env": ["SECRET=not-for-response"]},
+                    "State": {
+                        "Status": "running",
+                        "Running": True,
+                        "Paused": False,
+                        "Restarting": False,
+                        "Dead": False,
+                    },
+                }
+            ).encode()
 
     class Empty(httpx.SyncByteStream):
         def __iter__(self):
@@ -132,19 +148,28 @@ def test_actual_adapter_through_approval_and_journal(tmp_path, monkeypatch):
     def handler(request):
         requests.append((request.method, request.url.path))
         assert journal.get("container-action-01")["status"] == "dispatching"
-        return httpx.Response(204, stream=Empty()) if request.method == "POST" else httpx.Response(200, stream=Stream())
+        return (
+            httpx.Response(204, stream=Empty())
+            if request.method == "POST"
+            else httpx.Response(200, stream=Stream())
+        )
 
     actual = container_control.control
-    monkeypatch.setattr(container_control, "control", lambda *args: actual(
-        *args, transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(
+        container_control,
+        "control",
+        lambda *args: actual(*args, transport=httpx.MockTransport(handler)),
+    )
     approval = approve(agent)
     assert requests == []
     body = payload(approval_request_id=approval)
     result = tools_routes.run_tool(TOOL, body, agent)
     assert result["code"] == "OK"
     assert "SECRET" not in str(result)
-    assert requests == [("GET", f"/v1.45/containers/{ID}/json"),
-                        ("POST", f"/v1.45/containers/{ID}/restart"),
-                        ("GET", f"/v1.45/containers/{ID}/json")]
+    assert requests == [
+        ("GET", f"/v1.45/containers/{ID}/json"),
+        ("POST", f"/v1.45/containers/{ID}/restart"),
+        ("GET", f"/v1.45/containers/{ID}/json"),
+    ]
     assert tools_routes.run_tool(TOOL, body, agent) == result
     assert len(requests) == 3

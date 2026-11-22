@@ -1,4 +1,5 @@
 """Purging research results reads only their expiry and leaves every other object alone."""
+
 from unittest.mock import patch
 
 import pytest

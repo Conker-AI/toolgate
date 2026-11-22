@@ -47,9 +47,7 @@ def test_actual_transport_requires_scope_and_replays_receipt(setup):
     route = "/v2/tools/system.inventory/invoke"
     assert client.post(route, json=body).status_code == 401
     assert (
-        client.post(
-            route, json=body, headers={"X-ToolGate-Execution-Key": denied}
-        ).status_code
+        client.post(route, json=body, headers={"X-ToolGate-Execution-Key": denied}).status_code
         == 404
     )
     assert setup == []
@@ -72,9 +70,7 @@ def test_actual_transport_requires_scope_and_replays_receipt(setup):
 
 def test_owner_disabled_definition_is_not_reenabled_on_registration(setup):
     tool = cp.get("tool", "system.inventory")
-    cp.create_tool(
-        {**tool, "status": "disabled", "authorization": "owner_confirmation"}
-    )
+    cp.create_tool({**tool, "status": "disabled", "authorization": "owner_confirmation"})
     builtin_capabilities.ensure_builtin_system_capabilities()
     saved = cp.get("tool", "system.inventory")
     assert saved["status"] == "disabled"

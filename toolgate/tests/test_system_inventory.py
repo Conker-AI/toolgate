@@ -55,9 +55,7 @@ def transport(value=None, status=200, headers=None):
         lambda request: httpx.Response(
             status,
             headers=headers,
-            stream=Stream(
-                [json.dumps(value if value is not None else envelope()).encode()]
-            ),
+            stream=Stream([json.dumps(value if value is not None else envelope()).encode()]),
         )
     )
 
@@ -82,9 +80,7 @@ def test_fixed_authenticated_get_without_proxy_redirects(monkeypatch):
 @pytest.mark.parametrize("limit", [True, False, 0, 201, 1.0, "10", None])
 def test_invalid_limits_never_dispatch(limit):
     with pytest.raises(adapter.InventoryError) as exc:
-        adapter.collect(
-            limit, transport=httpx.MockTransport(lambda r: pytest.fail("dispatched"))
-        )
+        adapter.collect(limit, transport=httpx.MockTransport(lambda r: pytest.fail("dispatched")))
     assert exc.value.code == "invalid_limit" and exc.value.status == 422
 
 
@@ -104,18 +100,14 @@ def test_invalid_limits_never_dispatch(limit):
 def test_configuration_has_no_default_or_caller_path(monkeypatch, url):
     monkeypatch.setenv("TOOLGATE_SYSTEMGATE_URL", url)
     with pytest.raises(adapter.InventoryError):
-        adapter.collect(
-            transport=httpx.MockTransport(lambda r: pytest.fail("dispatched"))
-        )
+        adapter.collect(transport=httpx.MockTransport(lambda r: pytest.fail("dispatched")))
 
 
 @pytest.mark.parametrize("status", [301, 302, 401, 403, 500])
 def test_upstream_failures_are_static(status):
     with pytest.raises(adapter.InventoryError) as exc:
         adapter.collect(
-            transport=transport(
-                {"secret": "raw error"}, status, {"Location": "http://elsewhere"}
-            )
+            transport=transport({"secret": "raw error"}, status, {"Location": "http://elsewhere"})
         )
     assert str(exc.value) == "SystemGate inventory is unavailable."
 
@@ -194,9 +186,7 @@ def test_partial_and_observed_rows():
 
 
 def test_duplicate_json_keys_and_numeric_capability():
-    raw = json.dumps(envelope()).replace(
-        '"mode": "observed"', '"mode":"fixture","mode":"observed"'
-    )
+    raw = json.dumps(envelope()).replace('"mode": "observed"', '"mode":"fixture","mode":"observed"')
     with pytest.raises(adapter.InventoryError, match="invalid response"):
         adapter.collect(
             transport=httpx.MockTransport(

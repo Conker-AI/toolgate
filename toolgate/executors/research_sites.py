@@ -1,4 +1,5 @@
 """Sites with their own APIs: GitHub, Stack Exchange, app stores, YouTube and Product Hunt."""
+
 from __future__ import annotations
 
 import contextlib
@@ -32,19 +33,27 @@ def _github(query: str, _source: str, limit: int, recency_days: int, timeout: fl
     response = httpx.get("https://api.github.com/search/issues", headers=headers, **request_args)
     if response.status_code == 401 and "Authorization" in headers:
         public_headers = {name: value for name, value in headers.items() if name != "Authorization"}
-        response = httpx.get("https://api.github.com/search/issues", headers=public_headers, **request_args)
+        response = httpx.get(
+            "https://api.github.com/search/issues", headers=public_headers, **request_args
+        )
     response.raise_for_status()
     rows = json_body(response, "GitHub").get("items", [])
     results = []
     for row in rows[:limit]:
         body = clean_text(row.get("body") or "", 6000)
-        item = _normalize(row.get("title"), row.get("html_url"), body, "github", row.get("created_at"))
+        item = _normalize(
+            row.get("title"), row.get("html_url"), body, "github", row.get("created_at")
+        )
         if item:
-            results.append({**item, "document": f"GitHub issue: {item['title']}\nIssue body: {body}"})
+            results.append(
+                {**item, "document": f"GitHub issue: {item['title']}\nIssue body: {body}"}
+            )
     return results
 
 
-def _github_repositories(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
+def _github_repositories(
+    query: str, _source: str, limit: int, recency_days: int, timeout: float
+) -> list[dict]:
     """Search active public repositories as product landscape, never pain evidence."""
     pushed_after = (datetime.now(UTC) - timedelta(days=recency_days)).date().isoformat()
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "ToolGateResearch/2.0"}
@@ -56,20 +65,28 @@ def _github_repositories(query: str, _source: str, limit: int, recency_days: int
     request_args = {
         "params": {
             "q": f"{' '.join(terms)} in:name,description pushed:>={pushed_after} stars:>=5",
-            "sort": "stars", "order": "desc", "per_page": limit,
+            "sort": "stars",
+            "order": "desc",
+            "per_page": limit,
         },
         "timeout": timeout,
     }
-    response = httpx.get("https://api.github.com/search/repositories", headers=headers, **request_args)
+    response = httpx.get(
+        "https://api.github.com/search/repositories", headers=headers, **request_args
+    )
     if response.status_code == 401 and "Authorization" in headers:
         public_headers = {name: value for name, value in headers.items() if name != "Authorization"}
-        response = httpx.get("https://api.github.com/search/repositories", headers=public_headers, **request_args)
+        response = httpx.get(
+            "https://api.github.com/search/repositories", headers=public_headers, **request_args
+        )
     response.raise_for_status()
     results = []
     for row in json_body(response, "GitHub").get("items", [])[:limit]:
         full_name = clean_text(row.get("full_name"), 160)
         description = clean_text(row.get("description") or "", 1200)
-        topics = [clean_text(topic, 80) for topic in row.get("topics", [])[:12] if clean_text(topic, 80)]
+        topics = [
+            clean_text(topic, 80) for topic in row.get("topics", [])[:12] if clean_text(topic, 80)
+        ]
         stars = max(0, int(row.get("stargazers_count") or 0))
         license_value = row.get("license") if isinstance(row.get("license"), dict) else {}
         license_name = clean_text(license_value.get("spdx_id") or "unknown", 80)
@@ -79,21 +96,37 @@ def _github_repositories(query: str, _source: str, limit: int, recency_days: int
             3500,
         )
         item = _normalize(
-            f"GitHub - {full_name}: {description}", row.get("html_url"), description,
-            "github_repositories", row.get("pushed_at") or row.get("updated_at"),
+            f"GitHub - {full_name}: {description}",
+            row.get("html_url"),
+            description,
+            "github_repositories",
+            row.get("pushed_at") or row.get("updated_at"),
         )
         if item and full_name:
-            results.append({
-                **item, "document": document, "repository": full_name,
-                "stars": stars, "license": license_name,
-            })
+            results.append(
+                {
+                    **item,
+                    "document": document,
+                    "repository": full_name,
+                    "stars": stars,
+                    "license": license_name,
+                }
+            )
     return results
 
 
-def _stackoverflow(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
-    params = {"q": query, "site": "stackoverflow", "sort": "relevance", "order": "desc", "pagesize": limit,
-              "fromdate": int((datetime.now(UTC) - timedelta(days=recency_days)).timestamp()),
-              "filter": "withbody"}
+def _stackoverflow(
+    query: str, _source: str, limit: int, recency_days: int, timeout: float
+) -> list[dict]:
+    params = {
+        "q": query,
+        "site": "stackoverflow",
+        "sort": "relevance",
+        "order": "desc",
+        "pagesize": limit,
+        "fromdate": int((datetime.now(UTC) - timedelta(days=recency_days)).timestamp()),
+        "filter": "withbody",
+    }
     with contextlib.suppress(KeyError):
         params["key"] = vault.get_key("STACKEXCHANGE_KEY")
     response = httpx.get(
@@ -106,9 +139,16 @@ def _stackoverflow(query: str, _source: str, limit: int, recency_days: int, time
     results = []
     for row in rows[:limit]:
         body = extract_html_text(row.get("body") or "", 6000)
-        item = _normalize(row.get("title"), row.get("link"), body, "stackoverflow", row.get("creation_date"))
+        item = _normalize(
+            row.get("title"), row.get("link"), body, "stackoverflow", row.get("creation_date")
+        )
         if item:
-            results.append({**item, "document": f"Stack Overflow question: {item['title']}\nQuestion body: {body}"})
+            results.append(
+                {
+                    **item,
+                    "document": f"Stack Overflow question: {item['title']}\nQuestion body: {body}",
+                }
+            )
     return results
 
 
@@ -129,15 +169,20 @@ def _stackexchange_sites(query: str) -> tuple[str, ...]:
     return ("softwareengineering", "webapps", "superuser")
 
 
-def _stackexchange(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
+def _stackexchange(
+    query: str, _source: str, limit: int, recency_days: int, timeout: float
+) -> list[dict]:
     """Search a bounded set of relevant Stack Exchange communities."""
     terms = [
-        term for term in dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower()))
+        term
+        for term in dict.fromkeys(re.findall(r"[a-z0-9]+", query.lower()))
         if len(term) >= 2 and term not in STACKEXCHANGE_QUERY_STOP_WORDS
     ]
     focused_query = " ".join(terms[:2]) or query
     base_params = {
-        "q": focused_query, "sort": "relevance", "order": "desc",
+        "q": focused_query,
+        "sort": "relevance",
+        "order": "desc",
         "pagesize": min(8, max(2, limit)),
         "fromdate": int((datetime.now(UTC) - timedelta(days=recency_days)).timestamp()),
         "filter": "withbody",
@@ -150,7 +195,8 @@ def _stackexchange(query: str, _source: str, limit: int, recency_days: int, time
         try:
             response = httpx.get(
                 "https://api.stackexchange.com/2.3/search/advanced",
-                params={**base_params, "site": site}, timeout=timeout,
+                params={**base_params, "site": site},
+                timeout=timeout,
             )
             response.raise_for_status()
             payload = json_body(response, "Stack Exchange")
@@ -160,12 +206,17 @@ def _stackexchange(query: str, _source: str, limit: int, recency_days: int, time
         site_rows = []
         for row in payload.get("items", []):
             body = extract_html_text(row.get("body") or "", 6000)
-            item = _normalize(row.get("title"), row.get("link"), body, "stackexchange", row.get("creation_date"))
+            item = _normalize(
+                row.get("title"), row.get("link"), body, "stackexchange", row.get("creation_date")
+            )
             if item:
-                site_rows.append({
-                    **item, "community": site,
-                    "document": f"Stack Exchange question ({site}): {item['title']}\nQuestion body: {body}",
-                })
+                site_rows.append(
+                    {
+                        **item,
+                        "community": site,
+                        "document": f"Stack Exchange question ({site}): {item['title']}\nQuestion body: {body}",
+                    }
+                )
         buckets.append(site_rows)
     if not buckets and last_error:
         raise last_error
@@ -180,7 +231,9 @@ def _stackexchange(query: str, _source: str, limit: int, recency_days: int, time
     return results
 
 
-def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
+def _appstore_reviews(
+    query: str, _source: str, limit: int, recency_days: int, timeout: float
+) -> list[dict]:
     """Read recent reviews for one exact public Apple App Store application ID."""
     app_id = query.strip()
     if not re.fullmatch(r"[0-9]{5,15}", app_id):
@@ -204,11 +257,34 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
     for entry in entries if isinstance(entries, list) else []:
         if len(results) >= limit or not isinstance(entry, dict):
             break
-        rating = clean_text(cast(dict, entry.get("im:rating")).get("label") if isinstance(entry.get("im:rating"), dict) else "", 2)
-        content = clean_text(cast(dict, entry.get("content")).get("label") if isinstance(entry.get("content"), dict) else "", 6000)
-        title = clean_text(cast(dict, entry.get("title")).get("label") if isinstance(entry.get("title"), dict) else "", 300)
-        updated = clean_text(cast(dict, entry.get("updated")).get("label") if isinstance(entry.get("updated"), dict) else "", 80)
-        review_id = clean_text(cast(dict, entry.get("id")).get("label") if isinstance(entry.get("id"), dict) else "", 40)
+        rating = clean_text(
+            cast(dict, entry.get("im:rating")).get("label")
+            if isinstance(entry.get("im:rating"), dict)
+            else "",
+            2,
+        )
+        content = clean_text(
+            cast(dict, entry.get("content")).get("label")
+            if isinstance(entry.get("content"), dict)
+            else "",
+            6000,
+        )
+        title = clean_text(
+            cast(dict, entry.get("title")).get("label")
+            if isinstance(entry.get("title"), dict)
+            else "",
+            300,
+        )
+        updated = clean_text(
+            cast(dict, entry.get("updated")).get("label")
+            if isinstance(entry.get("updated"), dict)
+            else "",
+            80,
+        )
+        review_id = clean_text(
+            cast(dict, entry.get("id")).get("label") if isinstance(entry.get("id"), dict) else "",
+            40,
+        )
         if not rating or not rating.isdigit() or int(rating) > 3 or not content or not updated:
             continue
         try:
@@ -221,23 +297,31 @@ def _appstore_reviews(query: str, _source: str, limit: int, recency_days: int, t
         if review_id:
             url = f"{url}&reviewId={review_id}"
         item = _normalize(
-            title or f"App Store review ({rating}/5)", url,
-            f"Rating: {rating}/5. {content}", "appstore_reviews", published.isoformat(),
+            title or f"App Store review ({rating}/5)",
+            url,
+            f"Rating: {rating}/5. {content}",
+            "appstore_reviews",
+            published.isoformat(),
         )
         if item:
-            results.append({
-                **item,
-                "rating": int(rating) if rating.isdigit() else None,
-                "document": f"Apple App Store customer review ({rating}/5): {title}\n{content}",
-                "recency_provenance": {
-                    "provider": "apple_appstore_rss", "field": "entry.updated",
-                    "max_age_days": recency_days,
-                },
-            })
+            results.append(
+                {
+                    **item,
+                    "rating": int(rating) if rating.isdigit() else None,
+                    "document": f"Apple App Store customer review ({rating}/5): {title}\n{content}",
+                    "recency_provenance": {
+                        "provider": "apple_appstore_rss",
+                        "field": "entry.updated",
+                        "max_age_days": recency_days,
+                    },
+                }
+            )
     return results
 
 
-def _appstore_catalog(query: str, _source: str, limit: int, _recency_days: int, timeout: float) -> list[dict]:
+def _appstore_catalog(
+    query: str, _source: str, limit: int, _recency_days: int, timeout: float
+) -> list[dict]:
     """Resolve a bounded market query to public iOS app identities."""
     terms = set(topic_terms(query, QUERY_STOP_WORDS))
     if not terms:
@@ -245,7 +329,9 @@ def _appstore_catalog(query: str, _source: str, limit: int, _recency_days: int, 
     response = httpx.get(
         "https://itunes.apple.com/search",
         params={
-            "term": query, "country": "us", "entity": "software",
+            "term": query,
+            "country": "us",
+            "entity": "software",
             "limit": min(10, max(3, limit)),
         },
         headers={"Accept": "application/json"},
@@ -279,19 +365,26 @@ def _appstore_catalog(query: str, _source: str, limit: int, _recency_days: int, 
             f"Category: {genre}. Rating: {rating:.2f}/5 from {rating_count} ratings. {description}",
             2600,
         )
-        item = _normalize(name, url, snippet, "appstore_catalog", row.get("currentVersionReleaseDate"))
+        item = _normalize(
+            name, url, snippet, "appstore_catalog", row.get("currentVersionReleaseDate")
+        )
         if not item:
             continue
         complaint_opportunity = int(max(0.0, 4.5 - rating) * 1000)
-        ranked.append(((overlap, complaint_opportunity, min(rating_count, 100000)), {
-            **item,
-            "app_id": app_id,
-            "product_name": name,
-            "rating": rating,
-            "rating_count": rating_count,
-            "genre": genre,
-            "catalog_provider": "apple_itunes_search",
-        }))
+        ranked.append(
+            (
+                (overlap, complaint_opportunity, min(rating_count, 100000)),
+                {
+                    **item,
+                    "app_id": app_id,
+                    "product_name": name,
+                    "rating": rating,
+                    "rating_count": rating_count,
+                    "genre": genre,
+                    "catalog_provider": "apple_itunes_search",
+                },
+            )
+        )
     ranked.sort(key=lambda value: value[0], reverse=True)
     return [item for _score, item in ranked[:limit]]
 
@@ -299,18 +392,28 @@ def _appstore_catalog(query: str, _source: str, limit: int, _recency_days: int, 
 def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
     # In a header, never the URL: URLs reach httpx's request log and every HTTPStatusError text.
     key_header = {"X-Goog-Api-Key": vault.get_key("GOOGLE_API_KEY")}
-    published_after = (datetime.now(UTC) - timedelta(days=recency_days)).isoformat().replace("+00:00", "Z")
+    published_after = (
+        (datetime.now(UTC) - timedelta(days=recency_days)).isoformat().replace("+00:00", "Z")
+    )
     query_terms = [
-        term for term in re.findall(r"[a-z0-9]+", query.lower())
-        if len(term) >= 3 and term not in QUERY_STOP_WORDS and term not in {"comments", "frustrating"}
+        term
+        for term in re.findall(r"[a-z0-9]+", query.lower())
+        if len(term) >= 3
+        and term not in QUERY_STOP_WORDS
+        and term not in {"comments", "frustrating"}
     ]
     focused_query = " ".join(dict.fromkeys(query_terms))[:120] or query
     search_response = httpx.get(
         "https://www.googleapis.com/youtube/v3/search",
         params={
-            "part": "snippet", "type": "video", "q": focused_query,
-            "publishedAfter": published_after, "order": "relevance", "maxResults": min(5, max(1, limit)),
-            "safeSearch": "moderate", "relevanceLanguage": "en",
+            "part": "snippet",
+            "type": "video",
+            "q": focused_query,
+            "publishedAfter": published_after,
+            "order": "relevance",
+            "maxResults": min(5, max(1, limit)),
+            "safeSearch": "moderate",
+            "relevanceLanguage": "en",
         },
         headers=key_header,
         timeout=timeout,
@@ -318,7 +421,9 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
     search_response.raise_for_status()
     videos = json_body(search_response, "YouTube").get("items", [])
     ranked: list[tuple[int, dict]] = []
-    comments_per_video = min(20, max(5, (limit * 2 + max(len(videos), 1) - 1) // max(len(videos), 1)))
+    comments_per_video = min(
+        20, max(5, (limit * 2 + max(len(videos), 1) - 1) // max(len(videos), 1))
+    )
     for video in videos:
         video_id_value = video.get("id") if isinstance(video.get("id"), dict) else {}
         video_id = str(video_id_value.get("videoId") or "")
@@ -329,8 +434,11 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
             comments_response = httpx.get(
                 "https://www.googleapis.com/youtube/v3/commentThreads",
                 params={
-                    "part": "snippet", "videoId": video_id,
-                    "maxResults": comments_per_video, "order": "relevance", "textFormat": "plainText",
+                    "part": "snippet",
+                    "videoId": video_id,
+                    "maxResults": comments_per_video,
+                    "order": "relevance",
+                    "textFormat": "plainText",
                 },
                 headers=key_header,
                 timeout=timeout,
@@ -357,9 +465,14 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
                 continue
             likes = max(0, int(snippet.get("likeCount") or 0))
             url = f"https://www.youtube.com/watch?v={video_id}&lc={comment_id}"
-            document = clean_text(f"Video: {video_title}\nViewer comment: {comment}\nComment likes: {likes}", 3500)
+            document = clean_text(
+                f"Video: {video_title}\nViewer comment: {comment}\nComment likes: {likes}", 3500
+            )
             item = _normalize(
-                f"{video_title} - viewer comment", url, comment, "youtube",
+                f"{video_title} - viewer comment",
+                url,
+                comment,
+                "youtube",
                 snippet.get("publishedAt") or snippet.get("updatedAt"),
             )
             if item:
@@ -368,7 +481,9 @@ def _youtube(query: str, _source: str, limit: int, recency_days: int, timeout: f
     return [item for _likes, item in ranked[:limit]]
 
 
-def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
+def _producthunt(
+    query: str, _source: str, limit: int, recency_days: int, timeout: float
+) -> list[dict]:
     if not control_plane.settings().get("producthunt_commercial_use_approved", False):
         raise ResearchError("Product Hunt API business-use approval has not been confirmed")
     token = vault.get_key("PRODUCTHUNT_TOKEN")
@@ -376,7 +491,11 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
     if not terms:
         raise ResearchError("Product Hunt query has no useful topic terms")
     endpoint = "https://api.producthunt.com/v2/api/graphql"
-    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
     topic_variables = {f"q{index}": term for index, term in enumerate(terms)}
     topic_declarations = ", ".join(f"$q{index}: String!" for index in range(len(terms)))
@@ -387,7 +506,10 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
     topic_response = httpx.post(
         endpoint,
         headers=headers,
-        json={"query": f"query FindTopics({topic_declarations}) {{ {topic_fields} }}", "variables": topic_variables},
+        json={
+            "query": f"query FindTopics({topic_declarations}) {{ {topic_fields} }}",
+            "variables": topic_variables,
+        },
         timeout=timeout,
     )
     topic_response.raise_for_status()
@@ -424,7 +546,10 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
     product_response = httpx.post(
         endpoint,
         headers=headers,
-        json={"query": f"query TopicProducts({product_declarations}) {{ {product_fields} }}", "variables": product_variables},
+        json={
+            "query": f"query TopicProducts({product_declarations}) {{ {product_fields} }}",
+            "variables": product_variables,
+        },
         timeout=timeout,
     )
     product_response.raise_for_status()
@@ -441,16 +566,25 @@ def _producthunt(query: str, _source: str, limit: int, recency_days: int, timeou
             if not product_id or product_id in seen_products:
                 continue
             seen_products.add(product_id)
-            haystack = clean_text(f"{row.get('name', '')} {row.get('tagline', '')} {row.get('description', '')}", 2400).lower()
+            haystack = clean_text(
+                f"{row.get('name', '')} {row.get('tagline', '')} {row.get('description', '')}", 2400
+            ).lower()
             overlap = len(query_terms & set(re.findall(r"[a-z0-9]+", haystack)))
             if not overlap and topic.get("name", "").lower() not in haystack:
                 continue
             snippet = f"{row.get('tagline', '')}\n{row.get('description', '')}\nProduct Hunt votes: {int(row.get('votesCount') or 0)}"
-            item = _normalize(row.get("name"), row.get("url"), snippet, "producthunt", row.get("createdAt"))
+            item = _normalize(
+                row.get("name"), row.get("url"), snippet, "producthunt", row.get("createdAt")
+            )
             if item:
-                ranked.append((overlap * 100000 + int(row.get("votesCount") or 0), {
-                    **item,
-                    "document": f"Product Hunt product: {item['title']}\n{clean_text(snippet, 6000)}",
-                }))
+                ranked.append(
+                    (
+                        overlap * 100000 + int(row.get("votesCount") or 0),
+                        {
+                            **item,
+                            "document": f"Product Hunt product: {item['title']}\n{clean_text(snippet, 6000)}",
+                        },
+                    )
+                )
     ranked.sort(key=lambda value: value[0], reverse=True)
     return [item for _score, item in ranked[:limit]]

@@ -83,9 +83,7 @@ def test_scoped_catalogue_and_direct_call_cannot_escape(boundary):
         call("secret.echo")
     # A client skipping discovery still meets the same server-side scope check.
     with pytest.raises(RuntimeError, match="404"):
-        bridge._request(
-            "POST", "/v2/tools/secret.echo/invoke", {"args": {"value": "hello"}}
-        )
+        bridge._request("POST", "/v2/tools/secret.echo/invoke", {"args": {"value": "hello"}})
     assert not any(
         event["subject_id"] == "secret.echo"
         for event in control_plane.events(100)
@@ -103,9 +101,7 @@ def test_revocation_and_scope_changes_take_effect_without_restart(boundary):
         bridge.list_tools()
 
 
-def test_approvals_keep_identity_arguments_and_single_consumption(
-    boundary, monkeypatch
-):
+def test_approvals_keep_identity_arguments_and_single_consumption(boundary, monkeypatch):
     tool = control_plane.get("tool", "allowed.echo")
     control_plane.create_tool({**tool, "authorization": "owner_confirmation"})
     pending = call()
@@ -114,8 +110,7 @@ def test_approvals_keep_identity_arguments_and_single_consumption(
     record = control_plane.get("request", request_id)
     assert record["payload"]["created_by_agent_key"] == boundary["agent"]["id"]
     assert (
-        bridge._invoke("toolgate_request_status", {"request_id": request_id})["status"]
-        == "pending"
+        bridge._invoke("toolgate_request_status", {"request_id": request_id})["status"] == "pending"
     )
     approvals.decide_request(request_id, "approved", "admin")
     monkeypatch.setenv("TOOLGATE_EXECUTION_KEY", boundary["other_key"])
@@ -129,18 +124,14 @@ def test_approvals_keep_identity_arguments_and_single_consumption(
     assert call(approval=request_id)["code"] == "OK"
     with pytest.raises(RuntimeError, match="409"):
         call(approval=request_id)
-    executed = [
-        e for e in control_plane.events(100) if e["event_type"] == "tool_executed"
-    ]
+    executed = [e for e in control_plane.events(100) if e["event_type"] == "tool_executed"]
     assert len(executed) == 1
     assert executed[0]["actor"] == "scoped caller"
 
 
 def test_lockdown_and_limits_apply_to_mcp(boundary):
     tool = control_plane.get("tool", "allowed.echo")
-    control_plane.create_tool(
-        {**tool, "policy": {"usage_limits": {"max_per_minute": 1}}}
-    )
+    control_plane.create_tool({**tool, "policy": {"usage_limits": {"max_per_minute": 1}}})
     assert call()["code"] == "OK"
     with pytest.raises(RuntimeError, match="429"):
         call()
@@ -209,11 +200,7 @@ def test_invalid_and_admin_keys_are_not_execution_credentials(boundary, monkeypa
 
 def test_input_envelope_preserves_a_tool_argument_named_approval_request_id():
     schema = bridge._tool_input_schema(
-        {
-            "inputs": [
-                {"name": "approval_request_id", "type": "string", "required": True}
-            ]
-        }
+        {"inputs": [{"name": "approval_request_id", "type": "string", "required": True}]}
     )
     assert "approval_request_id" in schema["properties"]["args"]["properties"]
     assert schema["properties"]["args"]["required"] == ["approval_request_id"]

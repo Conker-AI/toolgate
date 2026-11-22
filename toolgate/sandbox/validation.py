@@ -220,7 +220,7 @@ class _Scanner:
 
     def step(self) -> None:
         text, i, mode = self.text, self.i, self.modes[-1]
-        char, pair = text[i], text[i:i + 2]
+        char, pair = text[i], text[i : i + 2]
         if mode == "sq":
             if char == "'":
                 self.modes.pop()
@@ -245,7 +245,7 @@ class _Scanner:
 
     def command_step(self, i: int, mode: str, char: str, pair: str) -> None:
         text = self.text
-        heredoc = HEREDOC.match(text, i) if pair == "<<" and text[i + 2:i + 3] != "<" else None
+        heredoc = HEREDOC.match(text, i) if pair == "<<" and text[i + 2 : i + 3] != "<" else None
         if char in "'\"":
             self.modes.append("sq" if char == "'" else "dq")
             self.keep(char)
@@ -275,7 +275,7 @@ class _Scanner:
             while self.i < len(text):
                 end = text.find("\n", self.i)
                 end = len(text) if end < 0 else end
-                line, self.i = text[self.i:end], end + 1
+                line, self.i = text[self.i : end], end + 1
                 if (line.lstrip("\t") if strip else line) == delimiter:
                     break
                 lines.append(line)

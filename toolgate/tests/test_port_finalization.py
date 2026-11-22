@@ -28,7 +28,11 @@ def interrupted_verification(request, monkeypatch):
     original = daemon.handle
 
     def handle(message):
-        if message.method == "GET" and daemon.replacement and daemon.replacement["State"]["Running"]:
+        if (
+            message.method == "GET"
+            and daemon.replacement
+            and daemon.replacement["State"]["Running"]
+        ):
             raise httpx.ReadTimeout("private-value")
         return original(message)
 
@@ -56,15 +60,18 @@ def test_verified_receipt_recovery_has_no_external_effects(request, monkeypatch)
     count = len(daemon.requests)
     assert container_control.targets() == []
     approved = []
-    result = port_finalization.finalize(payload.action_id, agent["id"],
-                                        authorize=lambda conn: approved.append(conn.in_transaction))
+    result = port_finalization.finalize(
+        payload.action_id, agent["id"], authorize=lambda conn: approved.append(conn.in_transaction)
+    )
     assert approved == [True]
     assert result["status"] == "completed"
     assert container_control.targets() == [result["response"]["result"]["result"]["replacementId"]]
     assert len(daemon.requests) == count
     assert "private-value" not in json.dumps(result["response"])
     with pytest.raises(port_replacements.ReplacementError):
-        port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail())
+        port_finalization.finalize(
+            payload.action_id, agent["id"], authorize=lambda conn: pytest.fail()
+        )
 
 
 def test_denied_authorization_rolls_back_approval_and_receipt(request, monkeypatch):
@@ -89,7 +96,9 @@ def test_other_actor_and_missing_lineage_cannot_finalize(request, monkeypatch):
         port_finalization.finalize(payload.action_id, "other", authorize=lambda conn: pytest.fail())
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", "/other/docker.sock")
     with pytest.raises(port_replacements.ReplacementError):
-        port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail())
+        port_finalization.finalize(
+            payload.action_id, agent["id"], authorize=lambda conn: pytest.fail()
+        )
 
 
 def test_partial_execution_cannot_finalize(request):
@@ -97,7 +106,9 @@ def test_partial_execution_cannot_finalize(request):
     daemon.fail = "/start"
     assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     with pytest.raises(port_replacements.ReplacementError):
-        port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail())
+        port_finalization.finalize(
+            payload.action_id, agent["id"], authorize=lambda conn: pytest.fail()
+        )
 
 
 def test_http_recovery_requires_own_exact_approval_and_replays_receipt(request, monkeypatch):
@@ -110,7 +121,10 @@ def test_http_recovery_requires_own_exact_approval_and_replays_receipt(request, 
     count = len(daemon.requests)
     assert client.post(url, json=body).status_code == 401
     _other, other_key = cp.issue_agent_key("Other", ["tool:system.port-control"])
-    assert client.post(url, json=body, headers={"X-ToolGate-Execution-Key": other_key}).status_code == 409
+    assert (
+        client.post(url, json=body, headers={"X-ToolGate-Execution-Key": other_key}).status_code
+        == 409
+    )
     response = client.post(url, json=body, headers=headers)
     assert response.status_code == 200 and response.json()["code"] == "CONFIRMATION_REQUIRED"
     rid = response.json()["request_id"]
@@ -118,8 +132,12 @@ def test_http_recovery_requires_own_exact_approval_and_replays_receipt(request, 
     with cp._conn() as conn:
         assert owner_channel.project(conn, cp.get("request", rid))["reviewable"]
     # Original execution approval must not authorize recovery.
-    assert client.post(url, json={**body, "approval_request_id": payload.approval_request_id},
-                       headers=headers).status_code == 409
+    assert (
+        client.post(
+            url, json={**body, "approval_request_id": payload.approval_request_id}, headers=headers
+        ).status_code
+        == 409
+    )
     approved_body = {**body, "approval_request_id": rid}
     assert client.post(url, json=approved_body, headers=headers).status_code == 409
     approvals.decide_request(rid, "approved", "owner")
@@ -137,8 +155,11 @@ def test_http_partial_recovery_does_not_create_approval(request):
     tools_routes.run_tool("system.port-control", payload, agent)
     before = len(cp.list_objects("request"))
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as error:
-        system_routes.finalize_port_recovery(models.PortFinalizationRequest(action_id=payload.action_id), agent)
+        system_routes.finalize_port_recovery(
+            models.PortFinalizationRequest(action_id=payload.action_id), agent
+        )
     assert error.value.status_code == 409
     assert len(cp.list_objects("request")) == before
 
@@ -156,8 +177,9 @@ def test_crash_after_atomic_verification_can_recover_without_docker_replay(reque
     assert port_replacements.steps(payload.action_id)[-1]["status"] == "observed"
     count = len(daemon.requests)
     approved = []
-    recovered = port_finalization.finalize(payload.action_id, agent["id"],
-        authorize=lambda conn: approved.append(conn.in_transaction))
+    recovered = port_finalization.finalize(
+        payload.action_id, agent["id"], authorize=lambda conn: approved.append(conn.in_transaction)
+    )
     assert approved == [True] and recovered["status"] == "completed"
     assert len(daemon.requests) == count
 
@@ -173,8 +195,12 @@ def test_failed_lineage_write_cannot_leave_successful_verification(request):
     with cp._conn() as conn:
         assert conn.execute("SELECT * FROM v2_container_lineage").fetchall() == []
     with pytest.raises(port_replacements.ReplacementError):
-        port_finalization.finalize(payload.action_id, agent["id"], authorize=lambda conn: pytest.fail(),
-            transport=httpx.MockTransport(lambda request: httpx.Response(503)))
+        port_finalization.finalize(
+            payload.action_id,
+            agent["id"],
+            authorize=lambda conn: pytest.fail(),
+            transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+        )
 
 
 def test_final_read_can_be_recovered_with_fresh_approval_and_no_effects(request, monkeypatch):
@@ -186,8 +212,12 @@ def test_final_read_can_be_recovered_with_fresh_approval_and_no_effects(request,
     assert journal.get(payload.action_id)["status"] == "outcome_unknown"
     assert port_replacements.steps(payload.action_id)[-1]["status"] == "outcome_unknown"
     approved = []
-    done = port_finalization.finalize(payload.action_id, agent["id"], transport=transport,
-        authorize=lambda conn: approved.append(conn.in_transaction))
+    done = port_finalization.finalize(
+        payload.action_id,
+        agent["id"],
+        transport=transport,
+        authorize=lambda conn: approved.append(conn.in_transaction),
+    )
     assert approved == [True] and done["status"] == "completed"
     assert all(message.method == "GET" for message in daemon.requests[count:])
     assert container_control.targets() == [receipt["replacementId"]]
@@ -211,8 +241,12 @@ def test_reverification_refuses_drift(request, monkeypatch, change):
     else:
         daemon.original["State"]["Running"] = True
     with pytest.raises(port_replacements.ReplacementError):
-        port_finalization.finalize(payload.action_id, agent["id"],
-            transport=httpx.MockTransport(daemon.handle), authorize=lambda conn: pytest.fail())
+        port_finalization.finalize(
+            payload.action_id,
+            agent["id"],
+            transport=httpx.MockTransport(daemon.handle),
+            authorize=lambda conn: pytest.fail(),
+        )
     assert journal.get(payload.action_id)["status"] == "outcome_unknown"
 
 
@@ -223,20 +257,34 @@ def test_reverification_denial_leaves_no_new_observation_or_lineage(request, mon
         raise PermissionError()
 
     with pytest.raises(PermissionError):
-        port_finalization.finalize(payload.action_id, agent["id"],
-            transport=httpx.MockTransport(daemon.handle), authorize=deny)
+        port_finalization.finalize(
+            payload.action_id,
+            agent["id"],
+            transport=httpx.MockTransport(daemon.handle),
+            authorize=deny,
+        )
     assert port_replacements.steps(payload.action_id)[-1]["status"] == "outcome_unknown"
     with cp._conn() as conn:
         assert conn.execute("SELECT * FROM v2_container_lineage").fetchall() == []
 
 
-def test_http_reverification_rechecks_after_approval_and_replays_without_reads(request, monkeypatch):
+def test_http_reverification_rechecks_after_approval_and_replays_without_reads(
+    request, monkeypatch
+):
     daemon, agent, payload = interrupted_verification(request, monkeypatch)
     preview, finalize = port_finalization.preview, port_finalization.finalize
-    monkeypatch.setattr(port_finalization, "preview", lambda *args: preview(
-        *args, transport=httpx.MockTransport(daemon.handle)))
-    monkeypatch.setattr(port_finalization, "finalize", lambda *args, **kwargs: finalize(
-        *args, **kwargs, transport=httpx.MockTransport(daemon.handle)))
+    monkeypatch.setattr(
+        port_finalization,
+        "preview",
+        lambda *args: preview(*args, transport=httpx.MockTransport(daemon.handle)),
+    )
+    monkeypatch.setattr(
+        port_finalization,
+        "finalize",
+        lambda *args, **kwargs: finalize(
+            *args, **kwargs, transport=httpx.MockTransport(daemon.handle)
+        ),
+    )
     body = models.PortFinalizationRequest(action_id=payload.action_id)
     count = len(daemon.requests)
     pending = system_routes.finalize_port_recovery(body, agent)
@@ -246,6 +294,7 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
     original_command = daemon.replacement["Config"]["Cmd"]
     daemon.replacement["Config"]["Cmd"] = ["changed-after-review"]
     from fastapi import HTTPException
+
     with pytest.raises(HTTPException) as error:
         system_routes.finalize_port_recovery(body, agent)
     assert error.value.status_code == 409
@@ -260,13 +309,27 @@ def test_http_reverification_rechecks_after_approval_and_replays_without_reads(r
 
 
 def test_reverification_after_process_recovery_normalizes_unfinished_read(request, monkeypatch):
-    monkeypatch.setattr(port_replacements, "unknown", lambda identity, ordinal: journal.unknown(identity))
+    monkeypatch.setattr(
+        port_replacements, "unknown", lambda identity, ordinal: journal.unknown(identity)
+    )
     daemon, agent, payload = interrupted_verification(request, monkeypatch)
     with cp._conn() as conn:
-        assert conn.execute("SELECT status FROM v2_port_steps WHERE action_id=? AND name='verify'",
-                            (payload.action_id,)).fetchone()[0] == "dispatching"
-    assert port_finalization.finalize(payload.action_id, agent["id"],
-        transport=httpx.MockTransport(daemon.handle), authorize=lambda conn: None)["status"] == "completed"
+        assert (
+            conn.execute(
+                "SELECT status FROM v2_port_steps WHERE action_id=? AND name='verify'",
+                (payload.action_id,),
+            ).fetchone()[0]
+            == "dispatching"
+        )
+    assert (
+        port_finalization.finalize(
+            payload.action_id,
+            agent["id"],
+            transport=httpx.MockTransport(daemon.handle),
+            authorize=lambda conn: None,
+        )["status"]
+        == "completed"
+    )
 
 
 def test_legacy_missing_basis_and_foreign_actor_cannot_reverify(request, monkeypatch):
@@ -275,7 +338,9 @@ def test_legacy_missing_basis_and_foreign_actor_cannot_reverify(request, monkeyp
     count = len(daemon.requests)
     for actor in ("other", agent["id"]):
         with pytest.raises(port_replacements.ReplacementError):
-            port_finalization.preview(payload.action_id, actor, transport=httpx.MockTransport(daemon.handle))
+            port_finalization.preview(
+                payload.action_id, actor, transport=httpx.MockTransport(daemon.handle)
+            )
     assert len(daemon.requests) == count
 
 
@@ -284,35 +349,48 @@ def test_started_container_recovers_without_repeating_start(request, monkeypatch
     daemon, agent, _, payload = request.getfixturevalue("pending")
     original = daemon.handle
     if crash == "acknowledgement":
+
         def handle(message):
             response = original(message)
             if message.method == "POST" and message.url.path.endswith("/start"):
                 raise httpx.ReadTimeout("lost start acknowledgement")
             return response
+
         monkeypatch.setattr(daemon, "handle", handle)
     else:
         original_begin = port_replacements.begin_step
+
         def begin(identity, ordinal, name, **kwargs):
             if name == "verify":
                 raise RuntimeError("crashed before verification claim")
             return original_begin(identity, ordinal, name, **kwargs)
+
         monkeypatch.setattr(port_replacements, "begin_step", begin)
     assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     assert port_replacements.steps(payload.action_id)[-1]["name"] == "start"
     monkeypatch.setattr(daemon, "handle", original)
     count = len(daemon.requests)
     original_steps = port_replacements.steps(payload.action_id)
+
     def deny(conn):
         raise PermissionError()
+
     with pytest.raises(PermissionError):
-        port_finalization.finalize(payload.action_id, agent["id"],
-            transport=httpx.MockTransport(daemon.handle), authorize=deny)
+        port_finalization.finalize(
+            payload.action_id,
+            agent["id"],
+            transport=httpx.MockTransport(daemon.handle),
+            authorize=deny,
+        )
     assert port_replacements.steps(payload.action_id) == original_steps
     assert journal.get(payload.action_id)["status"] == "outcome_unknown"
     approved = []
-    recovered = port_finalization.finalize(payload.action_id, agent["id"],
+    recovered = port_finalization.finalize(
+        payload.action_id,
+        agent["id"],
         transport=httpx.MockTransport(daemon.handle),
-        authorize=lambda conn: approved.append(conn.in_transaction))
+        authorize=lambda conn: approved.append(conn.in_transaction),
+    )
     assert recovered["status"] == "completed" and approved == [True]
     steps = port_replacements.steps(payload.action_id)
     assert steps[-1]["name"] == "verify"
@@ -325,16 +403,24 @@ def test_stopped_source_recovers_after_create_before_verification(request, monke
     daemon.original["State"].update(Running=False, Status="exited")
     _, agent, _, payload = request.getfixturevalue("pending")
     original_begin = port_replacements.begin_step
+
     def begin(identity, ordinal, name, **kwargs):
         if name == "verify":
             raise RuntimeError("crashed before verification")
         return original_begin(identity, ordinal, name, **kwargs)
+
     monkeypatch.setattr(port_replacements, "begin_step", begin)
     assert tools_routes.run_tool("system.port-control", payload, agent)["code"] == "OUTCOME_UNKNOWN"
     assert port_replacements.steps(payload.action_id)[-1]["name"] == "create"
     count = len(daemon.requests)
-    assert port_finalization.finalize(payload.action_id, agent["id"],
-        transport=httpx.MockTransport(daemon.handle),
-        authorize=lambda conn: None)["status"] == "completed"
+    assert (
+        port_finalization.finalize(
+            payload.action_id,
+            agent["id"],
+            transport=httpx.MockTransport(daemon.handle),
+            authorize=lambda conn: None,
+        )["status"]
+        == "completed"
+    )
     assert daemon.replacement["State"]["Running"] is False
     assert all(message.method == "GET" for message in daemon.requests[count:])

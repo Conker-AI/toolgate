@@ -22,10 +22,19 @@ def level_of(client, response):
     return view.json()["approval_level"]
 
 
-@pytest.mark.parametrize("template,expected", [
-    ("do", 1), ("run", 1), ("save", 1), ("send", 2), ("publish", 2), ("ship", 2),
-    ("delete", 3), ("pay", 3),
-])
+@pytest.mark.parametrize(
+    "template,expected",
+    [
+        ("do", 1),
+        ("run", 1),
+        ("save", 1),
+        ("send", 2),
+        ("publish", 2),
+        ("ship", 2),
+        ("delete", 3),
+        ("pay", 3),
+    ],
+)
 def test_his_card_for_the_tool_sets_the_level(api, template, expected):
     client, _, pi_key, _ = api
     assert card(client, "echo.ask", template).status_code == 200
@@ -69,40 +78,59 @@ def test_an_unreadable_tool_is_serious(value):
     assert levels.for_tool(value, {}) == 3
 
 
-@pytest.mark.parametrize("value,expected", [(1, 1), (2, 2), (3, 3), (None, 3), (0, 3), (4, 3),
-                                            (True, 3), ("1", 3), (1.0, 3)])
+@pytest.mark.parametrize(
+    "value,expected",
+    [(1, 1), (2, 2), (3, 3), (None, 3), (0, 3), (4, 3), (True, 3), ("1", 3), (1.0, 3)],
+)
 def test_a_missing_or_odd_stored_level_is_serious(value, expected):
     assert levels.stored(value) == expected
 
 
 def test_a_tool_it_cannot_find_asks_for_the_password(api):
-    request = approvals.create_verification_request("Run", "exact", "Pi", "tool", "not.registered", {}, 1)
+    request = approvals.create_verification_request(
+        "Run", "exact", "Pi", "tool", "not.registered", {}, 1
+    )
     assert request["payload"]["level"] == 3
 
 
 @pytest.mark.parametrize("shown,expected", [("do", 1), ("send", 2), ("pay", 3), ("odd", 3)])
 def test_the_level_is_never_below_the_card_the_inbox_shows(api, shown, expected):
     # The card is copied from the caller; whatever buttons it shows, the level is at least as strong.
-    request = approvals.create_verification_request("Run", "exact", "Pi", "tool", "echo.ask", {}, 1,
-                                                    card=shown)
+    request = approvals.create_verification_request(
+        "Run", "exact", "Pi", "tool", "echo.ask", {}, 1, card=shown
+    )
     assert request["payload"]["level"] == expected
 
 
 def publish_workflow(identity, *tool_ids):
-    steps = [(f"call{i}", "tool_call", {"tool": tool_id, "args": {}}) for i, tool_id in enumerate(tool_ids)]
+    steps = [
+        (f"call{i}", "tool_call", {"tool": tool_id, "args": {}})
+        for i, tool_id in enumerate(tool_ids)
+    ]
     save(identity, linear(*steps, ("result", "return", {"value": "$last"})))
-    return pub.publish("automation", identity, 1, validate=definitions.require_valid_automation_definition)
+    return pub.publish(
+        "automation", identity, 1, validate=definitions.require_valid_automation_definition
+    )
 
 
 def workflow_request(publication):
     payload = approvals.create_verification_request(
-        "Run", "exact", "Pi", "automation", publication["id"], {}, 1,
-        publication_digest=publication["digest"])["payload"]
+        "Run",
+        "exact",
+        "Pi",
+        "automation",
+        publication["id"],
+        {},
+        1,
+        publication_digest=publication["digest"],
+    )["payload"]
     return payload["level"], payload["card"]
 
 
 def echo_tool(identity, name):
-    cp.create_tool({"id": identity, "name": name, "description": "Test", "execution": {"type": "echo"}})
+    cp.create_tool(
+        {"id": identity, "name": name, "description": "Test", "execution": {"type": "echo"}}
+    )
 
 
 def test_a_workflow_takes_the_strongest_tool_it_runs(registry):
@@ -126,10 +154,18 @@ def test_a_workflow_named_for_a_payment_is_serious(registry):
 
 
 def unpublished(identity, tool_id):
-    cp.create_automation({"id": identity, "name": identity, "description": "x", "status": "active",
-                          "workflow": [{"type": "tool_call", "tool_id": tool_id}]})
+    cp.create_automation(
+        {
+            "id": identity,
+            "name": identity,
+            "description": "x",
+            "status": "active",
+            "workflow": [{"type": "tool_call", "tool_id": tool_id}],
+        }
+    )
     return approvals.create_verification_request(
-        "Run", "exact", "Pi", "automation", identity, {}, 1)["payload"]["level"]
+        "Run", "exact", "Pi", "automation", identity, {}, 1
+    )["payload"]["level"]
 
 
 def test_an_unpublished_workflow_counts_its_tools(registry):
@@ -147,10 +183,13 @@ def test_a_lowered_level_breaks_the_requests_origin(api):
     assert record["payload"]["level"] == 3
     record["payload"]["level"] = 1
     with cp._conn() as db:
-        db.execute("UPDATE v2_objects SET body=? WHERE kind='request' AND id=?",
-                   (json.dumps(record), identity))
+        db.execute(
+            "UPDATE v2_objects SET body=? WHERE kind='request' AND id=?",
+            (json.dumps(record), identity),
+        )
     view = client.get(f"/v2/owner/requests/{identity}", headers=owner()).json()
     assert view["unavailable_reason"] == "invalid_origin" and not view["reviewable"]
-    decided = client.post(f"/v2/owner/requests/{identity}/decision", headers=owner(),
-                          json={"status": "approved"})
+    decided = client.post(
+        f"/v2/owner/requests/{identity}/decision", headers=owner(), json={"status": "approved"}
+    )
     assert decided.status_code == 409

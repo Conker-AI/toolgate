@@ -139,7 +139,8 @@ def test_a_settings_save_at_the_same_moment_never_turns_lockdown_back_off(gate, 
         nonlocal other
         if other is None:  # the lockdown's write; a settings save starts right before it
             other = threading.Thread(
-                target=cp.update_settings, args=({"default_confirmation_expiry_seconds": 60}, "admin")
+                target=cp.update_settings,
+                args=({"default_confirmation_expiry_seconds": 60}, "admin"),
             )
             other.start()
             other.join(timeout=1)  # without the lock it finishes here, on the old state

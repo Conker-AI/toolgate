@@ -91,9 +91,7 @@ def while_running(
 def labelled(docker: Docker, label: str, value: str) -> list[str]:
     """Ids of every container (running or not) whose `label` equals `value`."""
     filters = json.dumps({"label": [f"{label}={value}"]})
-    response = docker.client.get(
-        "/v1.45/containers/json", params={"all": "1", "filters": filters}
-    )
+    response = docker.client.get("/v1.45/containers/json", params={"all": "1", "filters": filters})
     response.raise_for_status()
     return [item["Id"] for item in response.json()]
 
@@ -143,6 +141,7 @@ class ProxyHTTPConnection(http.client.HTTPConnection):
 
 def proxy_request(method: str, path: str, headers=None) -> tuple[str, bytes]:
     """Send a request to the proxy as UID 65533 and return (status, body_bytes)."""
+
     def _request():
         conn = ProxyHTTPConnection("localhost")
         try:
@@ -177,5 +176,5 @@ def logs(name: str) -> str:
         raise ValueError(f"Service {name} not found")
 
     # Use Docker.logs to get container logs (keep last 1MB)
-    stdout, stderr, _, _ = docker.logs(containers[0], keep=1024*1024)
-    return (stdout + stderr).decode('utf-8', errors='replace')
+    stdout, stderr, _, _ = docker.logs(containers[0], keep=1024 * 1024)
+    return (stdout + stderr).decode("utf-8", errors="replace")

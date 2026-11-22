@@ -103,7 +103,9 @@ class Settings(StrictDocument):
         for entry in entries:
             found = TRUSTED.fullmatch(entry.strip().lower())
             if not found:
-                raise ValueError(f"{entry[:80]!r} is not a package such as pip:requests or npm:lodash")
+                raise ValueError(
+                    f"{entry[:80]!r} is not a package such as pip:requests or npm:lodash"
+                )
             manager, name = found.groups()
             if manager == "pip":  # PEP 503: runs of - _ . are one -
                 name = re.sub(r"[-_.]+", "-", name)
@@ -171,7 +173,12 @@ def save(update: Update, actor: str = "owner") -> dict:
         changed = sorted(key for key in values if values[key] != before[key])
         # In the same transaction: a save is never applied without its event, nor refused after.
         cp.event(
-            "tool_settings_updated", "info", "settings", IDENTITY, actor, {"keys": changed},
+            "tool_settings_updated",
+            "info",
+            "settings",
+            IDENTITY,
+            actor,
+            {"keys": changed},
             connection=db,
         )
     return {"settings": values, "revision": revision + 1}

@@ -25,8 +25,7 @@ def migrate() -> None:
         retired = [
             dict(row)
             for row in rows
-            if row["kind"] == "ai_session"
-            or json.loads(row["body"]).get("kind") == "ai_draft"
+            if row["kind"] == "ai_session" or json.loads(row["body"]).get("kind") == "ai_draft"
         ]
         ids = {row["id"] for row in retired}
         events = [
@@ -53,9 +52,7 @@ def migrate() -> None:
                     (*key, original),
                 )
         for row in retired:
-            conn.execute(
-                "DELETE FROM v2_objects WHERE kind=? AND id=?", (row["kind"], row["id"])
-            )
+            conn.execute("DELETE FROM v2_objects WHERE kind=? AND id=?", (row["kind"], row["id"]))
         # Historical events remain visible in the ordinary audit log as well.
         settings = conn.execute(
             "SELECT body FROM v2_objects WHERE kind='settings' AND id='control-plane'"
@@ -77,9 +74,7 @@ def migrate() -> None:
 def export() -> dict:
     """Return an owner-only handoff, preserving IDs, links and raw source rows."""
     with control_plane._conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM v2_ai_archive ORDER BY source_table,kind,id"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM v2_ai_archive ORDER BY source_table,kind,id").fetchall()
     return {
         "format": "toolgate.ai-archive",
         "version": 1,

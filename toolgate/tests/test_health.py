@@ -5,6 +5,7 @@ so nothing here is mocked: the "up" case answers from a real HTTP server on a
 real socket, and the "down" cases point at a port nothing is listening on and
 at a database that genuinely cannot be opened.
 """
+
 import json
 import os
 import socket
@@ -64,10 +65,13 @@ class HealthTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
         self.thread.start()
 
-        self.os_patch = patch.dict(os.environ, {
-            "TOOLGATE_VAULT_KEY_FILE": str(self.root / "vault.key"),
-            "MEMORYGATE_URL": self.upstream_url,
-        })
+        self.os_patch = patch.dict(
+            os.environ,
+            {
+                "TOOLGATE_VAULT_KEY_FILE": str(self.root / "vault.key"),
+                "MEMORYGATE_URL": self.upstream_url,
+            },
+        )
         self.os_patch.start()
         for name in ("TOOLGATE_PI_URL", "TOOLGATE_PI_SERVICE_KEY"):  # the Ollama path by default
             os.environ.pop(name, None)
@@ -108,10 +112,16 @@ class HealthTests(unittest.TestCase):
         # revision - a dashboard reading one field for both is wrong everywhere.
         self.assertEqual(body["service"], "toolgate")
         self.assertEqual(body["version"], version.SERVICE_VERSION)
-        self.assertEqual({name: check["status"] for name, check in body["checks"].items()}, {
-            "control_plane_db": "ok", "vault": "ok",
-            "searxng": "ok", "memorygate": "ok", "generation": "ok",
-        })
+        self.assertEqual(
+            {name: check["status"] for name, check in body["checks"].items()},
+            {
+                "control_plane_db": "ok",
+                "vault": "ok",
+                "searxng": "ok",
+                "memorygate": "ok",
+                "generation": "ok",
+            },
+        )
         self.assertEqual(body["checks"]["generation"], {"status": "ok", "via": "ollama"})
 
     def test_health_names_the_dependency_that_stopped_answering(self):
@@ -132,27 +142,39 @@ class HealthTests(unittest.TestCase):
     def test_memorygate_degradation_is_not_hidden_by_http_success(self):
         self.point_upstreams_at(self.upstream_url)
         self.configure_memorygate()
-        self.upstream.health_body = {"service": "memorygate", "status": "degraded",
-                                     "checks": {"private": "do-not-forward-this"}}
+        self.upstream.health_body = {
+            "service": "memorygate",
+            "status": "degraded",
+            "checks": {"private": "do-not-forward-this"},
+        }
         body = self.health()
-        self.assertEqual({"status": "degraded", "reason": "upstream_reports_degraded"},
-                         body["checks"]["memorygate"])
+        self.assertEqual(
+            {"status": "degraded", "reason": "upstream_reports_degraded"},
+            body["checks"]["memorygate"],
+        )
         self.assertNotIn("do-not-forward-this", json.dumps(body))
 
     def test_http_errors_and_redirects_are_not_reported_as_healthy(self):
         for code in (301, 401, 403, 404):
             with self.subTest(code=code):
                 self.upstream.response_status = code
-                self.assertEqual({"status": "unavailable", "reason": "upstream_http_error"},
-                                 health_routes._probe_http(self.upstream_url, "/health"))
+                self.assertEqual(
+                    {"status": "unavailable", "reason": "upstream_http_error"},
+                    health_routes._probe_http(self.upstream_url, "/health"),
+                )
 
     def test_memorygate_probe_rejects_wrong_service_or_health_shape(self):
-        for body in ([], {"service": "other", "status": "ok"},
-                     {"service": "memorygate", "status": "surprise"}):
+        for body in (
+            [],
+            {"service": "other", "status": "ok"},
+            {"service": "memorygate", "status": "surprise"},
+        ):
             with self.subTest(body=body):
                 self.upstream.health_body = body
-                self.assertEqual({"status": "unavailable", "reason": "invalid_health_response"},
-                                 health_routes._probe_http(self.upstream_url, "/health", "memorygate"))
+                self.assertEqual(
+                    {"status": "unavailable", "reason": "invalid_health_response"},
+                    health_routes._probe_http(self.upstream_url, "/health", "memorygate"),
+                )
 
     def test_health_reports_degraded_when_the_control_plane_database_is_gone(self):
         self.point_upstreams_at(self.upstream_url)
@@ -259,8 +281,11 @@ class HealthTests(unittest.TestCase):
     def test_pi_own_degraded_parts_are_not_reported_as_generation(self):
         control_plane.update_settings({"research_searxng_url": self.upstream_url}, "test")
         self.use_pi(self.upstream_url)
-        self.upstream.health_body = {"service": "pi", "status": "degraded",
-                                     "checks": {"speech": {"status": "unavailable"}}}
+        self.upstream.health_body = {
+            "service": "pi",
+            "status": "degraded",
+            "checks": {"speech": {"status": "unavailable"}},
+        }
 
         body = self.health()
 
@@ -273,9 +298,14 @@ class HealthTests(unittest.TestCase):
         for answer in ({"models": []}, {"service": "memorygate", "status": "ok"}):
             with self.subTest(answer=answer):
                 self.upstream.health_body = answer
-                self.assertEqual(self.health()["checks"]["generation"], {
-                    "status": "unavailable", "reason": "invalid_health_response", "via": "pi",
-                })
+                self.assertEqual(
+                    self.health()["checks"]["generation"],
+                    {
+                        "status": "unavailable",
+                        "reason": "invalid_health_response",
+                        "via": "pi",
+                    },
+                )
 
     def test_pi_needs_both_its_address_and_key_before_it_is_the_generation_path(self):
         self.point_upstreams_at(self.upstream_url)

@@ -31,8 +31,21 @@ def link(source, target, action, completed=True):
     records.observed(action, 0, reference=target)
     lineage.record(action, source, target, SOCKET)
     if completed:
-        journal.finish(action, {"code": "OK", "result": {"ok": True, "result": {
-            "containerId": source, "replacementId": target, "outcome": "observed", "originalRetained": True}}})
+        journal.finish(
+            action,
+            {
+                "code": "OK",
+                "result": {
+                    "ok": True,
+                    "result": {
+                        "containerId": source,
+                        "replacementId": target,
+                        "outcome": "observed",
+                        "originalRetained": True,
+                    },
+                },
+            },
+        )
 
 
 def test_completed_chain_selects_current_leaf_and_retires_ancestors():

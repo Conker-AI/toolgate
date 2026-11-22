@@ -1,4 +1,5 @@
 """Bounded graph evaluator. Capability dispatch is supplied by ToolGate's boundary."""
+
 from __future__ import annotations
 
 import time
@@ -21,6 +22,7 @@ class GraphExecutionError(GraphValueError):
 @dataclass
 class Budget:
     """One shared counter stack across nested editor calls; no child resets it."""
+
     steps: int = 0
     items: int = 0
     frames: list = field(default_factory=list)
@@ -28,9 +30,11 @@ class Budget:
 
     def check(self):
         for frame in self.frames:
-            if (self.steps - frame[0] > frame[3].maxSteps
-                    or self.items - frame[1] > frame[3].maxLoopItems
-                    or self.clock() - frame[2] > frame[3].timeoutMs / 1000):
+            if (
+                self.steps - frame[0] > frame[3].maxSteps
+                or self.items - frame[1] > frame[3].maxLoopItems
+                or self.clock() - frame[2] > frame[3].timeoutMs / 1000
+            ):
                 raise GraphValueError("Workflow exceeded its shared execution budget.")
 
     def charge(self, *, item=False):
@@ -57,10 +61,12 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
     budget.frames.append((budget.steps, budget.items, budget.clock(), document.budgets))
     receipts, outputs = [], {}
     current = None
+
     def charge(*, item=False):
         budget.charge(item=item)
         if on_step:
             on_step()
+
     try:
         normalized = inputs(document.inputs, supplied)
         last = normalized
@@ -70,8 +76,10 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
             charge()
             config = current.config
             branch = None
+
             def value(item, missing=False):
                 return resolve(item, normalized, outputs, last, allow_missing=missing)
+
             if current.type == "input":
                 output = normalized
             elif current.type in {"set", "return"}:
@@ -83,19 +91,28 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
                 if config["operator"] == "divide" and right == 0:
                     raise GraphValueError("Cannot divide by zero.")
                 a, b = cast(float, left), cast(float, right)
-                operations = {"add": lambda: a + b, "subtract": lambda: a - b,
-                              "multiply": lambda: a * b, "divide": lambda: a / b}
+                operations = {
+                    "add": lambda: a + b,
+                    "subtract": lambda: a - b,
+                    "multiply": lambda: a * b,
+                    "divide": lambda: a / b,
+                }
                 output = operations[cast(str, config["operator"])]()
             elif current.type == "condition":
-                output = compare(config["operator"], value(config["left"], config["operator"] == "exists"),
-                                 value(config["right"]) if "right" in config else None)
+                output = compare(
+                    config["operator"],
+                    value(config["left"], config["operator"] == "exists"),
+                    value(config["right"]) if "right" in config else None,
+                )
                 branch = "true" if output else "false"
             elif current.type == "loop":
                 items = value(config["items"])
                 if not isinstance(items, list):
                     raise GraphValueError("Loop input must be an array.")
                 if len(items) > cast(int, config["limit"]):
-                    raise GraphValueError("Loop input exceeds its item limit; no partial list was processed.")
+                    raise GraphValueError(
+                        "Loop input exceeds its item limit; no partial list was processed."
+                    )
                 mapped = []
                 for item in items:
                     charge(item=True)
@@ -104,7 +121,9 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
                     elif not isinstance(item, str):
                         raise GraphValueError("Trim and uppercase require string items.")
                     else:
-                        mapped.append(item.strip() if config["operation"] == "trim" else item.upper())
+                        mapped.append(
+                            item.strip() if config["operation"] == "trim" else item.upper()
+                        )
                 output = {"items": mapped, "count": len(mapped)}
             else:
                 if dispatch is None:
@@ -119,30 +138,56 @@ def execute(document: EditorDocument, supplied, *, dispatch=None, budget=None, o
             if current.type == "return":
                 for item in document.outputs:
                     present = isinstance(output, dict) and item.name in output
-                    if (not present and item.required) or (present and not matches(output[item.name], item.type)):
-                        raise GraphValueError(f"Output does not match its declared type: {item.name}.")
+                    if (not present and item.required) or (
+                        present and not matches(output[item.name], item.type)
+                    ):
+                        raise GraphValueError(
+                            f"Output does not match its declared type: {item.name}."
+                        )
             # Bound total receipt volume as well as each individual value.
-            receipt = {"nodeId": current.id, "label": current.label, "type": current.type,
-                       "status": "completed", "output": output}
+            receipt = {
+                "nodeId": current.id,
+                "label": current.label,
+                "type": current.type,
+                "status": "completed",
+                "output": output,
+            }
             bounded([*receipts, receipt])
             if current.type == "return":
-                skipped = [{"nodeId": node.id, "label": node.label, "type": node.type,
-                            "status": "skipped"} for node in document.nodes
-                           if node.id not in outputs and node.id != current.id]
+                skipped = [
+                    {"nodeId": node.id, "label": node.label, "type": node.type, "status": "skipped"}
+                    for node in document.nodes
+                    if node.id not in outputs and node.id != current.id
+                ]
                 return bounded({"output": output, "steps": [*receipts, receipt, *skipped]})
             receipts.append(receipt)
             outputs[current.id] = output
             last = output
-            edge = next(edge for edge in document.edges if edge.source == current.id and edge.branch == branch)
+            edge = next(
+                edge
+                for edge in document.edges
+                if edge.source == current.id and edge.branch == branch
+            )
             current = nodes[edge.target]
         raise GraphValueError("Workflow did not reach Return.")
     except GraphExecutionError:
         raise
     except (GraphValueError, OverflowError) as error:
-        message = str(error) if isinstance(error, GraphValueError) else "Calculation exceeded numeric bounds."
+        message = (
+            str(error)
+            if isinstance(error, GraphValueError)
+            else "Calculation exceeded numeric bounds."
+        )
         if current:
-            receipts.append({"nodeId": current.id, "label": current.label, "type": current.type,
-                             "status": "failed", "error": message})
+            receipts.append(
+                {
+                    "nodeId": current.id,
+                    "label": current.label,
+                    "type": current.type,
+                    "status": "failed",
+                    "error": message,
+                }
+            )
         raise GraphExecutionError(message, current.id if current else None, receipts) from error
     finally:
         budget.frames.pop()

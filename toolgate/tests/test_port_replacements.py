@@ -20,7 +20,9 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("TOOLGATE_VAULT_SECRET", "synthetic-test-key")
     monkeypatch.setenv("TOOLGATE_VAULT_SALT", "a1" * 16)
     journal.begin("replace-1", "tool", "system.port-control", {"container_id": CID}, "actor", 1)
-    replacement = Replacement({"containerId": CID}, {"Env": ["SECRET=private-test-value"]}, "private-fingerprint", "app")
+    replacement = Replacement(
+        {"containerId": CID}, {"Env": ["SECRET=private-test-value"]}, "private-fingerprint", "app"
+    )
     store.save("replace-1", replacement)
     return replacement
 
@@ -31,12 +33,17 @@ def test_real_encrypted_roundtrip_never_puts_private_payload_in_receipts(setup):
     assert "private-test-value" not in json.dumps(journal.get("replace-1"))
     assert "private-test-value" not in repr(store.load_private("replace-1"))
     with cp._conn() as conn:
-        assert conn.execute("SELECT sealed FROM v2_port_replacements").fetchone()[0].startswith("enc:v1:")
+        assert (
+            conn.execute("SELECT sealed FROM v2_port_replacements")
+            .fetchone()[0]
+            .startswith("enc:v1:")
+        )
 
 
 def test_once_only_concurrent_step_claim_and_order(setup):
     def claim(_):
         return store.begin_step("replace-1", 0, "stop", authorize=lambda conn: None)
+
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert sorted(pool.map(claim, range(2))) == [False, True]
     with pytest.raises(store.ReplacementError):
@@ -59,6 +66,7 @@ def test_crash_recovery_cannot_claim_next_step_or_retry(setup):
 def test_authority_failure_rolls_back_claim(setup):
     def denied(conn):
         raise PermissionError("revoked")
+
     with pytest.raises(PermissionError):
         store.begin_step("replace-1", 0, "stop", authorize=denied)
     assert store.steps("replace-1") == []
@@ -89,8 +97,12 @@ def test_frozen_payload_and_completed_step_cannot_be_rewritten(setup):
     store.begin_step("replace-1", 0, "stop", authorize=lambda conn: None)
     store.observed("replace-1", 0)
     store.observed("replace-1", 0)
-    for sql in ["DELETE FROM v2_port_replacements", "UPDATE v2_port_replacements SET sealed='cleartext'",
-                "DELETE FROM v2_port_steps", "UPDATE v2_port_steps SET status='dispatching'"]:
+    for sql in [
+        "DELETE FROM v2_port_replacements",
+        "UPDATE v2_port_replacements SET sealed='cleartext'",
+        "DELETE FROM v2_port_steps",
+        "UPDATE v2_port_steps SET status='dispatching'",
+    ]:
         with pytest.raises(sqlite3.IntegrityError), cp._conn() as conn:
             conn.execute(sql)
 

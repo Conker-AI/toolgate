@@ -17,18 +17,23 @@ class FileError(RuntimeError):
     def __init__(self, code):
         self.code = code
         self.status = {
-            "invalid_arguments": 422, "not_configured": 503,
-            "invalid_configuration": 503, "unknown_root": 404,
-            "unsupported_platform": 503, "unavailable": 503,
+            "invalid_arguments": 422,
+            "not_configured": 503,
+            "invalid_configuration": 503,
+            "unknown_root": 404,
+            "unsupported_platform": 503,
+            "unavailable": 503,
         }[code]
-        super().__init__({
-            "invalid_arguments": "File listing arguments are invalid.",
-            "not_configured": "File roots are not configured.",
-            "invalid_configuration": "File root configuration is invalid.",
-            "unknown_root": "File root is not configured.",
-            "unsupported_platform": "File listing requires the Linux directory backend.",
-            "unavailable": "Directory metadata is unavailable.",
-        }[code])
+        super().__init__(
+            {
+                "invalid_arguments": "File listing arguments are invalid.",
+                "not_configured": "File roots are not configured.",
+                "invalid_configuration": "File root configuration is invalid.",
+                "unknown_root": "File root is not configured.",
+                "unsupported_platform": "File listing requires the Linux directory backend.",
+                "unavailable": "Directory metadata is unavailable.",
+            }[code]
+        )
 
     @property
     def message(self):
@@ -37,16 +42,20 @@ class FileError(RuntimeError):
 
 def _component(value):
     return (
-        isinstance(value, str) and 0 < len(value) <= 255
+        isinstance(value, str)
+        and 0 < len(value) <= 255
         and value not in (".", "..")
-        and not any(c in "/\\" or ord(c) < 32 or ord(c) == 127
-                    or 0xD800 <= ord(c) <= 0xDFFF for c in value)
+        and not any(
+            c in "/\\" or ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in value
+        )
     )
 
 
 def _relative(value):
-    return isinstance(value, str) and len(value) <= 4096 and (
-        value == "" or all(_component(c) for c in value.split("/"))
+    return (
+        isinstance(value, str)
+        and len(value) <= 4096
+        and (value == "" or all(_component(c) for c in value.split("/")))
     )
 
 
@@ -97,8 +106,7 @@ class LinuxBackend:
         return os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
 
     def open_child(self, fd, name):
-        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                       dir_fd=fd)
+        return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
 
     def close(self, fd):
         os.close(fd)
@@ -111,8 +119,13 @@ class LinuxBackend:
 
 
 def list_directory(root_id, path="", limit=200, *, backend=None):
-    if (not isinstance(root_id, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", root_id)
-            or not _relative(path) or type(limit) is not int or not 1 <= limit <= 200):
+    if (
+        not isinstance(root_id, str)
+        or not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", root_id)
+        or not _relative(path)
+        or type(limit) is not int
+        or not 1 <= limit <= 200
+    ):
         raise FileError("invalid_arguments")
     configured = _roots()
     if root_id not in configured:
@@ -139,17 +152,29 @@ def list_directory(root_id, path="", limit=200, *, backend=None):
                     truncated = True
                     continue
                 mode = backend.mode(fd, name)
-                kind = ("symlink" if stat.S_ISLNK(mode) else "directory" if stat.S_ISDIR(mode)
-                        else "file" if stat.S_ISREG(mode) else "other")
+                kind = (
+                    "symlink"
+                    if stat.S_ISLNK(mode)
+                    else "directory"
+                    if stat.S_ISDIR(mode)
+                    else "file"
+                    if stat.S_ISREG(mode)
+                    else "other"
+                )
                 relative = f"{path}/{name}" if path else name
                 if len(relative) > 4096:
                     truncated = True
                     continue
                 entries.append({"name": name, "path": relative, "kind": kind})
         return {
-            "mode": "observed", "rootId": root_id, "path": path,
-            "entries": sorted(entries, key=lambda item: (item["kind"] != "directory", item["name"])),
-            "truncated": truncated, "sampledAt": datetime.now(UTC).isoformat(),
+            "mode": "observed",
+            "rootId": root_id,
+            "path": path,
+            "entries": sorted(
+                entries, key=lambda item: (item["kind"] != "directory", item["name"])
+            ),
+            "truncated": truncated,
+            "sampledAt": datetime.now(UTC).isoformat(),
         }
     except OSError:
         raise FileError("unavailable") from None

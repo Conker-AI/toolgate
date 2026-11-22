@@ -9,20 +9,36 @@ from toolgate.executors import port_preview as adapter
 from toolgate.executors.port_plan import PlanError
 
 CID = "a" * 64
-MAPPING = {"hostAddress": "127.0.0.1", "hostPort": 9090,
-           "containerPort": 90, "protocol": "tcp"}
+MAPPING = {"hostAddress": "127.0.0.1", "hostPort": 9090, "containerPort": 90, "protocol": "tcp"}
 
 
 def inspection():
-    return {"Id": CID, "Config": {"Env": ["SECRET=private-value"]},
-            "State": {"Running": True, "Status": "running", "Paused": False,
-                      "Restarting": False, "Dead": False},
-            "HostConfig": {"NetworkMode": "bridge", "PublishAllPorts": False,
-                           "AutoRemove": False,
-                           "PortBindings": {"80/tcp": [{"HostIp": "", "HostPort": ""}]}},
-            "NetworkSettings": {"Ports": {
-                "80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "32768"},
-                           {"HostIp": "::", "HostPort": "32768"}], "81/tcp": None}}}
+    return {
+        "Id": CID,
+        "Config": {"Env": ["SECRET=private-value"]},
+        "State": {
+            "Running": True,
+            "Status": "running",
+            "Paused": False,
+            "Restarting": False,
+            "Dead": False,
+        },
+        "HostConfig": {
+            "NetworkMode": "bridge",
+            "PublishAllPorts": False,
+            "AutoRemove": False,
+            "PortBindings": {"80/tcp": [{"HostIp": "", "HostPort": ""}]},
+        },
+        "NetworkSettings": {
+            "Ports": {
+                "80/tcp": [
+                    {"HostIp": "0.0.0.0", "HostPort": "32768"},
+                    {"HostIp": "::", "HostPort": "32768"},
+                ],
+                "81/tcp": None,
+            }
+        },
+    }
 
 
 def test_running_preview_uses_allocated_ports_and_preserves_ipv6():
@@ -56,11 +72,19 @@ def test_missing_runtime_publication_cannot_erase_declared_binding(ports):
         adapter.from_inspection(CID, source, "create", mapping=MAPPING)
 
 
-@pytest.mark.parametrize("ports", [[], {"80/sctp": []}, {"70000/tcp": None},
-                                   {"80/tcp": [{"HostIp": "", "HostPort": "1234"}]},
-                                   {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "0"}]},
-                                   {"80/tcp": [{"HostIp": "localhost", "HostPort": "80"}]},
-                                   {"80/tcp": [None]}, {"80/tcp": "bad"}])
+@pytest.mark.parametrize(
+    "ports",
+    [
+        [],
+        {"80/sctp": []},
+        {"70000/tcp": None},
+        {"80/tcp": [{"HostIp": "", "HostPort": "1234"}]},
+        {"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "0"}]},
+        {"80/tcp": [{"HostIp": "localhost", "HostPort": "80"}]},
+        {"80/tcp": [None]},
+        {"80/tcp": "bad"},
+    ],
+)
 def test_invalid_or_unresolved_binding_is_never_silently_dropped(ports):
     source = inspection()
     source["NetworkSettings"]["Ports"] = ports
@@ -68,8 +92,9 @@ def test_invalid_or_unresolved_binding_is_never_silently_dropped(ports):
         adapter.from_inspection(CID, source, "create", mapping=MAPPING)
 
 
-@pytest.mark.parametrize("field,value", [("Paused", True), ("Restarting", True),
-                                        ("Dead", True), ("Status", "removing")])
+@pytest.mark.parametrize(
+    "field,value", [("Paused", True), ("Restarting", True), ("Dead", True), ("Status", "removing")]
+)
 def test_transitional_container_needs_reinspection(field, value):
     source = inspection()
     source["State"][field] = value
@@ -130,9 +155,13 @@ def test_transport_failure_is_bounded_static_and_not_retried(configured, monkeyp
             raise httpx.ReadTimeout("private-value")
         if failure == "revoked":
             monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", "[]")
-        body = (b'{"Id":"private-value","Id":"duplicate"}' if failure == "duplicate"
-                else b"x" * (docker.MAX_BYTES + 1) if failure == "oversized"
-                else json.dumps(inspection()).encode())
+        body = (
+            b'{"Id":"private-value","Id":"duplicate"}'
+            if failure == "duplicate"
+            else b"x" * (docker.MAX_BYTES + 1)
+            if failure == "oversized"
+            else json.dumps(inspection()).encode()
+        )
         return httpx.Response(307 if failure == "redirect" else 200, stream=Stream(body))
 
     with pytest.raises(docker.ControlError) as error:

@@ -11,10 +11,31 @@ from toolgate.executors.port_preview import from_inspection
 
 # ContainerConfig create fields from the Docker Engine v1.45 OpenAPI schema.
 CONFIG_FIELDS = {
-    "Hostname", "Domainname", "User", "AttachStdin", "AttachStdout", "AttachStderr",
-    "ExposedPorts", "Tty", "OpenStdin", "StdinOnce", "Env", "Cmd", "Healthcheck",
-    "ArgsEscaped", "Image", "Volumes", "WorkingDir", "Entrypoint", "NetworkDisabled",
-    "MacAddress", "OnBuild", "Labels", "StopSignal", "StopTimeout", "Shell",
+    "Hostname",
+    "Domainname",
+    "User",
+    "AttachStdin",
+    "AttachStdout",
+    "AttachStderr",
+    "ExposedPorts",
+    "Tty",
+    "OpenStdin",
+    "StdinOnce",
+    "Env",
+    "Cmd",
+    "Healthcheck",
+    "ArgsEscaped",
+    "Image",
+    "Volumes",
+    "WorkingDir",
+    "Entrypoint",
+    "NetworkDisabled",
+    "MacAddress",
+    "OnBuild",
+    "Labels",
+    "StopSignal",
+    "StopTimeout",
+    "Shell",
 }
 NETWORK_FIELDS = ("IPAMConfig", "Links", "MacAddress", "Aliases", "DriverOpts")
 
@@ -34,7 +55,9 @@ class Replacement:
     def create_body(self, snapshot_image):
         # The eventual executor must commit the stopped source writable layer and
         # journal its image ID. Reusing the original image would discard changes.
-        if not isinstance(snapshot_image, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", snapshot_image):
+        if not isinstance(snapshot_image, str) or not re.fullmatch(
+            r"sha256:[a-f0-9]{64}", snapshot_image
+        ):
             raise PlanError("invalid")
         result = copy.deepcopy(self._body)
         result["Image"] = snapshot_image
@@ -50,13 +73,16 @@ class Replacement:
 
 def _fingerprint(inspection):
     # This digest stays inside the private object, never an approval token.
-    value = {key: inspection[key] for key in ("Id", "Name", "Image", "Config", "HostConfig", "Mounts")}
+    value = {
+        key: inspection[key] for key in ("Id", "Name", "Image", "Config", "HostConfig", "Mounts")
+    }
     value["networks"] = {
         name: {key: endpoint.get(key) for key in (*NETWORK_FIELDS, "NetworkID")}
         for name, endpoint in inspection["NetworkSettings"]["Networks"].items()
     }
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                     allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
 
 
 def _preserve_volumes(host, mounts):
@@ -112,9 +138,15 @@ def _preserve_volumes(host, mounts):
                 # Resolve anonymous Mounts declarations without losing options.
                 declaration["Source"] = name
             else:
-                declarations.append({"Type": "volume", "Source": name, "Target": target,
-                                     "ReadOnly": not mount["RW"],
-                                     "VolumeOptions": {"NoCopy": True}})
+                declarations.append(
+                    {
+                        "Type": "volume",
+                        "Source": name,
+                        "Target": target,
+                        "ReadOnly": not mount["RW"],
+                        "VolumeOptions": {"NoCopy": True},
+                    }
+                )
         elif kind == "bind":
             if target not in bound and target not in by_target:
                 raise PlanError("unsupported")
@@ -128,7 +160,9 @@ def _preserve_volumes(host, mounts):
 
 def prepare(container_id, inspection, operation, *, mapping=None, original=None):
     """Prepare from a private inspect response; no returned public raw config."""
-    preview = from_inspection(container_id, inspection, operation, mapping=mapping, original=original)
+    preview = from_inspection(
+        container_id, inspection, operation, mapping=mapping, original=original
+    )
     try:
         config, host = copy.deepcopy(inspection["Config"]), copy.deepcopy(inspection["HostConfig"])
         if not isinstance(config, dict) or set(config) - CONFIG_FIELDS:
@@ -146,9 +180,10 @@ def prepare(container_id, inspection, operation, *, mapping=None, original=None)
         if not isinstance(exposed, dict):
             raise PlanError("invalid")
         for binding in preview["after"]:
-            key = f'{binding["containerPort"]}/{binding["protocol"]}'
-            ports.setdefault(key, []).append({"HostIp": binding["hostAddress"],
-                                              "HostPort": str(binding["hostPort"])})
+            key = f"{binding['containerPort']}/{binding['protocol']}"
+            ports.setdefault(key, []).append(
+                {"HostIp": binding["hostAddress"], "HostPort": str(binding["hostPort"])}
+            )
             exposed.setdefault(key, {})
         host["PortBindings"] = ports
         config["ExposedPorts"] = exposed
@@ -159,14 +194,18 @@ def prepare(container_id, inspection, operation, *, mapping=None, original=None)
         for network, endpoint in networks.items():
             if not isinstance(endpoint, dict) or not isinstance(network, str) or not network:
                 raise PlanError("invalid")
-            endpoints[network] = {key: copy.deepcopy(endpoint[key]) for key in NETWORK_FIELDS if key in endpoint}
+            endpoints[network] = {
+                key: copy.deepcopy(endpoint[key]) for key in NETWORK_FIELDS if key in endpoint
+            }
         config["HostConfig"] = host
         config["NetworkingConfig"] = {"EndpointsConfig": endpoints}
         preview["writableLayer"] = "snapshot_required"
         preview["volumeData"] = "reuse_existing"
-        preview["tmpfsData"] = "reset_on_replacement" if any(
-            mount["Type"] == "tmpfs" for mount in inspection["Mounts"]
-        ) else "none"
+        preview["tmpfsData"] = (
+            "reset_on_replacement"
+            if any(mount["Type"] == "tmpfs" for mount in inspection["Mounts"])
+            else "none"
+        )
         return Replacement(preview, config, _fingerprint(inspection), name[1:])
     except PlanError:
         raise

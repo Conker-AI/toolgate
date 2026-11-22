@@ -17,7 +17,9 @@ def test_memory_limit_oom(docker):
     # Check container memory limit
     inspect, _ = while_running(docker, agent, "sleep 1")
     assert inspect["HostConfig"]["Memory"] == 256 * 1024 * 1024, "Memory limit should be 256MB"
-    assert inspect["HostConfig"]["MemorySwap"] == 256 * 1024 * 1024, "MemorySwap should equal Memory"
+    assert inspect["HostConfig"]["MemorySwap"] == 256 * 1024 * 1024, (
+        "MemorySwap should equal Memory"
+    )
 
 
 def test_cpu_limit_one_core(docker):
@@ -30,7 +32,9 @@ def test_cpu_limit_one_core(docker):
 
     # Check cgroup CPU limit inside container
     cpu_check = run(agent, "cat /sys/fs/cgroup/cpu.max")
-    assert cpu_check["stdout"].strip() == "100000 100000", f"Expected '100000 100000', got {cpu_check['stdout']}"
+    assert cpu_check["stdout"].strip() == "100000 100000", (
+        f"Expected '100000 100000', got {cpu_check['stdout']}"
+    )
 
 
 def test_processes_limit_64(docker):
@@ -59,7 +63,9 @@ def test_time_limit(docker):
     duration_ms = int((end_time - start_time) * 1000)
 
     assert answer.get("timed_out") is True, f"Expected timeout, got {answer}"
-    assert answer.get("exit_code") is None, f"Expected no exit code on timeout, got {answer.get('exit_code')}"
+    assert answer.get("exit_code") is None, (
+        f"Expected no exit code on timeout, got {answer.get('exit_code')}"
+    )
     assert duration_ms < 15000, f"Expected duration < 15s, got {duration_ms}ms"
 
     # Check no container remains
@@ -92,7 +98,9 @@ def test_tmp_size_limit():
 def test_open_files_limit():
     agent = unique_agent()
     result = run(agent, "ulimit -n")
-    assert result["stdout"].strip() == "1024", f"Expected open files limit 1024, got {result['stdout']}"
+    assert result["stdout"].strip() == "1024", (
+        f"Expected open files limit 1024, got {result['stdout']}"
+    )
 
 
 def test_workspace_quota():
@@ -100,12 +108,16 @@ def test_workspace_quota():
 
     # Write 5 x 60MB files (total 300MB, limit is 256MB)
     for i in range(5):
-        result = run(agent, f"dd if=/dev/zero of=file{i}.bin bs=1M count=60 2>/dev/null; echo OK{i}")
+        result = run(
+            agent, f"dd if=/dev/zero of=file{i}.bin bs=1M count=60 2>/dev/null; echo OK{i}"
+        )
         if i < 4:  # First 4 should succeed
             assert result["exit_code"] == 0, f"File {i} should succeed"
             assert f"OK{i}" in result["stdout"]
         else:  # 5th should trigger quota
-            assert result.get("workspace_exceeded") is True, f"Expected workspace exceeded on file {i}"
+            assert result.get("workspace_exceeded") is True, (
+                f"Expected workspace exceeded on file {i}"
+            )
 
     # Try to write 10MB more - should be stopped
     result = run(agent, "dd if=/dev/zero of=more.bin bs=1M count=10 2>/dev/null; echo MORE")
@@ -188,6 +200,8 @@ def test_concurrency_per_agent():
         else:
             # At least one got busy error
             busy_found = any(r.get("code") == "busy" for _, r, _ in results)
-            assert busy_found, f"Expected busy error for concurrent execution, got results: {results}"
+            assert busy_found, (
+                f"Expected busy error for concurrent execution, got results: {results}"
+            )
     else:
         raise AssertionError(f"Expected 2 results, got {len(results)}")

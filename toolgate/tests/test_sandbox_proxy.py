@@ -99,22 +99,22 @@ class TestRewrite:
     """Test URL rewriting in responses."""
 
     def test_pypi_index_rewrite(self):
-        body = b'https://files.pythonhosted.org/packages/a/b.whl'
+        body = b"https://files.pythonhosted.org/packages/a/b.whl"
         rewritten = proxy.rewrite("pypi-index", body, "example.com:3128")
-        assert rewritten == b'/pypi/files/packages/a/b.whl'
+        assert rewritten == b"/pypi/files/packages/a/b.whl"
 
     def test_npm_metadata_rewrite_local_host(self):
-        body = b'https://registry.npmjs.org/lodash'
+        body = b"https://registry.npmjs.org/lodash"
         rewritten = proxy.rewrite("npm-metadata", body, "127.0.0.1:3128")
-        assert rewritten == b'http://127.0.0.1:3128/npm/lodash'
+        assert rewritten == b"http://127.0.0.1:3128/npm/lodash"
 
     def test_npm_metadata_no_rewrite_external_host(self):
-        body = b'https://registry.npmjs.org/lodash'
+        body = b"https://registry.npmjs.org/lodash"
         rewritten = proxy.rewrite("npm-metadata", body, "evil.com:80")
         assert rewritten == body  # Unchanged
 
     def test_other_kinds_not_rewritten(self):
-        body = b'https://example.com/something'
+        body = b"https://example.com/something"
         rewritten = proxy.rewrite("other", body, "localhost:3128")
         assert rewritten == body  # Unchanged
 
@@ -362,7 +362,7 @@ class TestRewriteEdgeCases:
 
     def test_npm_rewrite_case_sensitivity(self):
         # Test that rewrite is case-sensitive for host matching
-        body = b'https://registry.npmjs.org/lodash'
+        body = b"https://registry.npmjs.org/lodash"
         rewritten = proxy.rewrite("npm-metadata", body, "LOCALHOST:3128")
         assert rewritten == body  # No rewrite due to case mismatch
 

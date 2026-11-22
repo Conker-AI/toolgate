@@ -4,6 +4,7 @@ Emolga's CLI/API calls never touch this port; it exists purely so the owner can
 open the dashboard from any device on the tailnet. Run after `npm run build`:
     python server.py
 """
+
 from pathlib import Path
 
 import uvicorn

@@ -52,9 +52,7 @@ def store(tmp_path, monkeypatch):
         "admin",
         {"session_id": "original-session"},
     )
-    ordinary = approvals.create_request(
-        "warning", "Still relevant", "Retain in queue", "admin"
-    )
+    ordinary = approvals.create_request("warning", "Still relevant", "Retain in queue", "admin")
     return ordinary
 
 
@@ -77,13 +75,10 @@ def test_startup_retires_ai_routes_and_preserves_other_tools(store):
                 == 404
             )
         assert not any(
-            path.startswith("/v2/ai/")
-            for path in client.get("/openapi.json").json()["paths"]
+            path.startswith("/v2/ai/") for path in client.get("/openapi.json").json()["paths"]
         )
         _, key = control_plane.issue_agent_key("search caller", ["tool:research.*"])
-        tools = client.get(
-            "/v2/agent/tools", headers={"X-ToolGate-Execution-Key": key}
-        ).json()
+        tools = client.get("/v2/agent/tools", headers={"X-ToolGate-Execution-Key": key}).json()
         assert {"research.search", "research.fetch", "research.fetch-batch"} <= {
             t["id"] for t in tools
         }
@@ -101,24 +96,16 @@ def test_archive_export_is_lossless_idempotent_and_owner_only(store):
         assert client.get("/v2/archives/ai").status_code == 401
         _, key = control_plane.issue_agent_key("agent", ["tool:*"])
         assert (
-            client.get(
-                "/v2/archives/ai", headers={"X-ToolGate-Execution-Key": key}
-            ).status_code
+            client.get("/v2/archives/ai", headers={"X-ToolGate-Execution-Key": key}).status_code
             == 401
         )
-        first = client.get(
-            "/v2/archives/ai", headers={"X-ToolGate-Key": "archive-owner"}
-        ).json()
+        first = client.get("/v2/archives/ai", headers={"X-ToolGate-Key": "archive-owner"}).json()
         legacy_archive.migrate()
         assert first == legacy_archive.export()
     records = [
-        record["row"]
-        for record in first["records"]
-        if record["source_table"] == "v2_objects"
+        record["row"] for record in first["records"] if record["source_table"] == "v2_objects"
     ]
-    assert sorted(records, key=lambda r: r["id"]) == sorted(
-        originals, key=lambda r: r["id"]
-    )
+    assert sorted(records, key=lambda r: r["id"]) == sorted(originals, key=lambda r: r["id"])
     assert first["executable"] is False
     assert any(record["source_table"] == "v2_events" for record in first["records"])
     assert control_plane.list_objects("ai_session") == []
@@ -138,13 +125,7 @@ def test_archive_failure_rolls_back_every_retained_record(store):
         conn.execute("DROP TRIGGER fail_retirement")
     legacy_archive.migrate()
     assert (
-        len(
-            [
-                r
-                for r in legacy_archive.export()["records"]
-                if r["source_table"] == "v2_objects"
-            ]
-        )
+        len([r for r in legacy_archive.export()["records"] if r["source_table"] == "v2_objects"])
         == 2
     )
 
@@ -152,15 +133,11 @@ def test_archive_failure_rolls_back_every_retained_record(store):
 def test_collision_aborts_without_overwriting_the_archive(store):
     legacy_archive.migrate()
     original = legacy_archive.export()
-    control_plane._put(
-        "ai_session", "original-session", {"messages": ["different history"]}
-    )
+    control_plane._put("ai_session", "original-session", {"messages": ["different history"]})
     with pytest.raises(RuntimeError, match="collision"):
         legacy_archive.migrate()
     assert legacy_archive.export() == original
-    assert control_plane.get("ai_session", "original-session")["messages"] == [
-        "different history"
-    ]
+    assert control_plane.get("ai_session", "original-session")["messages"] == ["different history"]
 
 
 def test_legacy_proposals_cannot_be_created_or_promoted_through_generic_requests(store):

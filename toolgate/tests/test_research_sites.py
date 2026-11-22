@@ -28,18 +28,25 @@ class ResearchSiteTests(unittest.TestCase):
     def tearDown(self):
         control_plane.DB_PATH = self.original_db
 
-
     def test_github_bad_token_retries_without_authentication(self):
         rejected = Mock(status_code=401)
         accepted = Mock(status_code=200)
         accepted.raise_for_status.return_value = None
-        accepted.json.return_value = {"items": [{
-            "title": "Manual reconciliation", "html_url": "https://github.com/example/repo/issues/1",
-            "body": "CSV rows are reconciled manually.", "created_at": "2026-07-29T00:00:00Z",
-        }]}
-        with patch.object(research_web.vault, "get_key", return_value="bad-token"), \
-             patch.object(research_base, "_public_https_url", return_value=True), \
-             patch.object(research.httpx, "get", side_effect=[rejected, accepted]) as request:
+        accepted.json.return_value = {
+            "items": [
+                {
+                    "title": "Manual reconciliation",
+                    "html_url": "https://github.com/example/repo/issues/1",
+                    "body": "CSV rows are reconciled manually.",
+                    "created_at": "2026-07-29T00:00:00Z",
+                }
+            ]
+        }
+        with (
+            patch.object(research_web.vault, "get_key", return_value="bad-token"),
+            patch.object(research_base, "_public_https_url", return_value=True),
+            patch.object(research.httpx, "get", side_effect=[rejected, accepted]) as request,
+        ):
             rows = research._github("CSV reconciliation", "github", 1, 365, 5)
         self.assertEqual(1, len(rows))
         self.assertIn("GitHub issue", rows[0]["document"])
@@ -49,19 +56,29 @@ class ResearchSiteTests(unittest.TestCase):
     def test_github_repository_search_returns_explicit_product_landscape(self):
         response = Mock(status_code=200)
         response.raise_for_status.return_value = None
-        response.json.return_value = {"items": [{
-            "full_name": "acme/hook-debugger",
-            "description": "Capture and replay failed webhooks",
-            "html_url": "https://github.com/acme/hook-debugger",
-            "pushed_at": "2026-07-20T00:00:00Z",
-            "stargazers_count": 420,
-            "topics": ["webhooks", "debugging"],
-            "license": {"spdx_id": "MIT"},
-        }]}
-        with patch.object(research_web.vault, "get_key", return_value="private-token"), \
-             patch.object(research.httpx, "get", return_value=response) as request:
+        response.json.return_value = {
+            "items": [
+                {
+                    "full_name": "acme/hook-debugger",
+                    "description": "Capture and replay failed webhooks",
+                    "html_url": "https://github.com/acme/hook-debugger",
+                    "pushed_at": "2026-07-20T00:00:00Z",
+                    "stargazers_count": 420,
+                    "topics": ["webhooks", "debugging"],
+                    "license": {"spdx_id": "MIT"},
+                }
+            ]
+        }
+        with (
+            patch.object(research_web.vault, "get_key", return_value="private-token"),
+            patch.object(research.httpx, "get", return_value=response) as request,
+        ):
             rows = research._github_repositories(
-                "webhook replay debugging", "github_repositories", 5, 730, 5,
+                "webhook replay debugging",
+                "github_repositories",
+                5,
+                730,
+                5,
             )
         self.assertEqual("acme/hook-debugger", rows[0]["repository"])
         self.assertEqual(420, rows[0]["stars"])
@@ -75,13 +92,21 @@ class ResearchSiteTests(unittest.TestCase):
     def test_api_backed_research_results_include_bounded_snapshots(self):
         stack_response = Mock()
         stack_response.raise_for_status.return_value = None
-        stack_response.json.return_value = {"items": [{
-            "title": "Repeated API problem", "link": "https://stackoverflow.com/questions/1/example",
-            "body": "<p>We manually repeat this integration every day.</p>", "creation_date": 1,
-        }]}
-        with patch.object(research_web.vault, "get_key", side_effect=KeyError), \
-             patch.object(research_base, "_public_https_url", return_value=True), \
-             patch.object(research.httpx, "get", return_value=stack_response):
+        stack_response.json.return_value = {
+            "items": [
+                {
+                    "title": "Repeated API problem",
+                    "link": "https://stackoverflow.com/questions/1/example",
+                    "body": "<p>We manually repeat this integration every day.</p>",
+                    "creation_date": 1,
+                }
+            ]
+        }
+        with (
+            patch.object(research_web.vault, "get_key", side_effect=KeyError),
+            patch.object(research_base, "_public_https_url", return_value=True),
+            patch.object(research.httpx, "get", return_value=stack_response),
+        ):
             rows = research._stackoverflow("API integration", "stackoverflow", 1, 365, 5)
         self.assertIn("Stack Overflow question", rows[0]["document"])
         self.assertNotIn("<p>", rows[0]["document"])
@@ -91,20 +116,30 @@ class ResearchSiteTests(unittest.TestCase):
         for site in ("ai", "datascience", "softwareengineering"):
             response = Mock()
             response.raise_for_status.return_value = None
-            response.json.return_value = {"items": [{
-                "title": f"LLM evaluation problem on {site}",
-                "link": f"https://{site}.stackexchange.com/questions/1/example",
-                "body": "<p>We currently repeat model evaluation after regressions.</p>",
-                "creation_date": 1,
-            }]}
+            response.json.return_value = {
+                "items": [
+                    {
+                        "title": f"LLM evaluation problem on {site}",
+                        "link": f"https://{site}.stackexchange.com/questions/1/example",
+                        "body": "<p>We currently repeat model evaluation after regressions.</p>",
+                        "creation_date": 1,
+                    }
+                ]
+            }
             responses.append(response)
-        with patch.object(research_web.vault, "get_key", return_value="stack-key"), \
-             patch.object(research.httpx, "get", side_effect=responses) as request:
+        with (
+            patch.object(research_web.vault, "get_key", return_value="stack-key"),
+            patch.object(research.httpx, "get", side_effect=responses) as request,
+        ):
             rows = research._stackexchange("llm evaluation regression", "stackexchange", 5, 365, 5)
         self.assertEqual(3, len(rows))
-        self.assertEqual({"ai", "datascience", "softwareengineering"}, {row["community"] for row in rows})
+        self.assertEqual(
+            {"ai", "datascience", "softwareengineering"}, {row["community"] for row in rows}
+        )
         self.assertTrue(all("<p>" not in row["document"] for row in rows))
-        self.assertTrue(all(call.kwargs["params"]["q"] == "llm evaluation" for call in request.call_args_list))
+        self.assertTrue(
+            all(call.kwargs["params"]["q"] == "llm evaluation" for call in request.call_args_list)
+        )
 
     def test_stackexchange_routes_business_workflows_to_relevant_sites(self):
         self.assertEqual(
@@ -121,22 +156,28 @@ class ResearchSiteTests(unittest.TestCase):
         response = Mock()
         response.raise_for_status.return_value = None
         response.content = b"{}"
-        response.json.return_value = {"feed": {"entry": [
-            {
-                "im:rating": {"label": "2"},
-                "title": {"label": "Scheduling keeps losing jobs"},
-                "content": {"label": "We repeatedly lose scheduled jobs after dispatch changes."},
-                "updated": {"label": now},
-                "id": {"label": "review-123"},
-            },
-            {
-                "im:rating": {"label": "5"},
-                "title": {"label": "Perfect"},
-                "content": {"label": "Everything works."},
-                "updated": {"label": now},
-                "id": {"label": "review-456"},
-            },
-        ]}}
+        response.json.return_value = {
+            "feed": {
+                "entry": [
+                    {
+                        "im:rating": {"label": "2"},
+                        "title": {"label": "Scheduling keeps losing jobs"},
+                        "content": {
+                            "label": "We repeatedly lose scheduled jobs after dispatch changes."
+                        },
+                        "updated": {"label": now},
+                        "id": {"label": "review-123"},
+                    },
+                    {
+                        "im:rating": {"label": "5"},
+                        "title": {"label": "Perfect"},
+                        "content": {"label": "Everything works."},
+                        "updated": {"label": now},
+                        "id": {"label": "review-456"},
+                    },
+                ]
+            }
+        }
         with patch.object(research.httpx, "get", return_value=response):
             rows = research._appstore_reviews("1014146758", "appstore_reviews", 5, 90, 5)
         self.assertEqual(1, len(rows))
@@ -150,17 +191,23 @@ class ResearchSiteTests(unittest.TestCase):
         response = Mock()
         response.raise_for_status.return_value = None
         response.content = b"{}"
-        response.json.return_value = {"results": [{
-            "trackId": 123456789,
-            "trackName": "Field Dispatch",
-            "primaryGenreName": "Business",
-            "description": "Scheduling and dispatch for field service technicians.",
-            "averageUserRating": 2.5,
-            "userRatingCount": 120,
-            "currentVersionReleaseDate": datetime.now(UTC).isoformat(),
-        }]}
+        response.json.return_value = {
+            "results": [
+                {
+                    "trackId": 123456789,
+                    "trackName": "Field Dispatch",
+                    "primaryGenreName": "Business",
+                    "description": "Scheduling and dispatch for field service technicians.",
+                    "averageUserRating": 2.5,
+                    "userRatingCount": 120,
+                    "currentVersionReleaseDate": datetime.now(UTC).isoformat(),
+                }
+            ]
+        }
         with patch.object(research.httpx, "get", return_value=response):
-            rows = research._appstore_catalog("field service dispatch", "appstore_catalog", 5, 3650, 5)
+            rows = research._appstore_catalog(
+                "field service dispatch", "appstore_catalog", 5, 3650, 5
+            )
         self.assertEqual(1, len(rows))
         self.assertEqual("123456789", rows[0]["app_id"])
         self.assertEqual("Field Dispatch", rows[0]["product_name"])
@@ -170,21 +217,37 @@ class ResearchSiteTests(unittest.TestCase):
     def test_youtube_search_returns_provenance_bound_comment_snapshots(self):
         videos = Mock()
         videos.raise_for_status.return_value = None
-        videos.json.return_value = {"items": [{
-            "id": {"videoId": "abcdefghijk"},
-            "snippet": {"title": "Spreadsheet workflow problems"},
-        }]}
+        videos.json.return_value = {
+            "items": [
+                {
+                    "id": {"videoId": "abcdefghijk"},
+                    "snippet": {"title": "Spreadsheet workflow problems"},
+                }
+            ]
+        }
         comments = Mock()
         comments.raise_for_status.return_value = None
-        comments.json.return_value = {"items": [{"snippet": {"topLevelComment": {
-            "id": "comment_12345", "snippet": {
-                "textOriginal": "We manually copy every invoice and it takes hours.",
-                "likeCount": 12, "publishedAt": "2026-07-29T10:00:00Z",
-            },
-        }}}]}
-        with patch.object(research_web.vault, "get_key", return_value="private-google-key"), \
-             patch.object(research_base, "_public_https_url", return_value=True), \
-             patch.object(research.httpx, "get", side_effect=[videos, comments]) as get:
+        comments.json.return_value = {
+            "items": [
+                {
+                    "snippet": {
+                        "topLevelComment": {
+                            "id": "comment_12345",
+                            "snippet": {
+                                "textOriginal": "We manually copy every invoice and it takes hours.",
+                                "likeCount": 12,
+                                "publishedAt": "2026-07-29T10:00:00Z",
+                            },
+                        }
+                    }
+                }
+            ]
+        }
+        with (
+            patch.object(research_web.vault, "get_key", return_value="private-google-key"),
+            patch.object(research_base, "_public_https_url", return_value=True),
+            patch.object(research.httpx, "get", side_effect=[videos, comments]) as get,
+        ):
             rows = research._youtube("invoice workflow complaints", "youtube", 5, 30, 5)
         # The key travels in a header, never in the URL (request logs, HTTPStatusError text).
         self.assertEqual(2, get.call_count)
@@ -197,10 +260,15 @@ class ResearchSiteTests(unittest.TestCase):
         self.assertNotIn("private-google-key", str(rows))
 
     def test_cached_provider_snapshot_is_scanned_without_network_fetch(self):
-        row = research_cache.cache_research_result({
-            "title": "Comment", "url": "https://www.youtube.com/watch?v=abcdefghijk",
-            "source": "youtube", "document": "A manual workflow takes three hours every day.",
-        }, "2099-01-01T00:00:00+00:00")
+        row = research_cache.cache_research_result(
+            {
+                "title": "Comment",
+                "url": "https://www.youtube.com/watch?v=abcdefghijk",
+                "source": "youtube",
+                "document": "A manual workflow takes three hours every day.",
+            },
+            "2099-01-01T00:00:00+00:00",
+        )
         with patch.object(research.httpx, "Client") as client:
             result = research_base.fetch(row["id"], 2000)
         self.assertFalse(result["blocked"])
@@ -216,8 +284,13 @@ class ResearchSiteTests(unittest.TestCase):
         self.assertIn("reddit", source["allowed_values"])
         self.assertIn("stackexchange", source["allowed_values"])
         self.assertIn("discourse", source["allowed_values"])
-        self.assertEqual(3650, next(field for field in tool["inputs"] if field["name"] == "recency_days")["maximum"])
-        self.assertEqual("reddit", control_plane.get("tool", "research.reddit")["execution"]["fixed_source"])
+        self.assertEqual(
+            3650,
+            next(field for field in tool["inputs"] if field["name"] == "recency_days")["maximum"],
+        )
+        self.assertEqual(
+            "reddit", control_plane.get("tool", "research.reddit")["execution"]["fixed_source"]
+        )
         self.assertEqual(
             "github_repositories",
             control_plane.get("tool", "research.github-repositories")["execution"]["fixed_source"],
@@ -254,14 +327,32 @@ class ResearchSiteTests(unittest.TestCase):
         products.raise_for_status.return_value = None
         products.json.return_value = {
             "data": {
-                "p0": {"nodes": [{"id": "one", "name": "Invoice Flow", "tagline": "Invoice automation", "description": "Automates invoice review", "url": "https://www.producthunt.com/products/invoice-flow", "createdAt": "2026-01-01T00:00:00Z", "votesCount": 42}]},
+                "p0": {
+                    "nodes": [
+                        {
+                            "id": "one",
+                            "name": "Invoice Flow",
+                            "tagline": "Invoice automation",
+                            "description": "Automates invoice review",
+                            "url": "https://www.producthunt.com/products/invoice-flow",
+                            "createdAt": "2026-01-01T00:00:00Z",
+                            "votesCount": 42,
+                        }
+                    ]
+                },
                 "p1": {"nodes": []},
             }
         }
-        with patch.object(research_base.control_plane, "settings", return_value={"producthunt_commercial_use_approved": True}), \
-             patch.object(research_web.vault, "get_key", return_value="private-token"), \
-             patch.object(research_base, "_public_https_url", return_value=True), \
-             patch.object(research.httpx, "post", side_effect=[topics, products]) as request:
+        with (
+            patch.object(
+                research_base.control_plane,
+                "settings",
+                return_value={"producthunt_commercial_use_approved": True},
+            ),
+            patch.object(research_web.vault, "get_key", return_value="private-token"),
+            patch.object(research_base, "_public_https_url", return_value=True),
+            patch.object(research.httpx, "post", side_effect=[topics, products]) as request,
+        ):
             rows = research._producthunt("invoice automation", "producthunt", 5, 365, 5)
         self.assertEqual(["Invoice Flow"], [row["title"] for row in rows])
         self.assertNotIn("private-token", str(rows))

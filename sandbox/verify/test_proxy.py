@@ -75,7 +75,7 @@ def test_proxy_allowlist_pypi():
     # Test allowed PyPI requests as UID 65533
     status, body = proxy_request("GET", "/pypi/simple/six/")
     assert status == 200, f"Expected 200 for /pypi/simple/six/, got {status}"
-    body_str = body.decode('utf-8')
+    body_str = body.decode("utf-8")
     assert "/pypi/files/packages/" in body_str, "Expected package URLs in response"
     assert "https://files.pythonhosted.org" not in body_str, "Should not contain external URLs"
 
@@ -91,7 +91,7 @@ def test_proxy_refused_methods():
     refused_methods = [
         ("POST", "/npm/is-number"),
         ("PUT", "/npm/is-number"),
-        ("DELETE", "/npm/is-number")
+        ("DELETE", "/npm/is-number"),
     ]
 
     for method, path in refused_methods:
@@ -106,7 +106,7 @@ def test_proxy_refused_paths():
         ("GET", "/http://example.com/"),
         ("GET", "/pypi/simple/../../etc/passwd"),
         ("GET", "/npm/-/npm/v1/security/advisories/bulk"),
-        ("GET", "/github/x")
+        ("GET", "/github/x"),
     ]
 
     for method, path in refused_paths:
@@ -118,18 +118,21 @@ def test_proxy_absolute_form_request():
     # Test absolute-form request line as UID 65533
     def _absolute_request():
         import socket
+
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             sock.connect("/run/conker-proxy/proxy.sock")
             sock.send(b"GET http://example.com/ HTTP/1.0\r\n\r\n")
             response = sock.recv(1024)
-            return response.decode('utf-8', errors='ignore')
+            return response.decode("utf-8", errors="ignore")
         finally:
             sock.close()
 
     response = as_uid(65533, _absolute_request)
     # Should return 404 or 400
-    assert "404" in response or "400" in response, f"Expected 404/400 for absolute-form, got: {response}"
+    assert "404" in response or "400" in response, (
+        f"Expected 404/400 for absolute-form, got: {response}"
+    )
 
 
 def test_proxy_denied_logs():
@@ -138,13 +141,16 @@ def test_proxy_denied_logs():
     proxy_request("POST", "/npm/is-number")
 
     proxy_log = logs("package-proxy")
-    assert "package_denied" in proxy_log, "Expected package_denied in proxy logs for refused requests"
+    assert "package_denied" in proxy_log, (
+        "Expected package_denied in proxy logs for refused requests"
+    )
 
 
 def test_proxy_peer_check_verifier_uid():
     # Test as UID 0 (verifier) - should get closed
     def _request_as_uid0():
         import socket
+
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             sock.connect("/run/conker-proxy/proxy.sock")
@@ -152,7 +158,7 @@ def test_proxy_peer_check_verifier_uid():
             response = sock.recv(1024)
             # The proxy hangs up without answering; depending on timing that is an empty read
             # or a reset, and both mean nothing was served.
-            return response.decode('utf-8', errors='ignore') or "closed"
+            return response.decode("utf-8", errors="ignore") or "closed"
         except Exception:
             return "closed"
         finally:

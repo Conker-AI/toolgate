@@ -14,25 +14,40 @@ from toolgate.core import web_hosts
 from toolgate.executors import research_base
 
 
-@pytest.mark.parametrize("host", [
-    "xn--pple-43d.com",          # Cyrillic а + "pple"
-    "xn--80ak6aa92e.com",        # аррӏе, all Cyrillic letters that look Latin
-    "pаypal.com",                # raw Cyrillic а inside Latin
-    "xn--zz.com",                # does not decode
-    "xn--abc-.com",              # decodes to ASCII: not a real IDN
-    "xn--apple.com",             # decodes to control characters
-    "gοοgle.com",                # Greek omicrons inside Latin
-])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "xn--pple-43d.com",  # Cyrillic а + "pple"
+        "xn--80ak6aa92e.com",  # аррӏе, all Cyrillic letters that look Latin
+        "pаypal.com",  # raw Cyrillic а inside Latin
+        "xn--zz.com",  # does not decode
+        "xn--abc-.com",  # decodes to ASCII: not a real IDN
+        "xn--apple.com",  # decodes to control characters
+        "gοοgle.com",  # Greek omicrons inside Latin
+    ],
+)
 def test_lookalikes_are_refused(host):
     assert web_hosts.lookalike(host)
     assert web_hosts.refusal(f"https://{host}/page") == "lookalike"
 
 
-@pytest.mark.parametrize("host", [
-    "example.com", "münchen.de", "xn--mnchen-3ya.de", "пример.рф", "яндекс.ru",
-    "例え.jp", "東京ドーム.jp", "中文.tw", "한국.kr", "παράδειγμα.gr", "sub.example.co.uk",
-    "1.2.3.4",
-])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "example.com",
+        "münchen.de",
+        "xn--mnchen-3ya.de",
+        "пример.рф",
+        "яндекс.ru",
+        "例え.jp",
+        "東京ドーム.jp",
+        "中文.tw",
+        "한국.kr",
+        "παράδειγμα.gr",
+        "sub.example.co.uk",
+        "1.2.3.4",
+    ],
+)
 def test_real_names_pass(host):
     assert not web_hosts.lookalike(host)
 

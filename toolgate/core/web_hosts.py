@@ -49,8 +49,28 @@ _LATIN_LOOKING = {
     "GREEK": set("αικνορτυχ"),
 }
 _OWN_TLDS = {
-    "CYRILLIC": {"ru", "su", "ua", "by", "kz", "bg", "rs", "mk", "mn", "kg", "tj", "uz",
-                 "рф", "бг", "срб", "укр", "қаз", "мкд", "мон", "бел"},
+    "CYRILLIC": {
+        "ru",
+        "su",
+        "ua",
+        "by",
+        "kz",
+        "bg",
+        "rs",
+        "mk",
+        "mn",
+        "kg",
+        "tj",
+        "uz",
+        "рф",
+        "бг",
+        "срб",
+        "укр",
+        "қаз",
+        "мкд",
+        "мон",
+        "бел",
+    },
     "GREEK": {"gr", "cy", "ελ", "ευ"},
 }
 _HOST = re.compile(r"^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$")
@@ -106,8 +126,10 @@ def lookalike(host: str) -> bool:
         if len(scripts) == 1:
             (script,) = scripts
             letters = [char for char in label if _script(char)]
-            if script in _LATIN_LOOKING and tld not in _OWN_TLDS[script] and all(
-                char in _LATIN_LOOKING[script] for char in letters
+            if (
+                script in _LATIN_LOOKING
+                and tld not in _OWN_TLDS[script]
+                and all(char in _LATIN_LOOKING[script] for char in letters)
             ):
                 return True
     return False

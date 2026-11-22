@@ -15,12 +15,19 @@ def configured(monkeypatch):
     monkeypatch.setenv("TOOLGATE_SYSTEMD_SCOPE", "system")
     monkeypatch.setenv("TOOLGATE_MANAGED_SERVICE_UNITS", json.dumps([UNIT]))
     # Even a mistakenly omitted injection must never affect a real service.
-    monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **kw: pytest.fail("Real runner forbidden"))
+    monkeypatch.setattr(
+        adapter.subprocess, "run", lambda *a, **kw: pytest.fail("Real runner forbidden")
+    )
 
 
 def body(**overrides):
-    fields = {"Id": UNIT, "LoadState": "loaded", "ActiveState": "active",
-              "SubState": "running", "MainPID": "42"}
+    fields = {
+        "Id": UNIT,
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "MainPID": "42",
+    }
     fields.update(overrides)
     return "\n".join(f"{k}={v}" for k, v in fields.items()).encode() + b"\n"
 
@@ -29,6 +36,7 @@ def runner(calls):
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
         return SimpleNamespace(returncode=0, stdout=body())
+
     return run
 
 
@@ -50,10 +58,20 @@ def test_fixed_argv_projection_and_no_inherited_environment(monkeypatch, action)
         assert 0 < kw["timeout"] <= adapter.DEADLINE_SECONDS
         assert set(kw["env"]) == {"PATH", "LANG", "LC_ALL", "SYSTEMD_COLORS"}
     assert calls[1][1]["stdout"] == subprocess.DEVNULL
-    assert result == {"serviceId": ID, "action": action, "outcome": "observed", "dispatched": True,
-                      "before": result["after"], "after": {
-                          "id": UNIT, "loadState": "loaded", "activeState": "active",
-                          "subState": "running", "mainPid": 42}}
+    assert result == {
+        "serviceId": ID,
+        "action": action,
+        "outcome": "observed",
+        "dispatched": True,
+        "before": result["after"],
+        "after": {
+            "id": UNIT,
+            "loadState": "loaded",
+            "activeState": "active",
+            "subState": "running",
+            "mainPid": 42,
+        },
+    }
 
 
 def test_user_manager_uses_effective_identity_not_inherited_bus(monkeypatch):
@@ -68,27 +86,49 @@ def test_user_manager_uses_effective_identity_not_inherited_bus(monkeypatch):
     assert calls[0][1]["env"]["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/run/user/1234/bus"
 
 
-@pytest.mark.parametrize("unit", ["--root.service", "/foo.service", "../foo.service", "*.service",
-                                   "a?.service", "a@.service", "a.service\n", "a.socket", "a.service x",
-                                   "a\\x.service", "a;whoami.service", "a:other.service"])
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "--root.service",
+        "/foo.service",
+        "../foo.service",
+        "*.service",
+        "a?.service",
+        "a@.service",
+        "a.service\n",
+        "a.socket",
+        "a.service x",
+        "a\\x.service",
+        "a;whoami.service",
+        "a:other.service",
+    ],
+)
 def test_invalid_units_never_execute(unit):
     with pytest.raises(adapter.ControlError) as error:
         adapter.control("system:" + unit, "start")
     assert error.value.code == "invalid_arguments"
 
 
-@pytest.mark.parametrize("identity,action", [(UNIT, "start"), (None, "start"), (ID, []), (ID, "kill")])
+@pytest.mark.parametrize(
+    "identity,action", [(UNIT, "start"), (None, "start"), (ID, []), (ID, "kill")]
+)
 def test_bad_arguments(identity, action):
     with pytest.raises(adapter.ControlError) as error:
         adapter.control(identity, action)
     assert error.value.code == "invalid_arguments"
 
 
-@pytest.mark.parametrize("scope,units,code", [
-    ("", [UNIT], "not_configured"), ("remote", [UNIT], "invalid_configuration"),
-    ("system", [], "not_managed"), ("system", ["*.service"], "invalid_configuration"),
-    ("user", [UNIT], "not_managed"), ("system", {}, "invalid_configuration"),
-])
+@pytest.mark.parametrize(
+    "scope,units,code",
+    [
+        ("", [UNIT], "not_configured"),
+        ("remote", [UNIT], "invalid_configuration"),
+        ("system", [], "not_managed"),
+        ("system", ["*.service"], "invalid_configuration"),
+        ("user", [UNIT], "not_managed"),
+        ("system", {}, "invalid_configuration"),
+    ],
+)
 def test_config_denial(scope, units, code, monkeypatch):
     monkeypatch.setenv("TOOLGATE_SYSTEMD_SCOPE", scope)
     monkeypatch.setenv("TOOLGATE_MANAGED_SERVICE_UNITS", json.dumps(units))
@@ -105,6 +145,7 @@ def test_targets_are_config_only_scoped_sorted(monkeypatch):
 @pytest.mark.parametrize("changed", ["scope", "units"])
 def test_configuration_revoked_after_inspect_prevents_mutation(monkeypatch, changed):
     calls = []
+
     def run(argv, **kw):
         calls.append(argv)
         if changed == "scope":
@@ -112,20 +153,33 @@ def test_configuration_revoked_after_inspect_prevents_mutation(monkeypatch, chan
         else:
             monkeypatch.setenv("TOOLGATE_MANAGED_SERVICE_UNITS", "[]")
         return SimpleNamespace(returncode=0, stdout=body())
+
     with pytest.raises(adapter.ControlError):
         adapter.control(ID, "start", runner=run)
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("data", [body(Id="alias.service"), body(LoadState="not-found"),
-                                  body(LoadState="masked"), body(MainPID="-2"), body(MainPID="9999999999"),
-                                  body(ActiveState="secret"), body(SubState="bad\nvalue"),
-                                  body() + b"Id=other.service\n", b"x" * (adapter.MAX_BYTES + 1)])
+@pytest.mark.parametrize(
+    "data",
+    [
+        body(Id="alias.service"),
+        body(LoadState="not-found"),
+        body(LoadState="masked"),
+        body(MainPID="-2"),
+        body(MainPID="9999999999"),
+        body(ActiveState="secret"),
+        body(SubState="bad\nvalue"),
+        body() + b"Id=other.service\n",
+        b"x" * (adapter.MAX_BYTES + 1),
+    ],
+)
 def test_invalid_preinspection_blocks(data):
     calls = []
+
     def run(argv, **kw):
         calls.append(argv)
         return SimpleNamespace(returncode=0, stdout=data)
+
     with pytest.raises(adapter.ControlError):
         adapter.control(ID, "start", runner=run)
     assert len(calls) == 1
@@ -134,11 +188,13 @@ def test_invalid_preinspection_blocks(data):
 @pytest.mark.parametrize("failure_at", [1, 2, 3])
 def test_static_errors_and_no_retry(failure_at):
     calls = []
+
     def run(argv, **kw):
         calls.append(argv)
         if len(calls) == failure_at:
             raise RuntimeError("sensitive diagnostic")
         return SimpleNamespace(returncode=0, stdout=body())
+
     expected = adapter.ControlError if failure_at == 1 else adapter.OutcomeUnknown
     with pytest.raises(expected) as error:
         adapter.control(ID, "restart", runner=run)
@@ -148,9 +204,11 @@ def test_static_errors_and_no_retry(failure_at):
 
 def test_failed_mutation_exit_unknown_without_retry():
     calls = []
+
     def run(argv, **kw):
         calls.append(argv)
         return SimpleNamespace(returncode=int(len(calls) == 2), stdout=body())
+
     with pytest.raises(adapter.OutcomeUnknown):
         adapter.control(ID, "stop", runner=run)
     assert len(calls) == 2

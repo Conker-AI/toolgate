@@ -4,6 +4,7 @@ These run against real files and the real cipher. The property under test is
 that a reader who holds the values file but not the install-time secret learns
 nothing, so nothing here may be mocked.
 """
+
 import os
 import stat
 import threading
@@ -101,7 +102,10 @@ class VaultEncryptionTests(unittest.TestCase):
         # door; VaultError must keep taking that path rather than becoming a 500.
         vault.set_secret("GITHUB_TOKEN", "ghp_value")
 
-        with patch.dict(os.environ, {"TOOLGATE_VAULT_SECRET": "wrong"}), self.assertRaises(KeyError):
+        with (
+            patch.dict(os.environ, {"TOOLGATE_VAULT_SECRET": "wrong"}),
+            self.assertRaises(KeyError),
+        ):
             vault.get_key("GITHUB_TOKEN")
 
     def test_a_secret_supplied_only_through_the_environment_still_resolves(self):

@@ -56,12 +56,20 @@ def main() -> int:
         if ceiling is None and lines > LIMIT:
             problems.append(f"{path}: {lines} lines, limit {LIMIT}. Split it by concern.")
         elif ceiling is not None and lines > ceiling:
-            problems.append(f"{path}: grew to {lines} lines; it is allowlisted at {ceiling} and may only shrink.")
+            problems.append(
+                f"{path}: grew to {lines} lines; it is allowlisted at {ceiling} and may only shrink."
+            )
         elif ceiling is not None and lines <= LIMIT:
-            problems.append(f"{path}: now {lines} lines, under the limit; delete its line from {ALLOWLIST}.")
+            problems.append(
+                f"{path}: now {lines} lines, under the limit; delete its line from {ALLOWLIST}."
+            )
         elif ceiling is not None and lines < ceiling:
-            problems.append(f"{path}: shrank to {lines} lines; lower its entry in {ALLOWLIST} from {ceiling}.")
-    problems += [f"{path}: listed in {ALLOWLIST} but no longer tracked; delete the line." for path in allowed]
+            problems.append(
+                f"{path}: shrank to {lines} lines; lower its entry in {ALLOWLIST} from {ceiling}."
+            )
+    problems += [
+        f"{path}: listed in {ALLOWLIST} but no longer tracked; delete the line." for path in allowed
+    ]
     if problems:
         print("\n".join(problems))
         return 1

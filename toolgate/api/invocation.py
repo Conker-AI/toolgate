@@ -212,7 +212,11 @@ def invoke_tool(
         deny("POLICY_DENIED", "This tool is permanently blocked by its owner policy")
     needs_owner = authorization in {"owner_confirmation", "ai_review"} and not approval_granted
     if needs_owner and not approval_request_id:
-        expiry = int(control_plane.settings().get("default_confirmation_expiry_seconds", DEFAULT_CONFIRMATION_EXPIRY_SECONDS))
+        expiry = int(
+            control_plane.settings().get(
+                "default_confirmation_expiry_seconds", DEFAULT_CONFIRMATION_EXPIRY_SECONDS
+            )
+        )
         request = approvals.create_verification_request(
             f"Run {tool['name']}",
             (
@@ -339,8 +343,11 @@ def invoke_tool(
             # The workspace follows the caller's identity, never an argument.
             agent = identities.workspace_for(actor_id)
             if agent is None:
-                result = {"ok": False, "error": "The agent key is no longer active.",
-                          "error_code": "agent_revoked"}
+                result = {
+                    "ok": False,
+                    "error": "The agent key is no longer active.",
+                    "error_code": "agent_revoked",
+                }
             else:
                 result = _shape_tool_result(tool, sandbox.execute(tool, args, agent, action_id))
         else:
@@ -358,7 +365,9 @@ def invoke_tool(
         "result": result,
     }
     if refused:
-        envelope["next_action"] = refused["next_action"] or "Nothing was sent; fix the cause and ask again"
+        envelope["next_action"] = (
+            refused["next_action"] or "Nothing was sent; fix the cause and ask again"
+        )
     if publication:
         envelope["publication"] = {
             "kind": publication["kind"],

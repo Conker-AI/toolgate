@@ -34,8 +34,9 @@ class Backend:
         yield iter(SimpleNamespace(name=name) for name in self.names)
 
     def mode(self, fd, name):
-        return {"folder": stat.S_IFDIR, "link": stat.S_IFLNK,
-                "socket": stat.S_IFSOCK}.get(name, stat.S_IFREG)
+        return {"folder": stat.S_IFDIR, "link": stat.S_IFLNK, "socket": stat.S_IFSOCK}.get(
+            name, stat.S_IFREG
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -45,7 +46,8 @@ def config(monkeypatch):
 
 def test_configuration_is_not_observation():
     assert files.roots() == {
-        "mode": "configured", "roots": [{"id": "work", "path": "/srv/work"}],
+        "mode": "configured",
+        "roots": [{"id": "work", "path": "/srv/work"}],
         "capabilities": {"list": True, "read": False, "write": False},
     }
 
@@ -95,9 +97,19 @@ def test_open_failure_closes_parent_and_hides_error():
     assert "sensitive" not in str(error.value)
 
 
-@pytest.mark.parametrize("raw", ["{}", "[]", '{"x":"/a","x":"/b"}', '{"x":"relative"}',
-                                  '{"x":"/a/../b"}', '{"x":"/a/"}', "x" * 32769],
-                         ids=["empty", "array", "duplicate", "relative", "parent", "trailing", "large"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "{}",
+        "[]",
+        '{"x":"/a","x":"/b"}',
+        '{"x":"relative"}',
+        '{"x":"/a/../b"}',
+        '{"x":"/a/"}',
+        "x" * 32769,
+    ],
+    ids=["empty", "array", "duplicate", "relative", "parent", "trailing", "large"],
+)
 def test_invalid_config(monkeypatch, raw):
     monkeypatch.setattr(files.os, "environ", {"TOOLGATE_FILE_ROOTS": raw})
     with pytest.raises(files.FileError) as error:
@@ -122,7 +134,9 @@ def test_unsupported_platform(monkeypatch):
     assert error.value.code == "unsupported_platform"
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Actual Linux fd syscalls required")
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Actual Linux fd syscalls required"
+)
 def test_linux_metadata_symlinks_and_replaced_component(tmp_path, monkeypatch):
     root = tmp_path / "root"
     root.mkdir()

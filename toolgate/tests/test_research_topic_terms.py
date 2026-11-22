@@ -48,5 +48,7 @@ def test_appstore_catalog_accepts_a_query_made_of_filler_words(monkeypatch):
         return answer({"results": []})
 
     monkeypatch.setattr(research_sites.httpx, "get", get)
-    assert research_sites._appstore_catalog("small team tools", "appstore_catalog", 5, 3650, 5) == []
+    assert (
+        research_sites._appstore_catalog("small team tools", "appstore_catalog", 5, 3650, 5) == []
+    )
     assert sent == ["small team tools"]

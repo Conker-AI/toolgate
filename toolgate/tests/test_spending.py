@@ -1,4 +1,5 @@
 """Exercise real SQLite reservations and the outbound HTTP boundary without paid calls."""
+
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -21,22 +22,36 @@ from toolgate.executors import research
 def paid(tmp_path, monkeypatch):
     monkeypatch.setattr(control_plane, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setattr(server.vault, "get_key", lambda _: "test-secret")
-    return {"id": "paid", "name": "Paid", "version": 1, "authorization": "auto",
-            "status": "active", "inputs": [], "outputs": [], "execution": {
-                "type": "gemini_generate", "model": spending.MODEL,
-                "prompt_template": "hello", "secret_ref": "GOOGLE_API_KEY", "max_tokens": 128}}
+    return {
+        "id": "paid",
+        "name": "Paid",
+        "version": 1,
+        "authorization": "auto",
+        "status": "active",
+        "inputs": [],
+        "outputs": [],
+        "execution": {
+            "type": "gemini_generate",
+            "model": spending.MODEL,
+            "prompt_template": "hello",
+            "secret_ref": "GOOGLE_API_KEY",
+            "max_tokens": 128,
+        },
+    }
 
 
 def setup_budget(root="root", cap=10_000_000, cumulative=20_000_000, actor="agent"):
     spending.configure(True, cumulative, min(cap, cumulative))
-    spending.set_price(spending.MODEL, 1_000_000, 2_000_000,
-                       time.time() + 3600, "https://provider.example/pricing")
+    spending.set_price(
+        spending.MODEL, 1_000_000, 2_000_000, time.time() + 3600, "https://provider.example/pricing"
+    )
     return spending.create_job(actor, root, cap)["job_id"]
 
 
 def invoke(paid, job=None, action="root", actor="agent", **kwargs):
-    return invocation.invoke_tool(paid, {}, "Actor", actor_id=actor, action_id=action,
-                              job_id=job, **kwargs)
+    return invocation.invoke_tool(
+        paid, {}, "Actor", actor_id=actor, action_id=action, job_id=job, **kwargs
+    )
 
 
 def provider(monkeypatch, usage=None, before=None):
@@ -50,9 +65,13 @@ def provider(monkeypatch, usage=None, before=None):
         assert body["generationConfig"]["maxOutputTokens"] == 128
         assert body["generationConfig"]["thinkingConfig"] == {"thinkingBudget": 0}
         assert set(body) == {"contents", "generationConfig"}
-        return Mock(raise_for_status=lambda: None, json=lambda: {
-            "candidates": [{"content": {"parts": [{"text": "reply"}]}}],
-            **({"usageMetadata": usage} if usage is not None else {})})
+        return Mock(
+            raise_for_status=lambda: None,
+            json=lambda: {
+                "candidates": [{"content": {"parts": [{"text": "reply"}]}}],
+                **({"usageMetadata": usage} if usage is not None else {}),
+            },
+        )
 
     monkeypatch.setattr(httpx, "post", post)
     return calls
@@ -80,10 +99,15 @@ def test_reservation_precedes_network_reconciles_and_replay_does_not_charge(paid
     def before():
         with sqlite3.connect(control_plane.DB_PATH) as db:
             assert db.execute("SELECT status FROM v2_actions").fetchone() == ("dispatching",)
-            assert db.execute("SELECT reserved,accounted FROM v2_spend_reservations").fetchone() == (ceiling, None)
+            assert db.execute(
+                "SELECT reserved,accounted FROM v2_spend_reservations"
+            ).fetchone() == (ceiling, None)
 
-    calls = provider(monkeypatch, {"promptTokenCount": 42, "candidatesTokenCount": 8,
-                                   "totalTokenCount": 50}, before)
+    calls = provider(
+        monkeypatch,
+        {"promptTokenCount": 42, "candidatesTokenCount": 8, "totalTokenCount": 50},
+        before,
+    )
     first = invoke(paid, job)
     assert first["code"] == "OK"
     assert invoke(paid, job) == first
@@ -96,11 +120,16 @@ def test_reservation_precedes_network_reconciles_and_replay_does_not_charge(paid
 def test_uncertain_billing_keeps_reservation_across_restart(paid, monkeypatch, mode):
     job = setup_budget(cap=1_100_000, cumulative=1_100_000)
     if mode in {"timeout", "crash"}:
+
         def post(*args, **kwargs):
             raise (SystemExit("power loss") if mode == "crash" else httpx.ReadTimeout("lost reply"))
+
         monkeypatch.setattr(httpx, "post", post)
     else:
-        provider(monkeypatch, {"promptTokenCount": 1, "totalTokenCount": 1} if mode == "bad_usage" else None)
+        provider(
+            monkeypatch,
+            {"promptTokenCount": 1, "totalTokenCount": 1} if mode == "bad_usage" else None,
+        )
     if mode == "crash":
         with pytest.raises(SystemExit):
             invoke(paid, job)
@@ -122,8 +151,9 @@ def test_uncertain_billing_keeps_reservation_across_restart(paid, monkeypatch, m
 def test_budget_denial_rolls_back_approval_and_dispatch_together(paid, monkeypatch):
     job = setup_budget(cap=1)
     paid["authorization"] = "owner_confirmation"
-    request = approvals.create_verification_request("Run", "exact", "Actor", "tool", "paid", {}, 1,
-                                                        actor_id="agent")
+    request = approvals.create_verification_request(
+        "Run", "exact", "Actor", "tool", "paid", {}, 1, actor_id="agent"
+    )
     approvals.decide_request(request["id"], "approved", "owner")
     calls = provider(monkeypatch)
     with pytest.raises(HTTPException) as error:
@@ -147,12 +177,27 @@ def test_job_cannot_be_reused_by_another_agent_or_root(paid, monkeypatch, actor,
 def test_workflow_children_share_job_ceiling_and_cannot_resume_partial_run(paid, monkeypatch):
     agent, _ = control_plane.issue_agent_key("Actor", ["automation:flow"])
     job = setup_budget(cap=1_100_000, actor=agent["id"])
-    paid["policy"] = {"usage_limits": {"cooldown_seconds": 0, "max_per_minute": 60, "max_per_hour": 600}}
+    paid["policy"] = {
+        "usage_limits": {"cooldown_seconds": 0, "max_per_minute": 60, "max_per_hour": 600}
+    }
     control_plane.create_tool(paid)
-    automation = {"id": "flow", "name": "Flow", "version": 1, "status": "active",
-                  "authorization": "auto", "inputs": [], "workflow": [
-                      {"type": "tool_call", "tool_id": "paid"},
-                      {"type": "loop", "items": [1, 2], "max_iterations": 2, "steps": [{"type": "tool_call", "tool_id": "paid"}]}]}
+    automation = {
+        "id": "flow",
+        "name": "Flow",
+        "version": 1,
+        "status": "active",
+        "authorization": "auto",
+        "inputs": [],
+        "workflow": [
+            {"type": "tool_call", "tool_id": "paid"},
+            {
+                "type": "loop",
+                "items": [1, 2],
+                "max_iterations": 2,
+                "steps": [{"type": "tool_call", "tool_id": "paid"}],
+            },
+        ],
+    }
     control_plane.create_automation(automation)
     calls = provider(monkeypatch)
     payload = models.V2Invoke(action_id="root", job_id=job)
@@ -176,8 +221,16 @@ def test_concurrent_jobs_cannot_overbook_cumulative_cap(paid):
     def attempt(action, job):
         barrier.wait(timeout=5)
         try:
-            journal.begin(action, "tool", "paid", {}, "agent", 1, job_id=job,
-                          reserve=lambda db: spending.reserve(db, action, job, "agent", None, price))
+            journal.begin(
+                action,
+                "tool",
+                "paid",
+                {},
+                "agent",
+                1,
+                job_id=job,
+                reserve=lambda db: spending.reserve(db, action, job, "agent", None, price),
+            )
             return "reserved"
         except spending.BudgetDenied:
             return "denied"
@@ -197,13 +250,39 @@ def test_owner_only_can_set_caps_prices_and_mint_jobs(paid, monkeypatch, tmp_pat
     _, key = control_plane.issue_agent_key("agent", ["tool:*"])
     with TestClient(server.app, raise_server_exceptions=True) as client:
         for method, path, body in [
-            ("PUT", "/v2/spending/policy", {"enabled": True, "cumulative_cap": 10, "max_job_cap": 10}),
-            ("PUT", "/v2/spending/prices/" + spending.MODEL,
-             {"input_per_million": 1, "output_per_million": 2, "valid_until": time.time()+60, "source": "https://p.example"}),
-            ("POST", "/v2/spending/jobs", {"actor_id": "agent", "root_action_id": "root", "cap": 10}),
+            (
+                "PUT",
+                "/v2/spending/policy",
+                {"enabled": True, "cumulative_cap": 10, "max_job_cap": 10},
+            ),
+            (
+                "PUT",
+                "/v2/spending/prices/" + spending.MODEL,
+                {
+                    "input_per_million": 1,
+                    "output_per_million": 2,
+                    "valid_until": time.time() + 60,
+                    "source": "https://p.example",
+                },
+            ),
+            (
+                "POST",
+                "/v2/spending/jobs",
+                {"actor_id": "agent", "root_action_id": "root", "cap": 10},
+            ),
         ]:
-            assert client.request(method, path, json=body, headers={"X-ToolGate-Execution-Key": key}).status_code == 401
-            assert client.request(method, path, json=body, headers={"X-ToolGate-Key": "owner-secret"}).status_code == 200
+            assert (
+                client.request(
+                    method, path, json=body, headers={"X-ToolGate-Execution-Key": key}
+                ).status_code
+                == 401
+            )
+            assert (
+                client.request(
+                    method, path, json=body, headers={"X-ToolGate-Key": "owner-secret"}
+                ).status_code
+                == 200
+            )
 
 
 @pytest.mark.parametrize("kind", ["http_json", "memorygate", "tavily", "unsupported_model"])
@@ -235,7 +314,9 @@ def test_the_editor_refuses_a_model_without_a_spending_adapter(paid):
 
 def test_provider_bound_violation_disables_further_paid_dispatch(paid, monkeypatch):
     job = setup_budget()
-    provider(monkeypatch, {"promptTokenCount": 42, "candidatesTokenCount": 129, "totalTokenCount": 171})
+    provider(
+        monkeypatch, {"promptTokenCount": 42, "candidatesTokenCount": 129, "totalTokenCount": 171}
+    )
     invoke(paid, job)
     assert spending.status()["policy"]["enabled"] == 0
     assert spending.status()["accounted_and_reserved_microusd"] >= spending.MAX_INPUT_TOKENS
@@ -259,17 +340,23 @@ def test_reservations_and_job_identity_cannot_be_erased(paid, monkeypatch):
     job = setup_budget()
     provider(monkeypatch)
     invoke(paid, job)
-    for sql in ["DELETE FROM v2_spend_reservations", "UPDATE v2_spend_reservations SET reserved=0",
-                "INSERT OR REPLACE INTO v2_spend_reservations SELECT * FROM v2_spend_reservations",
-                "DELETE FROM v2_spend_jobs", "UPDATE v2_spend_jobs SET cap=999999999",
-                "INSERT OR REPLACE INTO v2_spend_jobs SELECT * FROM v2_spend_jobs"]:
+    for sql in [
+        "DELETE FROM v2_spend_reservations",
+        "UPDATE v2_spend_reservations SET reserved=0",
+        "INSERT OR REPLACE INTO v2_spend_reservations SELECT * FROM v2_spend_reservations",
+        "DELETE FROM v2_spend_jobs",
+        "UPDATE v2_spend_jobs SET cap=999999999",
+        "INSERT OR REPLACE INTO v2_spend_jobs SELECT * FROM v2_spend_jobs",
+    ]:
         with control_plane._conn() as db, pytest.raises(sqlite3.IntegrityError):
             db.execute(sql)
 
 
 def test_budget_policy_changes_do_not_reset_cumulative_usage(paid, monkeypatch):
     job = setup_budget()
-    provider(monkeypatch, {"promptTokenCount": 42, "candidatesTokenCount": 8, "totalTokenCount": 50})
+    provider(
+        monkeypatch, {"promptTokenCount": 42, "candidatesTokenCount": 8, "totalTokenCount": 50}
+    )
     invoke(paid, job)
     spending.configure(False, 100, 100)
     spending.configure(True, 100, 100)
@@ -279,11 +366,20 @@ def test_budget_policy_changes_do_not_reset_cumulative_usage(paid, monkeypatch):
 def test_price_change_before_reservation_cannot_use_old_rates(paid):
     job = setup_budget()
     price = spending.quote(spending.MODEL, 128)
-    spending.set_price(spending.MODEL, 9_000_000, 9_000_000,
-                       time.time() + 3600, "https://provider.example/pricing")
+    spending.set_price(
+        spending.MODEL, 9_000_000, 9_000_000, time.time() + 3600, "https://provider.example/pricing"
+    )
     with pytest.raises(spending.BudgetDenied, match="Pricing changed"):
-        journal.begin("root", "tool", "paid", {}, "agent", 1, job_id=job,
-                      reserve=lambda db: spending.reserve(db, "root", job, "agent", None, price))
+        journal.begin(
+            "root",
+            "tool",
+            "paid",
+            {},
+            "agent",
+            1,
+            job_id=job,
+            reserve=lambda db: spending.reserve(db, "root", job, "agent", None, price),
+        )
     assert journal.get("root") is None
     assert spending.status()["accounted_and_reserved_microusd"] == 0
 
@@ -292,7 +388,9 @@ def test_execution_identity_can_only_read_own_budget(paid):
     job = setup_budget(root="scheduled_run", actor="agent")
     assert spending.agent_job(job, "other") is None
     assert spending.agent_job(job, "agent") == {
-        "job_id": job, "root_action_id": "scheduled_run", "cap": 10_000_000,
+        "job_id": job,
+        "root_action_id": "scheduled_run",
+        "cap": 10_000_000,
     }
     client = TestClient(server.app)
     path = f"/v2/agent/spending/jobs/{job}"

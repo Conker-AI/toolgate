@@ -1,5 +1,6 @@
 """Shared research pieces: errors, provider cooldowns, source constants, URL safety,
 result normalization, and fetching pages by their short-lived handles."""
+
 from __future__ import annotations
 
 import re
@@ -44,12 +45,15 @@ def _require_provider_ready(provider: str) -> None:
     if blocked_until <= time.monotonic():
         _PROVIDER_COOLDOWNS.pop(provider, None)
         return
-    raise ResearchError(f"{provider} is temporarily unavailable after an upstream quota or authentication failure")
+    raise ResearchError(
+        f"{provider} is temporarily unavailable after an upstream quota or authentication failure"
+    )
 
 
 def _cooldown_provider(provider: str, seconds: int) -> None:
     _PROVIDER_COOLDOWNS[provider] = max(
-        _PROVIDER_COOLDOWNS.get(provider, 0), time.monotonic() + max(1, seconds),
+        _PROVIDER_COOLDOWNS.get(provider, 0),
+        time.monotonic() + max(1, seconds),
     )
 
 
@@ -76,39 +80,104 @@ GENERAL_EXCLUDED_DOMAINS = {"reddit.com"}
 
 
 QUERY_STOP_WORDS = {
-    "and", "business", "businesses", "company", "companies", "email", "for", "frustrating",
-    "independent", "manual", "problem", "problems", "recommendations", "small",
-    "software", "spreadsheet", "spreadsheets", "team", "teams", "the", "tool", "tools",
-    "workflow", "workflows",
+    "and",
+    "business",
+    "businesses",
+    "company",
+    "companies",
+    "email",
+    "for",
+    "frustrating",
+    "independent",
+    "manual",
+    "problem",
+    "problems",
+    "recommendations",
+    "small",
+    "software",
+    "spreadsheet",
+    "spreadsheets",
+    "team",
+    "teams",
+    "the",
+    "tool",
+    "tools",
+    "workflow",
+    "workflows",
 }
-
 
 
 def topic_terms(query: str, stop_words: set[str], min_length: int = 3) -> list[str]:
     """The query's words without filler, in order. When every word is filler ("email
     software"), all of them: the owner's query never shrinks to nothing."""
-    words = list(dict.fromkeys(term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) >= min_length))
+    words = list(
+        dict.fromkeys(
+            term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) >= min_length
+        )
+    )
     return [word for word in words if word not in stop_words] or words
 
 
 REDDIT_QUERY_STOP_WORDS = QUERY_STOP_WORDS - {
-    "business", "businesses", "manual", "spreadsheet", "spreadsheets", "workflow", "workflows",
+    "business",
+    "businesses",
+    "manual",
+    "spreadsheet",
+    "spreadsheets",
+    "workflow",
+    "workflows",
 }
 
 
 STACKEXCHANGE_QUERY_STOP_WORDS = QUERY_STOP_WORDS - {
-    "spreadsheet", "spreadsheets", "workflow", "workflows",
+    "spreadsheet",
+    "spreadsheets",
+    "workflow",
+    "workflows",
 }
 
 
 REDDIT_FEED_ALLOWLIST = {
-    "accounting", "askphotography", "autodetailing", "bookkeeping", "commercialcleaning",
-    "construction", "creatorservices", "customersuccess", "cybersecurity", "doggrooming",
-    "ecommerce", "fitness", "franchising", "freelance", "heavyequipment", "homeinspectors",
-    "hvac", "landlord", "landscaping", "logistics", "machinists", "mechanicadvice",
-    "msp", "musicteachers", "nonprofit", "procurement", "propertymanagement", "recruiting",
-    "rentalproperty", "restaurantowners", "saas", "salesops", "selfstorage", "smallbusiness",
-    "solar", "supplychain", "tutoring", "warehouse", "weddingphotography", "weddingplanning",
+    "accounting",
+    "askphotography",
+    "autodetailing",
+    "bookkeeping",
+    "commercialcleaning",
+    "construction",
+    "creatorservices",
+    "customersuccess",
+    "cybersecurity",
+    "doggrooming",
+    "ecommerce",
+    "fitness",
+    "franchising",
+    "freelance",
+    "heavyequipment",
+    "homeinspectors",
+    "hvac",
+    "landlord",
+    "landscaping",
+    "logistics",
+    "machinists",
+    "mechanicadvice",
+    "msp",
+    "musicteachers",
+    "nonprofit",
+    "procurement",
+    "propertymanagement",
+    "recruiting",
+    "rentalproperty",
+    "restaurantowners",
+    "saas",
+    "salesops",
+    "selfstorage",
+    "smallbusiness",
+    "solar",
+    "supplychain",
+    "tutoring",
+    "warehouse",
+    "weddingphotography",
+    "weddingplanning",
 }
 
 
@@ -117,14 +186,28 @@ def _public_https_url(url: str) -> bool:
     return web_hosts.refusal(url) is None and public_url(url)
 
 
-def _normalize(title: object, url: object, snippet: object, source: str, published_at: object = None) -> dict | None:
+def _normalize(
+    title: object, url: object, snippet: object, source: str, published_at: object = None
+) -> dict | None:
     target = str(url or "").strip()
     if not _public_https_url(target):
         return None
     raw_title = str(title or "")
     raw_snippet = str(snippet or "")
-    safe_title = (extract_html_text(raw_title, 300) if re.search(r"<[a-z][^>]*>", raw_title, re.I) else clean_text(raw_title, 300)) or urlsplit(target).hostname or "Untitled result"
-    safe_snippet = extract_html_text(raw_snippet, 1200) if re.search(r"<[a-z][^>]*>", raw_snippet, re.I) else clean_text(raw_snippet, 1200)
+    safe_title = (
+        (
+            extract_html_text(raw_title, 300)
+            if re.search(r"<[a-z][^>]*>", raw_title, re.I)
+            else clean_text(raw_title, 300)
+        )
+        or urlsplit(target).hostname
+        or "Untitled result"
+    )
+    safe_snippet = (
+        extract_html_text(raw_snippet, 1200)
+        if re.search(r"<[a-z][^>]*>", raw_snippet, re.I)
+        else clean_text(raw_snippet, 1200)
+    )
     inspection = inspect_text(f"{safe_title}\n{safe_snippet}")
     if inspection["risk"] != "low":
         # The model reads search rows unfenced, so text that tries to steer it never reaches it.
@@ -164,7 +247,8 @@ def _requested_site_domain(query: str) -> str | None:
         return None
     domain = match.group(1).strip(".")
     if (
-        "." not in domain or ".." in domain
+        "." not in domain
+        or ".." in domain
         or domain in {"localhost", "localhost.localdomain"}
         or re.fullmatch(r"[0-9.]+", domain)
     ):
@@ -201,15 +285,30 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
         )
         inspection = inspect_text(text)
         if inspection["risk"] == "high":
-            control_plane.event("research_content_blocked", "warning", "research_result", result_id, "research_fetch", inspection)
+            control_plane.event(
+                "research_content_blocked",
+                "warning",
+                "research_result",
+                result_id,
+                "research_fetch",
+                inspection,
+            )
             return {
-                "result_id": result_id, "blocked": True, "content_safety": inspection,
-                "content": "", "notice": "Content was withheld because it contained instruction-like or exfiltration-like text.",
+                "result_id": result_id,
+                "blocked": True,
+                "content_safety": inspection,
+                "content": "",
+                "notice": "Content was withheld because it contained instruction-like or exfiltration-like text.",
             }
         return {
-            "result_id": result_id, "blocked": False, "source": record.get("source"),
-            "title": record.get("title"), "url": record.get("url"), "content_safety": inspection,
-            "published_at": record.get("published_at"), "recency_provenance": record.get("recency_provenance"),
+            "result_id": result_id,
+            "blocked": False,
+            "source": record.get("source"),
+            "title": record.get("title"),
+            "url": record.get("url"),
+            "content_safety": inspection,
+            "published_at": record.get("published_at"),
+            "recency_provenance": record.get("recency_provenance"),
             "content_stats": {"received_bytes": 0, "model_characters": len(text), "snapshot": True},
             "content": _fenced(result_id, text),
         }
@@ -217,7 +316,10 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
     url = record["url"]
     if not _public_https_url(url):
         raise ResearchError("cached destination is no longer a safe public HTTPS URL")
-    headers = {"User-Agent": "ToolGateResearch/2.0", "Accept": "text/html,text/plain,application/json"}
+    headers = {
+        "User-Agent": "ToolGateResearch/2.0",
+        "Accept": "text/html,text/plain,application/json",
+    }
     content_type = ""
     body = bytearray()
     try:
@@ -230,19 +332,30 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
                             raise ResearchError("upstream exceeded the redirect limit")
                         target = urljoin(str(response.url), response.headers.get("location", ""))
                         if not _public_https_url(target):
-                            raise ResearchError("upstream redirect left the safe public HTTPS boundary")
+                            raise ResearchError(
+                                "upstream redirect left the safe public HTTPS boundary"
+                            )
                         if tool_settings.skipped(target, skip_sites):
                             raise ResearchError("upstream redirect went to a site the owner skips")
                         current_url = target
                         continue
                     response.raise_for_status()
                     content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
-                    if content_type not in {"text/html", "text/plain", "application/json", "application/ld+json"}:
-                        raise ResearchError(f"unsupported research content type: {content_type or 'unknown'}")
+                    if content_type not in {
+                        "text/html",
+                        "text/plain",
+                        "application/json",
+                        "application/ld+json",
+                    }:
+                        raise ResearchError(
+                            f"unsupported research content type: {content_type or 'unknown'}"
+                        )
                     for chunk in response.iter_bytes():
                         body.extend(chunk)
                         if len(body) > 524288:
-                            raise ResearchError("research page exceeded the 512 KiB decompressed response limit")
+                            raise ResearchError(
+                                "research page exceeded the 512 KiB decompressed response limit"
+                            )
                     encoding = response.encoding or "utf-8"
                     break
     except httpx.HTTPError as exc:
@@ -261,7 +374,14 @@ def fetch(result_id: str, max_chars: int = 12000, timeout: float = 15) -> dict:
         text = clean_text(raw, min(max(int(max_chars), 1000), page_limit))
     inspection = inspect_text(text)
     if inspection["risk"] == "high":
-        control_plane.event("research_content_blocked", "warning", "research_result", result_id, "research_fetch", inspection)
+        control_plane.event(
+            "research_content_blocked",
+            "warning",
+            "research_result",
+            result_id,
+            "research_fetch",
+            inspection,
+        )
         return {
             "result_id": result_id,
             "blocked": True,
@@ -298,11 +418,13 @@ def fetch_batch(result_ids: list[str], max_chars: int = 3500) -> dict:
             documents.append(fetch(result_id, max_chars, min(15.0, remaining)))
         except ResearchError as exc:
             # Not the content-safety block: "blocked" stays the safety filter's word.
-            documents.append({
-                "result_id": result_id,
-                "blocked": False,
-                "content": "",
-                "error": str(exc)[:240],
-                "notice": "This result could not be fetched; other batch results remain usable.",
-            })
+            documents.append(
+                {
+                    "result_id": result_id,
+                    "blocked": False,
+                    "content": "",
+                    "error": str(exc)[:240],
+                    "notice": "This result could not be fetched; other batch results remain usable.",
+                }
+            )
     return {"documents": documents, "result_count": len(documents)}

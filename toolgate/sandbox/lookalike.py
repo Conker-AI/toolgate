@@ -114,9 +114,9 @@ def _affixed(nbare: str, pbare: str, prefixes: frozenset[str], suffixes: frozens
     if nbare == pbare:
         return False
     for prefix in prefixes:
-        if nbare.startswith(prefix) and nbare[len(prefix):] == pbare:
+        if nbare.startswith(prefix) and nbare[len(prefix) :] == pbare:
             return True
-        if pbare.startswith(prefix) and pbare[len(prefix):] == nbare:
+        if pbare.startswith(prefix) and pbare[len(prefix) :] == nbare:
             return True
     for suffix in suffixes:
         if nbare.endswith(suffix) and nbare[: len(nbare) - len(suffix)] == pbare:

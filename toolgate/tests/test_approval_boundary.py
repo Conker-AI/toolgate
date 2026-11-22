@@ -5,6 +5,7 @@ approval names one exact action and is spent exactly once. These tests drive
 the real routes over the real ASGI app against a real SQLite file, because a
 mocked control plane would happily agree that a replay fails.
 """
+
 import os
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +26,9 @@ TOOL = {
     "name": "Approval Boundary Echo",
     "description": "Local echo used to exercise the approval binding.",
     "category": "safe",
-    "inputs": [{"name": "value", "type": "string", "required": True, "min_length": 1, "max_length": 120}],
+    "inputs": [
+        {"name": "value", "type": "string", "required": True, "min_length": 1, "max_length": 120}
+    ],
     "outputs": [{"name": "proof", "type": "object"}],
     "execution": {"type": "local_echo"},
     "policy": {"usage_limits": {"max_per_minute": 60, "max_per_hour": 600}},
@@ -46,10 +49,13 @@ class ApprovalBoundaryTests(unittest.TestCase):
         self.db_patch.start()
         self.env_patch = patch.object(vault, "ENV_PATH", root / "vault.env")
         self.env_patch.start()
-        self.os_patch = patch.dict(os.environ, {
-            "TOOLGATE_ADMIN_KEY": ADMIN_KEY,
-            "TOOLGATE_VAULT_KEY_FILE": str(root / "vault.key"),
-        })
+        self.os_patch = patch.dict(
+            os.environ,
+            {
+                "TOOLGATE_ADMIN_KEY": ADMIN_KEY,
+                "TOOLGATE_VAULT_KEY_FILE": str(root / "vault.key"),
+            },
+        )
         self.os_patch.start()
         # Not used as a context manager on purpose: the startup hook would
         # rebuild the built-in catalogue, which these tests do not need.
@@ -68,12 +74,16 @@ class ApprovalBoundaryTests(unittest.TestCase):
         body = {"args": {"value": value}}
         if approval_request_id:
             body["approval_request_id"] = approval_request_id
-        return self.client.post(f"/v2/tools/{TOOL_ID}/invoke", json=body,
-                                headers={"X-ToolGate-Execution-Key": key})
+        return self.client.post(
+            f"/v2/tools/{TOOL_ID}/invoke", json=body, headers={"X-ToolGate-Execution-Key": key}
+        )
 
     def approve(self, request_id: str, status: str = "approved"):
-        return self.client.post(f"/v2/requests/{request_id}/decision", json={"status": status},
-                                headers={"X-ToolGate-Key": ADMIN_KEY})
+        return self.client.post(
+            f"/v2/requests/{request_id}/decision",
+            json={"status": status},
+            headers={"X-ToolGate-Key": ADMIN_KEY},
+        )
 
     def mint(self, value: str = "hello", key: str | None = None) -> str:
         response = self.invoke(key or self.agent_key, value)
@@ -95,7 +105,9 @@ class ApprovalBoundaryTests(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.json()["code"], "OK")
 
-        self.assert_denied(self.invoke(self.agent_key, "hello", request_id), "already been consumed")
+        self.assert_denied(
+            self.invoke(self.agent_key, "hello", request_id), "already been consumed"
+        )
 
     def test_an_unapproved_request_cannot_be_consumed(self):
         request_id = self.mint()
@@ -127,7 +139,9 @@ class ApprovalBoundaryTests(unittest.TestCase):
         request_id = self.mint()
         self.approve(request_id)
 
-        self.assert_denied(self.invoke(self.other_key, "hello", request_id), "different originating agent")
+        self.assert_denied(
+            self.invoke(self.other_key, "hello", request_id), "different originating agent"
+        )
         self.assertEqual(self.invoke(self.agent_key, "hello", request_id).json()["code"], "OK")
 
     def test_an_unknown_request_id_is_refused(self):
@@ -153,15 +167,22 @@ class ApprovalBoundaryTests(unittest.TestCase):
 
         def consume():
             return approvals.consume_verification(
-                request_id, "tool", TOOL_ID, {"value": "hello"}, TOOL["version"],
-                agent["name"], agent["id"])
+                request_id,
+                "tool",
+                TOOL_ID,
+                {"value": "hello"},
+                TOOL["version"],
+                agent["name"],
+                agent["id"],
+            )
 
         with ThreadPoolExecutor(max_workers=12) as pool:
             outcomes = [future.result() for future in [pool.submit(consume) for _ in range(12)]]
 
         self.assertEqual([approved for approved, _ in outcomes].count(True), 1)
-        self.assertTrue(all("already been consumed" in reason
-                            for approved, reason in outcomes if not approved))
+        self.assertTrue(
+            all("already been consumed" in reason for approved, reason in outcomes if not approved)
+        )
 
     def test_the_decision_route_will_not_re_approve_a_decided_request(self):
         request_id = self.mint()

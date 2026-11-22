@@ -1,4 +1,5 @@
 """Changes committed before a dispatch reservation revoke that dispatch's authority."""
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -13,9 +14,20 @@ from toolgate.core import execution_journal as journal
 @pytest.fixture
 def flow(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "authority.db")
-    cp.create_tool({"id": "child", "name": "Child", "status": "active", "execution": {"type": "echo"}})
-    cp.create_automation({"id": "flow", "name": "Flow", "status": "active", "workflow": [
-        {"type": "tool_call", "tool_id": "child"}, {"type": "tool_call", "tool_id": "child"}]})
+    cp.create_tool(
+        {"id": "child", "name": "Child", "status": "active", "execution": {"type": "echo"}}
+    )
+    cp.create_automation(
+        {
+            "id": "flow",
+            "name": "Flow",
+            "status": "active",
+            "workflow": [
+                {"type": "tool_call", "tool_id": "child"},
+                {"type": "tool_call", "tool_id": "child"},
+            ],
+        }
+    )
     publications.publish("automation", "flow", 1)
     return cp.issue_agent_key("Caller", ["automation:flow"])
 
@@ -31,13 +43,17 @@ def revoke(agent, change):
 
 @pytest.mark.parametrize("published_version", [None, 1])
 @pytest.mark.parametrize("change", ["key", "scope", "child_only", "lockdown"])
-def test_mid_workflow_revocation_stops_next_child_without_scope_union(flow, monkeypatch, published_version, change):
+def test_mid_workflow_revocation_stops_next_child_without_scope_union(
+    flow, monkeypatch, published_version, change
+):
     agent, _ = flow
     calls = []
+
     def dispatch(tool, args):
         calls.append(tool["id"])
         revoke(agent, change)
         return {"ok": True, "result": {}}
+
     monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     payload = models.V2Invoke(action_id="root", published_version=published_version)
     result = automations_routes.run_automation("flow", payload, agent)
@@ -51,19 +67,29 @@ def test_mid_workflow_revocation_stops_next_child_without_scope_union(flow, monk
     assert calls == ["child"]
 
 
-@pytest.mark.parametrize("change,code", [("key", "AGENT_REVOKED"), ("scope", "POLICY_DENIED"), ("lockdown", "LOCKED_DOWN")])
-def test_http_authority_is_rechecked_inside_root_dispatch_transaction(flow, monkeypatch, change, code):
+@pytest.mark.parametrize(
+    "change,code",
+    [("key", "AGENT_REVOKED"), ("scope", "POLICY_DENIED"), ("lockdown", "LOCKED_DOWN")],
+)
+def test_http_authority_is_rechecked_inside_root_dispatch_transaction(
+    flow, monkeypatch, change, code
+):
     agent, raw = flow
     original = journal.begin
     calls = []
+
     def race(*args, **kwargs):
         revoke(agent, change)
         return original(*args, **kwargs)
+
     monkeypatch.setattr(journal, "begin", race)
     monkeypatch.setattr(invocation, "_dispatch_tool", lambda *args: calls.append(args))
     client = TestClient(server.app)
-    response = client.post("/v2/automations/flow/run", headers={"X-ToolGate-Execution-Key": raw},
-                           json={"action_id": "race", "published_version": 1})
+    response = client.post(
+        "/v2/automations/flow/run",
+        headers={"X-ToolGate-Execution-Key": raw},
+        json={"action_id": "race", "published_version": 1},
+    )
     assert response.status_code in {403, 423}
     assert response.json()["detail"]["code"] == code
     assert journal.get("race") is None and calls == []

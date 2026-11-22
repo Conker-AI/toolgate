@@ -27,7 +27,8 @@ def test_a_paid_call_without_its_credential_is_a_known_failure_with_no_hold(paid
     assert first["status"] == "completed"
     assert first["code"] == "SECRET_UNAVAILABLE"
     assert first["result"] == {
-        "ok": False, "error": "Hosted AI credential is not configured",
+        "ok": False,
+        "error": "Hosted AI credential is not configured",
         "error_code": "SECRET_UNAVAILABLE",
     }
     assert "Nothing was sent" in first["next_action"]
@@ -40,11 +41,21 @@ def test_a_paid_call_without_its_credential_is_a_known_failure_with_no_hold(paid
 @pytest.fixture
 def http_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(control_plane, "DB_PATH", tmp_path / "gate.db")
-    return {"id": "http", "name": "HTTP", "version": 1, "authorization": "auto", "status": "active",
-            "inputs": [{"name": "place", "type": "string", "required": False}],
-            "outputs": [], "execution": {
-                "type": "http_json", "billing": {"mode": "free"},
-                "url": "https://api.example.com/{place}", "allowed_hosts": ["api.example.com"]}}
+    return {
+        "id": "http",
+        "name": "HTTP",
+        "version": 1,
+        "authorization": "auto",
+        "status": "active",
+        "inputs": [{"name": "place", "type": "string", "required": False}],
+        "outputs": [],
+        "execution": {
+            "type": "http_json",
+            "billing": {"mode": "free"},
+            "url": "https://api.example.com/{place}",
+            "allowed_hosts": ["api.example.com"],
+        },
+    }
 
 
 def call(tool, action, args):
@@ -83,8 +94,13 @@ def test_a_refusal_after_the_request_was_sent_stays_unknown(http_tool, monkeypat
         return httpx.Response(500)
 
     monkeypatch.setattr(dispatch, "public_url", lambda url: True)
-    monkeypatch.setattr(dispatch, "public_client", lambda timeout, headers: httpx.Client(
-        transport=httpx.MockTransport(upstream), headers=headers))
+    monkeypatch.setattr(
+        dispatch,
+        "public_client",
+        lambda timeout, headers: httpx.Client(
+            transport=httpx.MockTransport(upstream), headers=headers
+        ),
+    )
     result = call(http_tool, "sent", {"place": "home"})
     assert sent == ["https://api.example.com/home"]
     assert result["code"] == "OUTCOME_UNKNOWN"

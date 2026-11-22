@@ -30,7 +30,9 @@ def strip_invisible_values(value):
     if isinstance(value, list):
         return [strip_invisible_values(item) for item in value]
     if isinstance(value, dict):
-        return {strip_invisible(str(key)): strip_invisible_values(item) for key, item in value.items()}
+        return {
+            strip_invisible(str(key)): strip_invisible_values(item) for key, item in value.items()
+        }
     return value
 
 

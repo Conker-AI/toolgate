@@ -17,10 +17,18 @@ def configured(monkeypatch, tmp_path):
 
 
 def inspection():
-    return {"Id": CID, "Config": {"Env": ["SECRET=never-return-this"]}, "State": {
-        "Status": "running", "Running": True, "Paused": False, "Restarting": False,
-        "Dead": False, "Error": "sensitive-diagnostic",
-    }}
+    return {
+        "Id": CID,
+        "Config": {"Env": ["SECRET=never-return-this"]},
+        "State": {
+            "Status": "running",
+            "Running": True,
+            "Paused": False,
+            "Restarting": False,
+            "Dead": False,
+            "Error": "sensitive-diagnostic",
+        },
+    }
 
 
 class Stream(httpx.SyncByteStream):
@@ -41,7 +49,11 @@ def test_fixed_dispatch_observed_projection(action):
 
     def handle(request):
         requests.append(request)
-        return httpx.Response(204, stream=Stream(b"")) if request.method == "POST" else response(inspection())
+        return (
+            httpx.Response(204, stream=Stream(b""))
+            if request.method == "POST"
+            else response(inspection())
+        )
 
     result = adapter.control(CID, action, transport=httpx.MockTransport(handle))
     assert [r.method for r in requests] == ["GET", "POST", "GET"]
@@ -59,11 +71,16 @@ def test_bad_arguments(cid, action):
         adapter.control(cid, action)
 
 
-@pytest.mark.parametrize("socket,ids,code", [
-    ("", [CID], "not_configured"), ("relative", [CID], "invalid_configuration"),
-    ("/foo/../sock", [CID], "invalid_configuration"), ("/sock", [], "not_managed"),
-    ("/sock", ["short"], "invalid_configuration"),
-])
+@pytest.mark.parametrize(
+    "socket,ids,code",
+    [
+        ("", [CID], "not_configured"),
+        ("relative", [CID], "invalid_configuration"),
+        ("/foo/../sock", [CID], "invalid_configuration"),
+        ("/sock", [], "not_managed"),
+        ("/sock", ["short"], "invalid_configuration"),
+    ],
+)
 def test_configuration_denies_before_transport(monkeypatch, socket, ids, code):
     monkeypatch.setenv("TOOLGATE_DOCKER_SOCKET", socket)
     monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS", json.dumps(ids))
@@ -78,8 +95,10 @@ def test_recheck_before_dispatch(monkeypatch, change):
 
     def handle(request):
         methods.append(request.method)
-        monkeypatch.setenv("TOOLGATE_MANAGED_CONTAINER_IDS" if change == "revoke" else "TOOLGATE_DOCKER_SOCKET",
-                           "[]" if change == "revoke" else "/different.sock")
+        monkeypatch.setenv(
+            "TOOLGATE_MANAGED_CONTAINER_IDS" if change == "revoke" else "TOOLGATE_DOCKER_SOCKET",
+            "[]" if change == "revoke" else "/different.sock",
+        )
         return response(inspection())
 
     with pytest.raises(adapter.ControlError):
@@ -87,7 +106,9 @@ def test_recheck_before_dispatch(monkeypatch, change):
     assert methods == ["GET"]
 
 
-@pytest.mark.parametrize("phase", ["post_error", "post_500", "post_redirect", "after_error", "after_invalid"])
+@pytest.mark.parametrize(
+    "phase", ["post_error", "post_500", "post_redirect", "after_error", "after_invalid"]
+)
 def test_post_dispatch_never_retried_and_unknown(phase):
     methods = []
 

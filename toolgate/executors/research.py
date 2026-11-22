@@ -4,6 +4,7 @@ Search providers are untrusted discovery inputs. Results receive short-lived
 handles before they reach an agent, and the fetch path accepts only those
 handles rather than arbitrary URLs.
 """
+
 from __future__ import annotations
 
 import contextvars
@@ -69,7 +70,9 @@ def _within(seconds: float, provider, *args):
     return outcome["rows"]
 
 
-def search(query: str, source: str, limit: int, recency_days: int, until: float | None = None) -> dict:
+def search(
+    query: str, source: str, limit: int, recency_days: int, until: float | None = None
+) -> dict:
     """One source's results. `until` is a shared deadline (time.monotonic) from a bundle."""
     if source not in SOURCE_DOMAINS:
         raise ResearchError(f"unsupported research source: {source}")
@@ -91,8 +94,16 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
         "github": [("github", _github), ("tavily", _tavily), ("searxng", _searx)],
         "github_repositories": [("github_repositories", _github_repositories)],
         "producthunt": [("producthunt", _producthunt), ("tavily", _tavily), ("searxng", _searx)],
-        "stackexchange": [("stackexchange", _stackexchange), ("tavily", _tavily), ("searxng", _searx)],
-        "stackoverflow": [("stackoverflow", _stackoverflow), ("tavily", _tavily), ("searxng", _searx)],
+        "stackexchange": [
+            ("stackexchange", _stackexchange),
+            ("tavily", _tavily),
+            ("searxng", _searx),
+        ],
+        "stackoverflow": [
+            ("stackoverflow", _stackoverflow),
+            ("tavily", _tavily),
+            ("searxng", _searx),
+        ],
         "youtube": [("youtube", _youtube), ("tavily", _tavily), ("searxng", _searx)],
     }[source]
     if source == "reddit" and clean_query.lower().startswith("subreddit:"):
@@ -115,7 +126,9 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
             failures.append(f"{provider_name}: shared deadline exhausted")
             break
         try:
-            rows = _within(remaining, provider, clean_query, source, limit, recency_days, min(8.0, remaining))
+            rows = _within(
+                remaining, provider, clean_query, source, limit, recency_days, min(8.0, remaining)
+            )
             # Sites the owner skips are never sources, whichever provider found them.
             rows = [row for row in rows if not tool_settings.skipped(row.get("url"), skip_sites)]
             completed_providers.append(provider_name)
@@ -127,7 +140,14 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
             failures.append(f"{provider_name}: shared deadline exhausted")
             break
         # AttributeError: a provider's JSON with a list or null where an object belongs.
-        except (ResearchError, httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        except (
+            ResearchError,
+            httpx.HTTPError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
             failures.append(f"{provider_name}: {type(exc).__name__}")
     if not rows and not completed_providers:
         raise ResearchError("all configured search providers failed: " + "; ".join(failures))
@@ -146,10 +166,13 @@ def search(query: str, source: str, limit: int, recency_days: int, until: float 
     output = []
     for row in rows:
         record = research_cache.cache_research_result(row, expires_at.isoformat())
-        output.append({
-            key: value for key, value in {**row, "result_id": record["id"], "url": row["url"]}.items()
-            if key != "document"
-        })
+        output.append(
+            {
+                key: value
+                for key, value in {**row, "result_id": record["id"], "url": row["url"]}.items()
+                if key != "document"
+            }
+        )
     return {
         "query": clean_query,
         "source": source,
@@ -176,17 +199,31 @@ def search_bundle(query: str, sources: list[str], limit_per_source: int, recency
     until = time.monotonic() + most if most is not None else None
     for source in ordered_sources:
         if until is not None and until - time.monotonic() < 0.5:
-            reports.append({"source": source, "status": "failed", "result_count": 0, "error": "the tool time limit was reached"})
+            reports.append(
+                {
+                    "source": source,
+                    "status": "failed",
+                    "result_count": 0,
+                    "error": "the tool time limit was reached",
+                }
+            )
             continue
         try:
             result = search(query, source, limit_per_source, recency_days, until=until)
         except ResearchError as exc:
-            reports.append({"source": source, "status": "failed", "result_count": 0, "error": str(exc)[:300]})
+            reports.append(
+                {"source": source, "status": "failed", "result_count": 0, "error": str(exc)[:300]}
+            )
             continue
-        reports.append({
-            "source": source, "status": "completed", "result_count": result.get("result_count", 0),
-            "provider": result.get("provider"), "fallback_failures": result.get("fallback_failures", []),
-        })
+        reports.append(
+            {
+                "source": source,
+                "status": "completed",
+                "result_count": result.get("result_count", 0),
+                "provider": result.get("provider"),
+                "fallback_failures": result.get("fallback_failures", []),
+            }
+        )
         for row in result.get("results", []):
             normalized = str(row.get("url") or "").rstrip("/").lower()
             if not normalized or normalized in seen_urls:
@@ -196,10 +233,10 @@ def search_bundle(query: str, sources: list[str], limit_per_source: int, recency
     if not any(report["status"] == "completed" for report in reports):
         raise ResearchError("all bundled research sources failed")
     return {
-        "query": clean_text(query, 240), "sources": ordered_sources,
-        "result_count": len(combined), "results": combined,
+        "query": clean_text(query, 240),
+        "sources": ordered_sources,
+        "result_count": len(combined),
+        "results": combined,
         "source_reports": reports,
         "notice": "Bundled results preserve source provenance and remain untrusted evidence.",
     }
-
-

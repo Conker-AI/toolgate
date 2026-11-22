@@ -6,6 +6,7 @@ created through the API with no policy got `{}`, and an absent limit reads as
 unlimited. The seeded tools were fine; anything created afterwards, including
 a tool Conker proposes, was not.
 """
+
 import unittest
 
 import pytest
@@ -76,8 +77,13 @@ class ToolsAreRegisteredWithCeilings(unittest.TestCase):
     def test_updating_a_tool_does_not_drop_its_ceilings(self):
         """`update_tool` rebuilds the record through `create_tool`, so an edit
         that omits policy must not quietly return the tool to unlimited."""
-        control_plane.create_tool({"id": "edited.tool", "name": "Edited",
-                                   "policy": {"usage_limits": {"max_per_minute": 2}}})
+        control_plane.create_tool(
+            {
+                "id": "edited.tool",
+                "name": "Edited",
+                "policy": {"usage_limits": {"max_per_minute": 2}},
+            }
+        )
         updated = control_plane.update_tool("edited.tool", {"name": "Edited again"})
         self.assertIsNotNone(updated["policy"]["usage_limits"]["max_per_minute"])
 

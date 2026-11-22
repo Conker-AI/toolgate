@@ -1,4 +1,5 @@
 """Owner draft persistence must not publish, grant or execute anything."""
+
 from concurrent.futures import ThreadPoolExecutor
 
 from toolgate.core import control_plane as cp
@@ -6,19 +7,43 @@ from toolgate.tests.test_owner_channel import ADMIN, HEADERS, gate  # noqa: F401
 
 
 def document(identity="example"):
-    return {"id": identity, "name": "Example", "description": "", "kind": "workflow",
-            "nodes": [{"id": "input", "type": "input", "label": "Input",
-                       "position": {"x": 0, "y": 0}, "config": {}},
-                      {"id": "result", "type": "return", "label": "Return",
-                       "position": {"x": 200, "y": 0}, "config": {"value": "$last"}}],
-            "edges": [], "inputs": [], "outputs": [], "credentialRefs": [],
-            "effect": "read", "agentVisible": True,
-            "budgets": {"maxSteps": 80, "maxLoopItems": 20, "timeoutMs": 5000}}
+    return {
+        "id": identity,
+        "name": "Example",
+        "description": "",
+        "kind": "workflow",
+        "nodes": [
+            {
+                "id": "input",
+                "type": "input",
+                "label": "Input",
+                "position": {"x": 0, "y": 0},
+                "config": {},
+            },
+            {
+                "id": "result",
+                "type": "return",
+                "label": "Return",
+                "position": {"x": 200, "y": 0},
+                "config": {"value": "$last"},
+            },
+        ],
+        "edges": [],
+        "inputs": [],
+        "outputs": [],
+        "credentialRefs": [],
+        "effect": "read",
+        "agentVisible": True,
+        "budgets": {"maxSteps": 80, "maxLoopItems": 20, "timeoutMs": 5000},
+    }
 
 
 def save(client, revision=0, value=None, headers=None):
-    return client.post("/v2/owner/editor-drafts/example", headers=headers or HEADERS,
-                       json={"expected_revision": revision, "document": value or document()})
+    return client.post(
+        "/v2/owner/editor-drafts/example",
+        headers=headers or HEADERS,
+        json={"expected_revision": revision, "document": value or document()},
+    )
 
 
 def test_round_trip_retains_disconnected_draft_without_execution_authority(gate):
@@ -29,7 +54,9 @@ def test_round_trip_retains_disconnected_draft_without_execution_authority(gate)
     assert response.json()["document"] == value
     assert response.json()["revision"] == 1
     assert client.get("/v2/owner/editor-drafts/example", headers=HEADERS).json() == response.json()
-    assert client.get("/v2/owner/editor-drafts", headers=HEADERS).json()["items"][0]["id"] == "example"
+    assert (
+        client.get("/v2/owner/editor-drafts", headers=HEADERS).json()["items"][0]["id"] == "example"
+    )
     assert cp.get("tool", "example") is None
     assert cp.get("automation", "example") is None
     assert cp.authenticate_agent(execution)["scopes"] == ["tool:example"]
@@ -39,8 +66,12 @@ def test_round_trip_retains_disconnected_draft_without_execution_authority(gate)
 
 def test_owner_only_and_cannot_be_used_as_admin_or_execution(gate):
     client, _, execution = gate
-    for headers in ({"X-ToolGate-Key": ADMIN}, {"X-ToolGate-Execution-Key": execution},
-                    {"X-ToolGate-Owner-Key": execution}, {"X-ToolGate-Owner-Key": "wrong"}):
+    for headers in (
+        {"X-ToolGate-Key": ADMIN},
+        {"X-ToolGate-Execution-Key": execution},
+        {"X-ToolGate-Owner-Key": execution},
+        {"X-ToolGate-Owner-Key": "wrong"},
+    ):
         assert save(client, headers=headers).status_code == 401
         assert client.get("/v2/owner/editor-drafts", headers=headers).status_code == 401
     assert save(client).status_code == 200
@@ -58,8 +89,12 @@ def test_stale_and_simultaneous_writes_do_not_overwrite(gate):
 
 def test_invalid_identity_unknown_fields_and_oversized_drafts_rejected(gate):
     client = gate[0]
-    for change in ({"id": "different"}, {"script": "not an executable document"},
-                   {"credentialRefs": ["raw-secret"]}, {"name": " "}):
+    for change in (
+        {"id": "different"},
+        {"script": "not an executable document"},
+        {"credentialRefs": ["raw-secret"]},
+        {"name": " "},
+    ):
         assert save(client, value={**document(), **change}).status_code == 422
     value = document()
     value["nodes"][1]["config"] = {"value": "a" * 150001}
@@ -70,8 +105,14 @@ def test_invalid_identity_unknown_fields_and_oversized_drafts_rejected(gate):
 def test_keyset_pagination_has_no_full_documents(gate):
     client = gate[0]
     for identity in ("a", "b", "c"):
-        assert client.post(f"/v2/owner/editor-drafts/{identity}", headers=HEADERS,
-                           json={"expected_revision": 0, "document": document(identity)}).status_code == 200
+        assert (
+            client.post(
+                f"/v2/owner/editor-drafts/{identity}",
+                headers=HEADERS,
+                json={"expected_revision": 0, "document": document(identity)},
+            ).status_code
+            == 200
+        )
     page = client.get("/v2/owner/editor-drafts?limit=2", headers=HEADERS).json()
     assert [item["id"] for item in page["items"]] == ["a", "b"]
     assert all("document" not in item for item in page["items"])
