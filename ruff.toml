@@ -57,4 +57,6 @@ exclude = [
     "toolgate/core/control_plane.py",
     "toolgate/scripts/mutation_check.py",
     "toolgate/tests/test_research_search.py",
+    "toolgate/tests/test_research_providers.py",
+    "toolgate/tests/test_research_reddit.py",
 ]
