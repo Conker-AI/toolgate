@@ -24,3 +24,7 @@ dashboard/.env
 .pytest_cache/
 .coverage
 .coverage.*
+
+# Local test scratch
+.test-tmp/
+.test-deps/
