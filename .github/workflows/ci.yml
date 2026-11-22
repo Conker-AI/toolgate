@@ -72,6 +72,10 @@ jobs:
         # docs/openapi.json is the API reference; written by hand, it fell versions behind.
         run: python toolgate/scripts/export_openapi.py --check
 
+      - name: Test skips
+        # Every skip/xfail marker needs a reason and the per-file counts in skip-baseline.txt may only shrink.
+        run: python toolgate/scripts/check_skips.py
+
       - name: Types
         # pyright basic mode (pyrightconfig.json). Errors that predate the check are counted
         # per file in type-baseline.txt; a count may only go down.
@@ -118,7 +122,14 @@ jobs:
           exit 1
 
       - name: Module contract
-        run: python -m pytest toolgate/tests/test_module_contract.py -q
+        # A contract test that skips (no service answered) proves nothing, so any SKIPPED fails the step.
+        run: |
+          set -o pipefail
+          python -m pytest toolgate/tests/test_module_contract.py -q -rs -p no:cacheprovider | tee "$RUNNER_TEMP/pytest.out"
+          if grep -q "^SKIPPED" "$RUNNER_TEMP/pytest.out"; then
+            echo "::error::The module contract test skipped; it must run against the container."
+            exit 1
+          fi
 
       - if: always()
         run: docker compose -f toolgate/docker-compose.yml down -v

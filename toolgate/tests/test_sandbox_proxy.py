@@ -15,8 +15,10 @@ else:
     # Create dummy imports for Windows
     proxy = None
 
+# The proxy module only exists on POSIX, so every test here needs it.
+pytestmark = pytest.mark.skipif(proxy is None, reason="the sandbox proxy is POSIX only")
 
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
+
 class TestRoute:
     """Test URL routing validation."""
 
@@ -94,7 +96,6 @@ class TestRoute:
             assert result is None
 
 
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
 class TestRewrite:
     """Test URL rewriting in responses."""
 
@@ -119,7 +120,6 @@ class TestRewrite:
         assert rewritten == body  # Unchanged
 
 
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
 class TestLocation:
     """Test Location header rewriting."""
 
@@ -139,12 +139,9 @@ class TestLocation:
         assert rewritten is None
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX only")
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
 class TestPosixOnly:
     """POSIX-only tests with real HTTP server."""
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX only")
     def test_real_proxy_server_allowed_methods(self, tmp_path, monkeypatch):
         socket_path = tmp_path / "test.sock"
 
@@ -165,7 +162,6 @@ class TestPosixOnly:
             server.shutdown()
             socket_path.unlink(missing_ok=True)
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX only")
     def test_real_proxy_server_refused_methods(self, tmp_path, monkeypatch):
         socket_path = tmp_path / "test.sock"
 
@@ -206,7 +202,6 @@ class TestPosixOnly:
             socket_path.unlink(missing_ok=True)
             monkeypatch.setattr(http.client, "HTTPSConnection", original_https)
 
-    @pytest.mark.skipif(os.name == "nt", reason="POSIX only")
     def test_server_refuses_wrong_uid(self, tmp_path, monkeypatch):
         socket_path = tmp_path / "test.sock"
 
@@ -286,7 +281,6 @@ class TestPosixOnly:
             conn.close()
 
 
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
 class TestRouteSpecificCases:
     """Additional specific routing tests."""
 
@@ -340,7 +334,6 @@ class TestRouteSpecificCases:
             assert result[3] == "npm-metadata"
 
 
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
 class TestRewriteEdgeCases:
     """Test edge cases in URL rewriting."""
 
@@ -367,7 +360,6 @@ class TestRewriteEdgeCases:
         assert rewritten == body  # No rewrite due to case mismatch
 
 
-@pytest.mark.skipif(proxy is None, reason="Proxy module not available")
 class TestLocationEdgeCases:
     """Test edge cases in location rewriting."""
 
