@@ -1769,7 +1769,7 @@
   },
   "info": {
     "title": "ToolGate",
-    "version": "0.17.0"
+    "version": "0.17.1"
   },
   "openapi": "3.1.0",
   "paths": {
