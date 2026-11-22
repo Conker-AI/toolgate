@@ -1,5 +1,4 @@
 """Durable dispatch identities. Missing replies never authorize another dispatch."""
-
 from __future__ import annotations
 
 import hashlib
@@ -72,14 +71,9 @@ BEGIN SELECT RAISE(ABORT, 'a forgotten action stays forgotten'); END;
 """
 # The one result a forgotten completed action keeps; the triggers above accept nothing else.
 FORGOTTEN_RESPONSE = json.dumps(
-    {
-        "ok": False,
-        "code": "FORGOTTEN",
-        "message": "The arguments and result of this action were forgotten with its chat.",
-    },
-    sort_keys=True,
-    separators=(",", ":"),
-)
+    {"ok": False, "code": "FORGOTTEN",
+     "message": "The arguments and result of this action were forgotten with its chat."},
+    sort_keys=True, separators=(",", ":"))
 SCHEMA = SCHEMA.replace("@FORGOTTEN@", FORGOTTEN_RESPONSE)
 # Before forgetting existed these two refused every change; the triggers above replaced them.
 OLD_TRIGGERS = schema_ledger.RETIRED  # v2_action_identity_immutable, v2_action_result_immutable
@@ -98,12 +92,8 @@ def _retire_old_triggers(conn) -> None:
 
 
 def forgotten(conn, action_id: str) -> bool:
-    return (
-        conn.execute(
-            "SELECT 1 FROM v2_forgotten WHERE object_type='action' AND object_id=?", (action_id,)
-        ).fetchone()
-        is not None
-    )
+    return conn.execute("SELECT 1 FROM v2_forgotten WHERE object_type='action' AND object_id=?",
+                        (action_id,)).fetchone() is not None
 
 
 class ExecutionConflict(ValueError):
@@ -116,15 +106,8 @@ class UsageLimitExceeded(ValueError):
         self.limit = limit
 
 
-def enforce_usage_limits(
-    conn,
-    subject_type: str,
-    subject_id: str,
-    event_type: str,
-    limits: dict,
-    *,
-    now: float | None = None,
-) -> None:
+def enforce_usage_limits(conn, subject_type: str, subject_id: str, event_type: str,
+                         limits: dict, *, now: float | None = None) -> None:
     """Reserve dispatch capacity while the journal writer lock is held.
 
     A journal row is the durable reservation. Legacy events without a matching
@@ -160,14 +143,10 @@ def enforce_usage_limits(
         observed[key] = max(observed.get(key, 0), happened_at)
 
     per_minute = limits.get("max_per_minute")
-    if per_minute is not None and sum(at >= current - 60 for at in observed.values()) >= int(
-        per_minute
-    ):
+    if per_minute is not None and sum(at >= current - 60 for at in observed.values()) >= int(per_minute):
         raise UsageLimitExceeded("minute")
     per_hour = limits.get("max_per_hour")
-    if per_hour is not None and sum(at >= current - 3600 for at in observed.values()) >= int(
-        per_hour
-    ):
+    if per_hour is not None and sum(at >= current - 3600 for at in observed.values()) >= int(per_hour):
         raise UsageLimitExceeded("hour")
     cooldown = limits.get("cooldown_seconds")
     if cooldown and observed and current - max(observed.values()) < int(cooldown):
@@ -182,21 +161,15 @@ def initialize(conn) -> None:
 def apply(conn) -> None:
     """The journal's schema (step 0001 of the ledger); idempotent."""
     conn.executescript(SCHEMA)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS v2_events_usage_window "
-        "ON v2_events(event_type,subject_type,subject_id,created_at)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS v2_events_usage_window "
+                 "ON v2_events(event_type,subject_type,subject_id,created_at)")
     conn.executescript(recovery_journal.SCHEMA)
     conn.executescript(container_admission.SCHEMA)
     _retire_old_triggers(conn)
     # Additive upgrade: legacy identities keep their exact original fingerprint.
-    if "publication_digest" not in {
-        row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")
-    }:
+    if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
         conn.execute("BEGIN IMMEDIATE")
-        if "publication_digest" not in {
-            row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")
-        }:
+        if "publication_digest" not in {row["name"] for row in conn.execute("PRAGMA table_info(v2_actions)")}:
             conn.execute("ALTER TABLE v2_actions ADD COLUMN publication_digest TEXT")
         conn.commit()
     conn.executescript("""
@@ -207,38 +180,23 @@ def apply(conn) -> None:
     spending.apply(conn)
 
 
-def fingerprint(
-    subject_type: str,
-    subject_id: str,
-    args: dict,
-    actor_id: str,
-    job_id: str | None,
-    parent_action_id: str | None,
-    publication_digest: str | None = None,
-) -> str:
+def fingerprint(subject_type: str, subject_id: str, args: dict, actor_id: str,
+                job_id: str | None, parent_action_id: str | None,
+                publication_digest: str | None = None) -> str:
     identity = [subject_type, subject_id, args, actor_id, job_id, parent_action_id]
     if publication_digest is not None:
         identity.append({"publication_digest": publication_digest})
-    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    encoded = json.dumps(identity,
+                         sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def existing(
-    action_id: str,
-    subject_type: str,
-    subject_id: str,
-    args: dict,
-    actor_id: str,
-    job_id: str | None = None,
-    parent_action_id: str | None = None,
-    *,
-    publication_digest: str | None = None,
-) -> dict | None:
+def existing(action_id: str, subject_type: str, subject_id: str, args: dict, actor_id: str,
+             job_id: str | None = None, parent_action_id: str | None = None, *,
+             publication_digest: str | None = None) -> dict | None:
     if not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,160}", action_id):
         raise ExecutionConflict("Use an action_id of 1-160 ASCII letters, digits or _ . : / -")
-    expected = fingerprint(
-        subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest
-    )
+    expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest)
     with control_plane._conn() as conn:
         initialize(conn)
         row = recovery_journal.lookup(conn, action_id)
@@ -248,30 +206,15 @@ def existing(
 
 
 def _row(row) -> dict:
-    return {
-        **dict(row),
-        "args": json.loads(row["args"]),
-        "response": json.loads(row["response"]) if row["response"] else None,
-    }
+    return {**dict(row), "args": json.loads(row["args"]),
+            "response": json.loads(row["response"]) if row["response"] else None}
 
 
-def begin(
-    action_id: str,
-    subject_type: str,
-    subject_id: str,
-    args: dict,
-    actor_id: str,
-    version: int | None,
-    *,
-    job_id: str | None = None,
-    parent_action_id: str | None = None,
-    authorize=None,
-    reserve=None,
-    publication_digest: str | None = None,
-) -> tuple[dict, bool]:
-    expected = fingerprint(
-        subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest
-    )
+def begin(action_id: str, subject_type: str, subject_id: str, args: dict, actor_id: str,
+          version: int | None, *, job_id: str | None = None,
+          parent_action_id: str | None = None, authorize=None, reserve=None,
+          publication_digest: str | None = None) -> tuple[dict, bool]:
+    expected = fingerprint(subject_type, subject_id, args, actor_id, job_id, parent_action_id, publication_digest)
     with control_plane._conn() as conn:
         initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
@@ -283,40 +226,19 @@ def begin(
         if conn.execute("SELECT 1 FROM v2_recovery_hold").fetchone():
             raise ExecutionConflict("Recovery is held; new effects are disabled.")
         if parent_action_id:
-            parent = conn.execute(
-                "SELECT * FROM v2_actions WHERE action_id=?", (parent_action_id,)
-            ).fetchone()
-            if (
-                not parent
-                or parent["actor_id"] != actor_id
-                or parent["job_id"] != job_id
-                or parent["status"] != "dispatching"
-            ):
-                raise ExecutionConflict(
-                    "Child dispatch must inherit its active parent's job and identity"
-                )
+            parent = conn.execute("SELECT * FROM v2_actions WHERE action_id=?",
+                                  (parent_action_id,)).fetchone()
+            if (not parent or parent["actor_id"] != actor_id or parent["job_id"] != job_id
+                    or parent["status"] != "dispatching"):
+                raise ExecutionConflict("Child dispatch must inherit its active parent's job and identity")
         if authorize:
             authorize(conn)
         now = time.time()
-        conn.execute(
-            "INSERT INTO v2_actions(action_id,fingerprint,actor_id,subject_type,subject_id,version,args,"
-            "job_id,parent_action_id,publication_digest,status,response,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,'dispatching',NULL,?,?)",
-            (
-                action_id,
-                expected,
-                actor_id,
-                subject_type,
-                subject_id,
-                version,
-                json.dumps(args, allow_nan=False),
-                job_id,
-                parent_action_id,
-                publication_digest,
-                now,
-                now,
-            ),
-        )
+        conn.execute("INSERT INTO v2_actions(action_id,fingerprint,actor_id,subject_type,subject_id,version,args,"
+                     "job_id,parent_action_id,publication_digest,status,response,created_at,updated_at) "
+                     "VALUES (?,?,?,?,?,?,?,?,?,?,'dispatching',NULL,?,?)",
+                     (action_id, expected, actor_id, subject_type, subject_id, version,
+                      json.dumps(args, allow_nan=False), job_id, parent_action_id, publication_digest, now, now))
         if reserve:
             reserve(conn)
         row = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
@@ -334,35 +256,25 @@ def finish(action_id: str, response: dict, reconcile=None) -> dict:
             return _row(row)
         if reconcile:
             reconcile(conn)
-        conn.execute(
-            "UPDATE v2_actions SET status='completed',response=?,updated_at=? WHERE action_id=?",
-            (json.dumps(response, allow_nan=False), time.time(), action_id),
-        )
-        return _row(
-            conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
-        )
+        conn.execute("UPDATE v2_actions SET status='completed',response=?,updated_at=? WHERE action_id=?",
+                     (json.dumps(response, allow_nan=False), time.time(), action_id))
+        return _row(conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone())
 
 
 def unknown(action_id: str) -> None:
     with control_plane._conn() as conn:
         initialize(conn)
         recovery_journal.assert_not_held(conn)
-        conn.execute(
-            "UPDATE v2_actions SET status='outcome_unknown',updated_at=?"
-            " WHERE action_id=? AND status='dispatching'",
-            (time.time(), action_id),
-        )
+        conn.execute("UPDATE v2_actions SET status='outcome_unknown',updated_at=?"
+                     " WHERE action_id=? AND status='dispatching'", (time.time(), action_id))
 
 
 def recover_interrupted() -> int:
     with control_plane._conn() as conn:
         initialize(conn)
         recovery_journal.assert_not_held(conn)
-        return conn.execute(
-            "UPDATE v2_actions SET status='outcome_unknown',updated_at=?"
-            " WHERE status='dispatching'",
-            (time.time(),),
-        ).rowcount
+        return conn.execute("UPDATE v2_actions SET status='outcome_unknown',updated_at=?"
+                            " WHERE status='dispatching'", (time.time(),)).rowcount
 
 
 def get(action_id: str) -> dict | None:
@@ -375,49 +287,17 @@ def get(action_id: str) -> dict | None:
 def list_actions(limit: int = 100) -> list[dict]:
     with control_plane._conn() as conn:
         initialize(conn)
-        records = {
-            row["action_id"]: dict(row)
-            for row in conn.execute(
-                "SELECT * FROM v2_actions ORDER BY created_at DESC LIMIT ?", (limit,)
-            )
-        }
-        records.update(
-            {
-                row["action_id"]: json.loads(row["record"])
-                for row in conn.execute(
-                    "SELECT * FROM v2_recovery_receipts ORDER BY json_extract(record, '$.created_at') DESC LIMIT ?",
-                    (limit,),
-                )
-            }
-        )
-        return [
-            _row(row)
-            for row in sorted(records.values(), key=lambda row: row["created_at"], reverse=True)[
-                :limit
-            ]
-        ]
+        records = {row["action_id"]: dict(row) for row in conn.execute(
+            "SELECT * FROM v2_actions ORDER BY created_at DESC LIMIT ?", (limit,))}
+        records.update({row["action_id"]: json.loads(row["record"]) for row in conn.execute(
+            "SELECT * FROM v2_recovery_receipts ORDER BY json_extract(record, '$.created_at') DESC LIMIT ?", (limit,))})
+        return [_row(row) for row in sorted(records.values(), key=lambda row: row["created_at"], reverse=True)[:limit]]
 
 
 def response(record: dict) -> dict:
-    target = (
-        {
-            "definition_version": record["version"],
-            "publication_digest": record["publication_digest"],
-        }
-        if record.get("publication_digest")
-        else {}
-    )
+    target = {"definition_version": record["version"], "publication_digest": record["publication_digest"]} if record.get("publication_digest") else {}
     if record["response"] is not None:
-        return {
-            **record["response"],
-            **target,
-            "action_id": record["action_id"],
-            "status": "completed",
-        }
-    return {
-        **target,
-        "code": "OUTCOME_UNKNOWN" if record["status"] == "outcome_unknown" else "IN_PROGRESS",
-        "action_id": record["action_id"],
-        "status": record["status"],
-        "message": "Dispatch is recorded but its outcome is not confirmed. Do not repeat it.",
-    }
+        return {**record["response"], **target, "action_id": record["action_id"], "status": "completed"}
+    return {**target, "code": "OUTCOME_UNKNOWN" if record["status"] == "outcome_unknown" else "IN_PROGRESS",
+            "action_id": record["action_id"], "status": record["status"],
+            "message": "Dispatch is recorded but its outcome is not confirmed. Do not repeat it."}
