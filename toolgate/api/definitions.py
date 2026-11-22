@@ -141,7 +141,10 @@ def tool_definition_errors(tool: dict) -> list[str]:
         errors.append("system.process-control is reserved for managed service lifecycle")
     if tool.get("id") == "system.port-control" and execution != {"type": "port_control"}:
         errors.append("system.port-control is reserved for reviewed port replacement")
-    for reserved_id, kind in (("sandbox.run", "sandbox_run"), ("sandbox.install", "sandbox_install")):
+    for reserved_id, kind in (
+        ("sandbox.run", "sandbox_run"),
+        ("sandbox.install", "sandbox_install"),
+    ):
         uses_kind = isinstance(execution, dict) and execution.get("type") == kind
         if (tool.get("id") == reserved_id or uses_kind) and (
             tool.get("id") != reserved_id or execution != {"type": kind}
@@ -159,8 +162,12 @@ def tool_definition_errors(tool: dict) -> list[str]:
             errors.append(str(exc))
         if tool.get("authorization") != "owner_confirmation":
             errors.append("External MCP tools require owner_confirmation")
-        if (input_names != {"arguments"} or len(inputs) != 1
-                or inputs[0].get("type") != "object" or inputs[0].get("required") is not True):
+        if (
+            input_names != {"arguments"}
+            or len(inputs) != 1
+            or inputs[0].get("type") != "object"
+            or inputs[0].get("required") is not True
+        ):
             errors.append("External MCP tools require one object input named arguments")
     elif execution["type"] == "port_control":
         if (

@@ -290,7 +290,9 @@ def validate_arguments(schema, value):
                     visit(props[key], child)
         elif kind == "array":
             entries = cast(list, item)
-            if node.get("uniqueItems") and len({_value_key(child) for child in entries}) != len(entries):
+            if node.get("uniqueItems") and len({_value_key(child) for child in entries}) != len(
+                entries
+            ):
                 _error("invalid_arguments", "Arguments require unique array items.")
             for child in entries:
                 visit(node["items"], child)

@@ -14,14 +14,22 @@ from toolgate.core import execution_journal as journal
 @pytest.fixture
 def tool(tmp_path, monkeypatch):
     monkeypatch.setattr(control_plane, "DB_PATH", tmp_path / "gate.db")
-    return {"id": "act", "name": "Action", "version": 1, "authorization": "auto",
-            "inputs": [], "outputs": [], "execution": {"type": "http_json", "billing": {"mode": "free"}}}
+    return {
+        "id": "act",
+        "name": "Action",
+        "version": 1,
+        "authorization": "auto",
+        "inputs": [],
+        "outputs": [],
+        "execution": {"type": "http_json", "billing": {"mode": "free"}},
+    }
 
 
 def invoke(tool, **kwargs):
     action_id = kwargs.pop("action_id", "job.action")
-    return invocation.invoke_tool(tool, kwargs.pop("args", {}), "actor", actor_id="agent",
-                              action_id=action_id, **kwargs)
+    return invocation.invoke_tool(
+        tool, kwargs.pop("args", {}), "actor", actor_id="agent", action_id=action_id, **kwargs
+    )
 
 
 def test_dispatch_is_durable_before_external_effect_and_replay_is_cached(tool, monkeypatch):
@@ -88,11 +96,15 @@ def test_two_callers_cannot_dispatch_same_action(tool, monkeypatch):
     assert calls == [1]
 
 
-@pytest.mark.parametrize("limits", [
-    {"max_per_minute": 1, "max_per_hour": 100, "cooldown_seconds": 0},
-    {"max_per_minute": 100, "max_per_hour": 1, "cooldown_seconds": 0},
-    {"max_per_minute": 100, "max_per_hour": 100, "cooldown_seconds": 60},
-], ids=["minute", "hour", "cooldown"])
+@pytest.mark.parametrize(
+    "limits",
+    [
+        {"max_per_minute": 1, "max_per_hour": 100, "cooldown_seconds": 0},
+        {"max_per_minute": 100, "max_per_hour": 1, "cooldown_seconds": 0},
+        {"max_per_minute": 100, "max_per_hour": 100, "cooldown_seconds": 60},
+    ],
+    ids=["minute", "hour", "cooldown"],
+)
 def test_concurrent_distinct_actions_cannot_exceed_usage_limit(tool, monkeypatch, limits):
     tool["policy"] = {"usage_limits": limits}
     ready = Barrier(2)
@@ -137,7 +149,9 @@ def test_concurrent_distinct_actions_cannot_exceed_usage_limit(tool, monkeypatch
 def test_completed_action_and_audit_event_consume_one_slot(tool, monkeypatch):
     tool["policy"] = {"usage_limits": {"max_per_minute": 2}}
     calls = []
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: calls.append(1) or {"ok": True, "result": {}})
+    monkeypatch.setattr(
+        invocation, "_dispatch_tool", lambda *a: calls.append(1) or {"ok": True, "result": {}}
+    )
     assert invoke(tool, action_id="slot.one")["code"] == "OK"
     assert invoke(tool, action_id="slot.two")["code"] == "OK"
     with pytest.raises(HTTPException) as caught:
@@ -149,7 +163,9 @@ def test_completed_action_and_audit_event_consume_one_slot(tool, monkeypatch):
 def test_legacy_event_without_journal_row_still_consumes_capacity(tool, monkeypatch):
     tool["policy"] = {"usage_limits": {"max_per_minute": 1}}
     control_plane.event("tool_executed", "info", "tool", tool["id"], "legacy", {"ok": True})
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: pytest.fail("legacy usage was ignored"))
+    monkeypatch.setattr(
+        invocation, "_dispatch_tool", lambda *a: pytest.fail("legacy usage was ignored")
+    )
     with pytest.raises(HTTPException) as caught:
         invoke(tool, action_id="after.legacy")
     assert caught.value.status_code == 429
@@ -158,14 +174,19 @@ def test_legacy_event_without_journal_row_still_consumes_capacity(tool, monkeypa
 
 def test_failed_journal_commit_cannot_dispatch_or_consume_approval(tool, monkeypatch):
     tool["authorization"] = "owner_confirmation"
-    request = approvals.create_verification_request("Run", "exact", "actor", "tool",
-                                                        "act", {}, 1, actor_id="agent")
+    request = approvals.create_verification_request(
+        "Run", "exact", "actor", "tool", "act", {}, 1, actor_id="agent"
+    )
     approvals.decide_request(request["id"], "approved", "owner")
     with control_plane._conn() as db:
         journal.initialize(db)
-        db.execute("CREATE TRIGGER reject_dispatch BEFORE INSERT ON v2_actions "
-                   "BEGIN SELECT RAISE(ABORT, 'disk failure'); END")
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: pytest.fail("dispatched without record"))
+        db.execute(
+            "CREATE TRIGGER reject_dispatch BEFORE INSERT ON v2_actions "
+            "BEGIN SELECT RAISE(ABORT, 'disk failure'); END"
+        )
+    monkeypatch.setattr(
+        invocation, "_dispatch_tool", lambda *a: pytest.fail("dispatched without record")
+    )
     with pytest.raises(sqlite3.IntegrityError):
         invoke(tool, approval_request_id=request["id"])
     assert control_plane.get("request", request["id"])["payload"]["binding"]["consumed_at"] is None
@@ -177,7 +198,14 @@ def test_rate_limited_dispatch_does_not_consume_approval(tool, monkeypatch):
     monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: {"ok": True, "result": {}})
     assert invoke({**tool, "authorization": "auto"}, action_id="capacity.owner")["code"] == "OK"
     request = approvals.create_verification_request(
-        "Run", "exact", "actor", "tool", "act", {}, 1, actor_id="agent",
+        "Run",
+        "exact",
+        "actor",
+        "tool",
+        "act",
+        {},
+        1,
+        actor_id="agent",
     )
     approvals.decide_request(request["id"], "approved", "owner")
     with pytest.raises(HTTPException) as caught:
@@ -188,9 +216,13 @@ def test_rate_limited_dispatch_does_not_consume_approval(tool, monkeypatch):
 
 def test_receipt_write_failure_never_becomes_permission_to_retry(tool, monkeypatch):
     calls = []
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: calls.append(1) or {"ok": True, "result": {}})
+    monkeypatch.setattr(
+        invocation, "_dispatch_tool", lambda *a: calls.append(1) or {"ok": True, "result": {}}
+    )
     with monkeypatch.context() as patch:
-        patch.setattr(journal, "finish", lambda *a, **kw: (_ for _ in ()).throw(sqlite3.OperationalError()))
+        patch.setattr(
+            journal, "finish", lambda *a, **kw: (_ for _ in ()).throw(sqlite3.OperationalError())
+        )
         with pytest.raises(sqlite3.OperationalError):
             invoke(tool)
     assert invoke(tool)["code"] == "IN_PROGRESS"
@@ -210,10 +242,15 @@ def test_identity_includes_actor_and_parent_job(tool, monkeypatch):
 
 
 def test_completed_receipt_cannot_be_replaced_or_deleted(tool, monkeypatch):
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda *a: {"ok": True, "result": {"receipt": 7}})
+    monkeypatch.setattr(
+        invocation, "_dispatch_tool", lambda *a: {"ok": True, "result": {"receipt": 7}}
+    )
     first = invoke(tool)
-    for sql in ["DELETE FROM v2_actions", "UPDATE v2_actions SET response='{}'",
-                "INSERT OR REPLACE INTO v2_actions SELECT * FROM v2_actions"]:
+    for sql in [
+        "DELETE FROM v2_actions",
+        "UPDATE v2_actions SET response='{}'",
+        "INSERT OR REPLACE INTO v2_actions SELECT * FROM v2_actions",
+    ]:
         with control_plane._conn() as db, pytest.raises(sqlite3.IntegrityError):
             db.execute(sql)
     assert invoke(tool) == first
@@ -221,11 +258,25 @@ def test_completed_receipt_cannot_be_replaced_or_deleted(tool, monkeypatch):
 
 def test_workflow_retry_block_never_repeats_uncertain_child(tool, monkeypatch):
     tool["status"] = "active"
-    tool["policy"] = {"usage_limits": {"cooldown_seconds": 0, "max_per_minute": 60, "max_per_hour": 600}}
+    tool["policy"] = {
+        "usage_limits": {"cooldown_seconds": 0, "max_per_minute": 60, "max_per_hour": 600}
+    }
     control_plane.create_tool(tool)
-    control_plane.create_automation({"id": "flow", "name": "Flow", "status": "active", "authorization": "auto",
-                                    "workflow": [{"type": "retry", "max_attempts": 3,
-                                                  "step": {"type": "tool_call", "tool_id": "act"}}]})
+    control_plane.create_automation(
+        {
+            "id": "flow",
+            "name": "Flow",
+            "status": "active",
+            "authorization": "auto",
+            "workflow": [
+                {
+                    "type": "retry",
+                    "max_attempts": 3,
+                    "step": {"type": "tool_call", "tool_id": "act"},
+                }
+            ],
+        }
+    )
     calls = []
 
     def interrupted(*args):
@@ -252,7 +303,12 @@ def test_status_is_visible_only_to_owner_or_originating_agent(tool, monkeypatch)
     journal.unknown("known")
     client = TestClient(server.app)
     assert client.get("/v2/actions", headers={"X-ToolGate-Execution-Key": key}).status_code == 401
-    assert client.get("/v2/agent/actions/known", headers={"X-ToolGate-Execution-Key": other}).status_code == 404
+    assert (
+        client.get(
+            "/v2/agent/actions/known", headers={"X-ToolGate-Execution-Key": other}
+        ).status_code
+        == 404
+    )
     response = client.get("/v2/agent/actions/known", headers={"X-ToolGate-Execution-Key": key})
     assert response.status_code == 200
     assert response.json()["code"] == "OUTCOME_UNKNOWN"
@@ -278,9 +334,13 @@ invocation._dispatch_tool = dispatch
 invocation.invoke_tool({"id":"act","name":"Action","version":1,"execution":{"type":"echo"}},
                    {}, "actor", actor_id="agent", action_id="process-action")
 """
-    result = subprocess.run([sys.executable, "-c", code, str(control_plane.DB_PATH), str(effect)],
-                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-                            capture_output=True, timeout=30, check=False)
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(control_plane.DB_PATH), str(effect)],
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
     assert result.returncode == 71, result.stderr.decode()
     assert effect.read_text() == "happened"
     assert journal.recover_interrupted() == 1

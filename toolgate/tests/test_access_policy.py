@@ -182,7 +182,9 @@ def tool_access(client, key, tool_id, enabled=None, digest=None):
     path = f"/v2/owner/tools/{tool_id}/access"
     if enabled is None:
         return client.get(path, headers=owner(key))
-    return client.post(path, json={"enabled": enabled, "expected_digest": digest}, headers=owner(key))
+    return client.post(
+        path, json={"enabled": enabled, "expected_digest": digest}, headers=owner(key)
+    )
 
 
 def test_the_owner_lets_the_chat_key_use_a_tool_and_takes_it_back(api):
@@ -226,8 +228,10 @@ def test_a_grant_whose_audit_event_cannot_be_written_is_not_applied(api):
     client, _, pi_key, _ = api
     digest = tool_access(client, pi_key, "echo.hidden").json()["digest"]
     with closing(sqlite3.connect(cp.DB_PATH)) as db:
-        db.execute("CREATE TRIGGER no_events BEFORE INSERT ON v2_events "
-                   "BEGIN SELECT RAISE(ABORT, 'events refused'); END")
+        db.execute(
+            "CREATE TRIGGER no_events BEFORE INSERT ON v2_events "
+            "BEGIN SELECT RAISE(ABORT, 'events refused'); END"
+        )
         db.commit()
     with pytest.raises(sqlite3.Error):
         tool_access(client, pi_key, "echo.hidden", True, digest)

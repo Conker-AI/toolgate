@@ -14,30 +14,53 @@ from toolgate.core import spending
 
 
 def call(identity, version=1, **fields):
-    return {"type": "automation_call", "automation_id": identity, "published_version": version, **fields}
+    return {
+        "type": "automation_call",
+        "automation_id": identity,
+        "published_version": version,
+        **fields,
+    }
 
 
 def save(identity, workflow, **fields):
-    return cp.create_automation({"id": identity, "name": identity, "description": "Nested test",
-                                 "status": "active", "workflow": workflow, **fields})
+    return cp.create_automation(
+        {
+            "id": identity,
+            "name": identity,
+            "description": "Nested test",
+            "status": "active",
+            "workflow": workflow,
+            **fields,
+        }
+    )
 
 
 @pytest.fixture
 def nested(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "nested.db")
-    tool = cp.create_tool({"id": "tool", "name": "Tool", "status": "active", "execution": {"type": "echo"}})
-    child = save("child", [{"type": "tool_call", "tool_id": "tool"}, {"type": "return", "value": "old"}])
+    tool = cp.create_tool(
+        {"id": "tool", "name": "Tool", "status": "active", "execution": {"type": "echo"}}
+    )
+    child = save(
+        "child", [{"type": "tool_call", "tool_id": "tool"}, {"type": "return", "value": "old"}]
+    )
     pub.publish("automation", "child", 1)
     root = save("root", [call("child")])
     publication = pub.publish("automation", "root", 1)
     agent, _ = cp.issue_agent_key("Caller", ["automation:root", "automation:child"])
     calls = []
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
+    monkeypatch.setattr(
+        invocation,
+        "_dispatch_tool",
+        lambda tool, args: calls.append(tool) or {"ok": True, "result": {}},
+    )
     return tool, child, root, publication, agent, calls
 
 
 def run(agent, version=1, action="root-action"):
-    return automations_routes.run_automation("root", models.V2Invoke(action_id=action, published_version=version), agent)
+    return automations_routes.run_automation(
+        "root", models.V2Invoke(action_id=action, published_version=version), agent
+    )
 
 
 def test_nested_snapshot_is_old_exact_definition_with_parent_receipts(nested):
@@ -65,15 +88,24 @@ def test_distinct_child_publications_do_not_merge_same_tool_id(nested):
     pub.publish("automation", "second", second["version"])
     root = cp.update_automation("root", {**root, "workflow": [call("child"), call("second")]})
     pub.publish("automation", "root", root["version"])
-    agent = cp.update_agent_key_scopes(agent["id"], ["automation:root", "automation:child", "automation:second"])
+    agent = cp.update_agent_key_scopes(
+        agent["id"], ["automation:root", "automation:child", "automation:second"]
+    )
     assert run(agent, 2)["code"] == "OK"
     assert calls == [tool, changed_tool]
 
 
 def test_loop_calls_have_distinct_deterministic_paths(nested):
     _, _, root, _, agent, calls = nested
-    root = cp.update_automation("root", {**root, "workflow": [
-        {"type": "loop", "items": [1, 2], "max_iterations": 2, "steps": [call("child")]}]})
+    root = cp.update_automation(
+        "root",
+        {
+            **root,
+            "workflow": [
+                {"type": "loop", "items": [1, 2], "max_iterations": 2, "steps": [call("child")]}
+            ],
+        },
+    )
     pub.publish("automation", "root", 2)
     result = run(agent, 2)
     assert result["code"] == "OK" and len(calls) == 2
@@ -94,7 +126,9 @@ def test_root_and_nested_scopes_are_intersected_before_any_dispatch(nested, scop
 
 def test_nested_dependency_revocation_and_digest_mismatch_fail(nested):
     _, child, root, _, agent, calls = nested
-    changed = cp.update_automation("root", {**root, "workflow": [call("child", publication_digest="0" * 64)]})
+    changed = cp.update_automation(
+        "root", {**root, "workflow": [call("child", publication_digest="0" * 64)]}
+    )
     with pytest.raises(pub.PublicationInvalid):
         pub.publish("automation", "root", changed["version"])
     cp.update_automation("child", {**child, "authorization": "blocked"})
@@ -105,8 +139,15 @@ def test_nested_dependency_revocation_and_digest_mismatch_fail(nested):
 
 def test_hidden_branch_dependencies_and_cross_version_cycles_rejected(nested):
     _, _, root, _, _, _ = nested
-    changed = cp.update_automation("root", {**root, "workflow": [
-        {"type": "condition", "left": False, "right": True, "then": [call("missing")]}]})
+    changed = cp.update_automation(
+        "root",
+        {
+            **root,
+            "workflow": [
+                {"type": "condition", "left": False, "right": True, "then": [call("missing")]}
+            ],
+        },
+    )
     with pytest.raises(pub.PublicationInvalid):
         pub.publish("automation", "root", changed["version"])
     changed = cp.update_automation("root", {**root, "workflow": [call("root", 1)]})
@@ -135,7 +176,9 @@ def test_expanded_depth_and_node_limits(nested):
 def test_ancestor_and_child_step_limits_cannot_reset(nested, limited):
     _, child, root, _, agent, calls = nested
     if limited == "child":
-        child = cp.update_automation("child", {**child, "policy": {"usage_limits": {"max_steps": 1}}})
+        child = cp.update_automation(
+            "child", {**child, "policy": {"usage_limits": {"max_steps": 1}}}
+        )
         pub.publish("automation", "child", child["version"])
         root = {**root, "workflow": [call("child", child["version"])]}
     else:
@@ -148,14 +191,18 @@ def test_ancestor_and_child_step_limits_cannot_reset(nested, limited):
 
 def test_root_deadline_survives_nested_entry(nested, monkeypatch):
     _, _, root, _, agent, calls = nested
-    changed = cp.update_automation("root", {**root, "policy": {"usage_limits": {"max_runtime_seconds": 3}}})
+    changed = cp.update_automation(
+        "root", {**root, "policy": {"usage_limits": {"max_runtime_seconds": 3}}}
+    )
     pub.publish("automation", "root", changed["version"])
     now = [0]
     monkeypatch.setattr(time, "monotonic", lambda: now[0])
+
     def dispatch(tool, args):
         calls.append(tool)
         now[0] = 4
         return {"ok": True, "result": {}}
+
     monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     assert run(agent, changed["version"])["code"] == "OUTCOME_UNKNOWN"
     assert len(calls) == 1
@@ -163,12 +210,15 @@ def test_root_deadline_survives_nested_entry(nested, monkeypatch):
 
 def test_unknown_nested_call_inside_retry_never_repeats_effect(nested, monkeypatch):
     _, _, root, _, agent, calls = nested
-    changed = cp.update_automation("root", {**root, "workflow": [
-        {"type": "retry", "max_attempts": 3, "step": call("child")}]})
+    changed = cp.update_automation(
+        "root", {**root, "workflow": [{"type": "retry", "max_attempts": 3, "step": call("child")}]}
+    )
     pub.publish("automation", "root", changed["version"])
+
     def lost(tool, args):
         calls.append(tool)
         raise TimeoutError("lost receipt")
+
     monkeypatch.setattr(invocation, "_dispatch_tool", lost)
     first = run(agent, changed["version"])
     assert first["code"] == "OUTCOME_UNKNOWN" and len(calls) == 1
@@ -191,7 +241,10 @@ def test_root_confirmation_binds_nested_publications(nested):
     assert view["action"]["publication"]["automations"] == pub.automation_bindings(publication)
     owner.decide(pending["request_id"], "approved", "All exact descendants")
     payload.approval_request_id = pending["request_id"]
-    assert automations_routes.run_automation("root", payload, agent)["code"] == "OK" and len(calls) == 1
+    assert (
+        automations_routes.run_automation("root", payload, agent)["code"] == "OK"
+        and len(calls) == 1
+    )
 
 
 def test_live_nested_execution_is_rejected_without_dispatch(nested):
@@ -205,11 +258,20 @@ def test_live_nested_execution_is_rejected_without_dispatch(nested):
 @pytest.mark.parametrize("revoked", ["root_policy", "nested_scope"])
 def test_mid_nested_revocation_stops_later_leaf_dispatch(nested, monkeypatch, revoked):
     _, child, root, _, agent, calls = nested
-    child = cp.update_automation("child", {**child, "workflow": [
-        {"type": "tool_call", "tool_id": "tool"}, {"type": "tool_call", "tool_id": "tool"}]})
+    child = cp.update_automation(
+        "child",
+        {
+            **child,
+            "workflow": [
+                {"type": "tool_call", "tool_id": "tool"},
+                {"type": "tool_call", "tool_id": "tool"},
+            ],
+        },
+    )
     pub.publish("automation", "child", child["version"])
     root = cp.update_automation("root", {**root, "workflow": [call("child", child["version"])]})
     pub.publish("automation", "root", root["version"])
+
     def dispatch(tool, args):
         calls.append(tool)
         if revoked == "root_policy":
@@ -217,6 +279,7 @@ def test_mid_nested_revocation_stops_later_leaf_dispatch(nested, monkeypatch, re
         else:
             cp.update_agent_key_scopes(agent["id"], ["automation:root"])
         return {"ok": True, "result": {}}
+
     monkeypatch.setattr(invocation, "_dispatch_tool", dispatch)
     assert run(agent, root["version"])["code"] == "OUTCOME_UNKNOWN"
     assert len(calls) == 1
@@ -224,33 +287,66 @@ def test_mid_nested_revocation_stops_later_leaf_dispatch(nested, monkeypatch, re
 
 def test_nested_paid_leaves_share_root_job_ceiling(nested):
     tool, child, root, _, agent, calls = nested
-    cp.update_tool("tool", {**tool, "execution": {"type": "gemini_generate", "model": spending.MODEL,
-        "prompt_template": "hello", "secret_ref": "REFERENCE_ONLY", "max_tokens": 128}})
+    cp.update_tool(
+        "tool",
+        {
+            **tool,
+            "execution": {
+                "type": "gemini_generate",
+                "model": spending.MODEL,
+                "prompt_template": "hello",
+                "secret_ref": "REFERENCE_ONLY",
+                "max_tokens": 128,
+            },
+        },
+    )
     child = cp.update_automation("child", child)
     pub.publish("automation", "child", child["version"])
     root = cp.update_automation("root", {**root, "workflow": [call("child", 2), call("child", 2)]})
     pub.publish("automation", "root", root["version"])
     spending.configure(True, 20_000_000, 1_100_000)
-    spending.set_price(spending.MODEL, 1_000_000, 2_000_000, time.time() + 3600, "https://provider.example/pricing")
+    spending.set_price(
+        spending.MODEL, 1_000_000, 2_000_000, time.time() + 3600, "https://provider.example/pricing"
+    )
     job = spending.create_job(agent["id"], "paid-root", 1_100_000)["job_id"]
     payload = models.V2Invoke(action_id="paid-root", published_version=root["version"], job_id=job)
     result = automations_routes.run_automation("root", payload, agent)
     assert result["code"] == "OUTCOME_UNKNOWN" and len(calls) == 1
     with cp._conn() as conn:
-        assert conn.execute("SELECT COUNT(*) FROM v2_spend_reservations WHERE job_id=?", (job,)).fetchone()[0] == 1
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM v2_spend_reservations WHERE job_id=?", (job,)
+            ).fetchone()[0]
+            == 1
+        )
     assert automations_routes.run_automation("root", payload, agent) == result and len(calls) == 1
 
 
 def test_nested_arguments_resolve_explicitly_without_sharing_variables(nested):
     _, child, root, _, agent, _ = nested
-    child = cp.update_automation("child", {**child, "inputs": [{"name": "value", "type": "string", "required": True}],
-        "workflow": [{"type": "set", "name": "secret", "value": "inner"},
-                     {"type": "return", "value": "$args.value"}]})
+    child = cp.update_automation(
+        "child",
+        {
+            **child,
+            "inputs": [{"name": "value", "type": "string", "required": True}],
+            "workflow": [
+                {"type": "set", "name": "secret", "value": "inner"},
+                {"type": "return", "value": "$args.value"},
+            ],
+        },
+    )
     pub.publish("automation", "child", child["version"])
-    root = cp.update_automation("root", {**root, "workflow": [
-        {"type": "set", "name": "secret", "value": "outer"},
-        call("child", child["version"], args={"value": "$vars.secret"}),
-        {"type": "return", "value": "$vars.secret"}]})
+    root = cp.update_automation(
+        "root",
+        {
+            **root,
+            "workflow": [
+                {"type": "set", "name": "secret", "value": "outer"},
+                call("child", child["version"], args={"value": "$vars.secret"}),
+                {"type": "return", "value": "$vars.secret"},
+            ],
+        },
+    )
     pub.publish("automation", "root", root["version"])
     result = run(agent, root["version"])
     assert result["result"]["result"] == "outer"
@@ -264,8 +360,13 @@ def test_http_nested_authoring_and_publication_contract(nested):
     client = TestClient(server.app)
     server.app.dependency_overrides[deps.require_admin] = lambda: "admin"
     try:
-        definition = {"id": "http-parent", "name": "HTTP parent", "description": "Nested source contract",
-                      "status": "active", "workflow": [call("child")]}
+        definition = {
+            "id": "http-parent",
+            "name": "HTTP parent",
+            "description": "Nested source contract",
+            "status": "active",
+            "workflow": [call("child")],
+        }
         created = client.post("/v2/automations", json=definition)
         assert created.status_code == 200, created.text
         published = client.post("/v2/automations/http-parent/publish", json={"expected_version": 1})

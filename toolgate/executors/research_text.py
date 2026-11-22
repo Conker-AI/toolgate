@@ -11,48 +11,144 @@ from html.parser import HTMLParser
 from toolgate.core.untrusted_text import strip_invisible
 
 INJECTION_RULES = (
-    ("instruction_override", re.compile(r"\b(ignore|disregard|override|forget)\b.{0,80}\b(previous|prior|system|developer|instructions?|prompt)\b", re.I | re.S)),
-    ("role_impersonation", re.compile(r"\b(system|developer|assistant)\s*(message|prompt|instruction)?\s*:", re.I)),
-    ("secret_request", re.compile(r"\b(reveal|print|send|upload|exfiltrate)\b.{0,80}\b(secret|credential|token|api[- _]?key|password|environment)\b", re.I | re.S)),
-    ("tool_command", re.compile(r"\b(run|execute|call)\b.{0,60}\b(toolgate|terminal|shell|powershell|bash|curl)\b", re.I | re.S)),
+    (
+        "instruction_override",
+        re.compile(
+            r"\b(ignore|disregard|override|forget)\b.{0,80}\b(previous|prior|system|developer|instructions?|prompt)\b",
+            re.I | re.S,
+        ),
+    ),
+    (
+        "role_impersonation",
+        re.compile(r"\b(system|developer|assistant)\s*(message|prompt|instruction)?\s*:", re.I),
+    ),
+    (
+        "secret_request",
+        re.compile(
+            r"\b(reveal|print|send|upload|exfiltrate)\b.{0,80}\b(secret|credential|token|api[- _]?key|password|environment)\b",
+            re.I | re.S,
+        ),
+    ),
+    (
+        "tool_command",
+        re.compile(
+            r"\b(run|execute|call)\b.{0,60}\b(toolgate|terminal|shell|powershell|bash|curl)\b",
+            re.I | re.S,
+        ),
+    ),
     ("encoded_payload", re.compile(r"\b(base64|jailbreak)\b", re.I)),
     ("hidden_instruction", re.compile(r"\b(decode this|hidden instructions?)\b", re.I)),
     ("encoded_blob", re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{96,}={0,2}(?![A-Za-z0-9+/])")),
-    ("model_directive", re.compile(r"\b(assistant|agent|model|ai|llm)s?\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b", re.I | re.S)),
+    (
+        "model_directive",
+        re.compile(
+            r"\b(assistant|agent|model|ai|llm)s?\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b",
+            re.I | re.S,
+        ),
+    ),
     # The same order to "you": how docs address their reader, so weak on its own.
-    ("reader_directive", re.compile(r"\byou\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b", re.I | re.S)),
-    ("prompt_probe", re.compile(r"\b(repeat|show|print|reveal)\b.{0,60}\b(system prompt|hidden instructions?|developer message)\b", re.I | re.S)),
+    (
+        "reader_directive",
+        re.compile(
+            r"\byou\b.{0,30}\b(must|should|need to|required to)\b.{0,100}\b(ignore|follow|obey|execute|call|reveal|send|open|visit)\b",
+            re.I | re.S,
+        ),
+    ),
+    (
+        "prompt_probe",
+        re.compile(
+            r"\b(repeat|show|print|reveal)\b.{0,60}\b(system prompt|hidden instructions?|developer message)\b",
+            re.I | re.S,
+        ),
+    ),
     # Pages written to agents ("to any AI reading this page") rather than to people.
-    ("agent_addressing", re.compile(r"\b(ai|llm|language model|assistant|agent|bot)s?\b.{0,40}\b(reading|processing|summari[sz]ing|crawling|browsing)\s+(this|these)\s+(page|text|document|content|site|website|message|post|email|article|file)s?\b", re.I | re.S)),
+    (
+        "agent_addressing",
+        re.compile(
+            r"\b(ai|llm|language model|assistant|agent|bot)s?\b.{0,40}\b(reading|processing|summari[sz]ing|crawling|browsing)\s+(this|these)\s+(page|text|document|content|site|website|message|post|email|article|file)s?\b",
+            re.I | re.S,
+        ),
+    ),
 )
 
 # Rules that speak to the model itself. The others (role labels such as "System:", "base64",
 # "jailbreak", long hex digests or tokens, "run ... in your terminal", "you should ... open") match
 # most READMEs, docs and Q&A answers, so on their own they do not withhold a page.
-STRONG_RULES = frozenset({
-    "instruction_override", "secret_request", "prompt_probe", "agent_addressing",
-    "model_directive", "hidden_instruction",
-})
+STRONG_RULES = frozenset(
+    {
+        "instruction_override",
+        "secret_request",
+        "prompt_probe",
+        "agent_addressing",
+        "model_directive",
+        "hidden_instruction",
+    }
+)
 
 
 SUPPRESSED_TAGS = {
-    "aside", "dialog", "footer", "form", "head", "header", "menu", "nav",
-    "noscript", "script", "style", "svg", "template",
+    "aside",
+    "dialog",
+    "footer",
+    "form",
+    "head",
+    "header",
+    "menu",
+    "nav",
+    "noscript",
+    "script",
+    "style",
+    "svg",
+    "template",
 }
 
 
 BLOCK_TAGS = {
-    "article", "blockquote", "br", "dd", "div", "dl", "dt", "figcaption",
-    "figure", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "li", "main",
-    "p", "pre", "section", "table", "td", "th", "tr",
+    "article",
+    "blockquote",
+    "br",
+    "dd",
+    "div",
+    "dl",
+    "dt",
+    "figcaption",
+    "figure",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "li",
+    "main",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "td",
+    "th",
+    "tr",
 }
 
 
 BOILERPLATE_MARKERS = {
-    "advertisement", "cookie", "cookie-banner", "cookie-consent", "modal",
-    "newsletter", "paywall", "popup", "privacy-banner", "subscribe",
+    "advertisement",
+    "cookie",
+    "cookie-banner",
+    "cookie-consent",
+    "modal",
+    "newsletter",
+    "paywall",
+    "popup",
+    "privacy-banner",
+    "subscribe",
     # Text a reader never sees but a model would: a common place to hide orders for agents.
-    "sr-only", "visually-hidden", "screen-reader-text", "d-none", "invisible",
+    "sr-only",
+    "visually-hidden",
+    "screen-reader-text",
+    "d-none",
+    "invisible",
 }
 
 
@@ -64,7 +160,21 @@ HIDDEN_STYLE = re.compile(
 )
 
 
-VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+VOID_TAGS = {
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "source",
+    "track",
+    "wbr",
+}
 
 
 class _TextExtractor(HTMLParser):
@@ -112,9 +222,15 @@ class _TextExtractor(HTMLParser):
 
 
 class _PublishedAtExtractor(HTMLParser):
-    ACCEPTED_META_KEYS = frozenset({
-        "article:published_time", "datepublished", "date-published", "publishdate", "pubdate",
-    })
+    ACCEPTED_META_KEYS = frozenset(
+        {
+            "article:published_time",
+            "datepublished",
+            "date-published",
+            "publishdate",
+            "pubdate",
+        }
+    )
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -123,10 +239,19 @@ class _PublishedAtExtractor(HTMLParser):
     def handle_starttag(self, tag: str, attrs) -> None:
         attributes = {str(key).lower(): str(value or "").strip() for key, value in attrs}
         if tag.lower() == "meta":
-            key = (attributes.get("property") or attributes.get("name") or attributes.get("itemprop") or "").lower()
+            key = (
+                attributes.get("property")
+                or attributes.get("name")
+                or attributes.get("itemprop")
+                or ""
+            ).lower()
             if key in self.ACCEPTED_META_KEYS and attributes.get("content"):
                 self.candidates.append((f"meta:{key}", attributes["content"]))
-        elif tag.lower() == "time" and attributes.get("itemprop", "").lower() == "datepublished" and attributes.get("datetime"):
+        elif (
+            tag.lower() == "time"
+            and attributes.get("itemprop", "").lower() == "datepublished"
+            and attributes.get("datetime")
+        ):
             self.candidates.append(("time:datePublished", attributes["datetime"]))
 
 

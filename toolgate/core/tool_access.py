@@ -31,8 +31,15 @@ def _not_found():
     return OwnerError("tool_not_found", "Tool not found.", 404)
 
 
-def access(identity, agent, payload: State | None = None, *, accept=None, not_found=_not_found,
-           event_prefix="tool_access"):
+def access(
+    identity,
+    agent,
+    payload: State | None = None,
+    *,
+    accept=None,
+    not_found=_not_found,
+    event_prefix="tool_access",
+):
     """The key's access to one tool; with a payload, grant or revoke it first.
 
     `accept(tool)` narrows which tools this route serves (the MCP route keeps its own)."""
@@ -71,7 +78,8 @@ def access(identity, agent, payload: State | None = None, *, accept=None, not_fo
             )
             if not payload.enabled and cp.is_scoped({**caller, "scopes": updated}, identity):
                 raise OwnerError(
-                    "broad_execution_grant", "A broader host-managed grant still covers this tool.",
+                    "broad_execution_grant",
+                    "A broader host-managed grant still covers this tool.",
                     409,
                 )
             conn.execute(

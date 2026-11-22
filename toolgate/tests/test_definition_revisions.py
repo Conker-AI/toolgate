@@ -1,4 +1,5 @@
 """Stored versions and optimistic definition saves serialize against SQLite writers."""
+
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -39,8 +40,10 @@ def test_expected_version_rejects_stale_write_without_mutation(database, kind):
     saved = update("item", {"name": "Current", "expected_version": 1})
     assert saved["version"] == 2
     assert "expected_version" not in saved
-    for save in [lambda: update("item", {"name": "Stale", "expected_version": 1}),
-                 lambda: create({"id": "item", "name": "Stale upsert", "expected_version": 1})]:
+    for save in [
+        lambda: update("item", {"name": "Stale", "expected_version": 1}),
+        lambda: create({"id": "item", "name": "Stale upsert", "expected_version": 1}),
+    ]:
         with pytest.raises(cp.DefinitionConflict) as error:
             save()
         assert error.value.current_version == 2
@@ -87,7 +90,11 @@ def test_http_conflict_validation_and_legacy_compatibility(database, kind):
     server.app.dependency_overrides[deps.require_admin] = lambda: "admin"
     try:
         client = TestClient(server.app)  # No lifespan: no bootstrap/provider activity.
-        body = {"id": "item", "name": "Item", "execution": {"type": "echo"}} if kind == "tool" else {"id": "item", "workflow": []}
+        body = (
+            {"id": "item", "name": "Item", "execution": {"type": "echo"}}
+            if kind == "tool"
+            else {"id": "item", "workflow": []}
+        )
         body.update(name="Item", description="Local definition revision test")
         url = f"/v2/{'tools' if kind == 'tool' else 'automations'}"
         assert client.post(url, json=body).status_code == 200
@@ -103,8 +110,10 @@ def test_http_conflict_validation_and_legacy_compatibility(database, kind):
         assert cp.events() == events_before
         assert client.put(url + "/item", json=body).json()["version"] == 3
         for invalid in [0, -1, True, 1.5, "3"]:
-            assert client.put(url + "/item", json={**body, "expected_version": invalid}).status_code == 422
+            assert (
+                client.put(url + "/item", json={**body, "expected_version": invalid}).status_code
+                == 422
+            )
         assert cp.get(kind, "item")["version"] == 3
     finally:
         server.app.dependency_overrides.pop(deps.require_admin, None)
-

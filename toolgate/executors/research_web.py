@@ -1,4 +1,5 @@
 """General web search: SearXNG and Tavily, with community snapshots and Reddit feed dates."""
+
 from __future__ import annotations
 
 import contextlib
@@ -32,18 +33,26 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
             # SearXNG already returns a bounded public excerpt. Keeping that
             # snapshot avoids direct Reddit scraping and preserves the same
             # injection scanning and short-lived provenance boundary as APIs.
-            published_at = item.get("published_at") or _reddit_rss_published_at(item["url"], min(timeout, 5))
+            published_at = item.get("published_at") or _reddit_rss_published_at(
+                item["url"], min(timeout, 5)
+            )
             return {
                 **item,
                 "published_at": published_at,
-                **({"recency_provenance": {"provider": "reddit_atom", "field": "entry.updated"}} if published_at else {}),
+                **(
+                    {"recency_provenance": {"provider": "reddit_atom", "field": "entry.updated"}}
+                    if published_at
+                    else {}
+                ),
                 "document": f"Reddit discussion excerpt: {item['title']}\n{clean_text(item['snippet'], 2400)}",
             }
         if source == "hackernews":
             match = re.search(r"[?&]id=(\d+)", item["url"])
             if not match:
                 return item
-            response = httpx.get(f"https://hn.algolia.com/api/v1/items/{match.group(1)}", timeout=timeout)
+            response = httpx.get(
+                f"https://hn.algolia.com/api/v1/items/{match.group(1)}", timeout=timeout
+            )
             response.raise_for_status()
             payload = json_body(response, "Hacker News")
             parts = [extract_html_text(payload.get("text") or "", 2400)]
@@ -52,14 +61,22 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
             discussion = clean_text("\n".join(part for part in parts if part), 6000)
             hydrated = dict(item)
             normalized = _normalize(
-                item.get("title"), item.get("url"), item.get("snippet"), source,
+                item.get("title"),
+                item.get("url"),
+                item.get("snippet"),
+                source,
                 item.get("published_at") or payload.get("created_at"),
             )
             if normalized and normalized.get("published_at"):
-                hydrated.update({
-                    "published_at": normalized["published_at"],
-                    "recency_provenance": {"provider": "hackernews_item", "field": "created_at"},
-                })
+                hydrated.update(
+                    {
+                        "published_at": normalized["published_at"],
+                        "recency_provenance": {
+                            "provider": "hackernews_item",
+                            "field": "created_at",
+                        },
+                    }
+                )
             if discussion:
                 hydrated["document"] = f"Hacker News discussion: {item['title']}\n{discussion}"
             return hydrated
@@ -70,12 +87,19 @@ def _community_snapshot(item: dict, source: str, timeout: float) -> dict:
             params = {"site": "stackoverflow", "filter": "withbody"}
             with contextlib.suppress(KeyError):
                 params["key"] = vault.get_key("STACKEXCHANGE_KEY")
-            response = httpx.get(f"https://api.stackexchange.com/2.3/questions/{match.group(1)}", params=params, timeout=timeout)
+            response = httpx.get(
+                f"https://api.stackexchange.com/2.3/questions/{match.group(1)}",
+                params=params,
+                timeout=timeout,
+            )
             response.raise_for_status()
             rows = json_body(response, "Stack Overflow").get("items", [])
             body = extract_html_text(rows[0].get("body") or "", 6000) if rows else ""
             if body:
-                return {**item, "document": f"Stack Overflow question: {item['title']}\nQuestion body: {body}"}
+                return {
+                    **item,
+                    "document": f"Stack Overflow question: {item['title']}\nQuestion body: {body}",
+                }
     except (httpx.HTTPError, ResearchError, KeyError, TypeError, ValueError):
         return item
     return item
@@ -105,7 +129,11 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
     source_domain = SOURCE_DOMAINS[source]
     domain = source_domain or _requested_site_domain(query)
     scoped_query = f"site:{domain} {query}" if source_domain else query
-    base_url = control_plane.settings().get("research_searxng_url", "http://toolgate-searxng:8080").rstrip("/")
+    base_url = (
+        control_plane.settings()
+        .get("research_searxng_url", "http://toolgate-searxng:8080")
+        .rstrip("/")
+    )
     headers = {"Accept": "application/json"}
     # The bundled instance has no proxy in front of it and wants a client address; any other
     # instance sees ToolGate as it is, so its own rate limits still apply.
@@ -113,9 +141,14 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
         headers |= {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
     response = httpx.get(
         f"{base_url}/search",
-        params={"q": scoped_query, "format": "json", "language": tool_settings.search_language(),
-                "safesearch": tool_settings.safe_search(), "categories": "general",
-                **_searx_time_range(recency_days)},
+        params={
+            "q": scoped_query,
+            "format": "json",
+            "language": tool_settings.search_language(),
+            "safesearch": tool_settings.safe_search(),
+            "categories": "general",
+            **_searx_time_range(recency_days),
+        },
         headers=headers,
         timeout=timeout,
     )
@@ -125,21 +158,32 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
     for row in rows:
         if len(results) >= limit:
             break
-        item = _normalize(row.get("title"), row.get("url"), row.get("content"), source, row.get("publishedDate"))
+        item = _normalize(
+            row.get("title"), row.get("url"), row.get("content"), source, row.get("publishedDate")
+        )
         # SearXNG's windows are coarse (a week for "last 3 days"), so dated rows are checked too.
         if item and _older_than(item, recency_days):
             continue
-        hostname = urlsplit(item["url"]).hostname.lower() if item and urlsplit(item["url"]).hostname else ""
-        if source == "general" and not domain and any(
-            hostname == blocked or hostname.endswith(f".{blocked}")
-            for blocked in GENERAL_EXCLUDED_DOMAINS
+        hostname = (
+            urlsplit(item["url"]).hostname.lower()
+            if item and urlsplit(item["url"]).hostname
+            else ""
+        )
+        if (
+            source == "general"
+            and not domain
+            and any(
+                hostname == blocked or hostname.endswith(f".{blocked}")
+                for blocked in GENERAL_EXCLUDED_DOMAINS
+            )
         ):
             continue
         if item and (not domain or hostname == domain or hostname.endswith(f".{domain}")):
             remaining = deadline - time.monotonic()
             results.append(
                 _community_snapshot(item, source, min(1.5, remaining))
-                if remaining >= 0.25 else item
+                if remaining >= 0.25
+                else item
             )
     return results
 
@@ -148,7 +192,9 @@ def _tavily(query: str, source: str, limit: int, recency_days: int, timeout: flo
     raise ResearchError("Tavily is disabled until it has a bounded spending adapter; use SearXNG")
 
 
-def _tavily_unmetered(query: str, source: str, limit: int, recency_days: int, timeout: float) -> list[dict]:
+def _tavily_unmetered(
+    query: str, source: str, limit: int, recency_days: int, timeout: float
+) -> list[dict]:
     deadline = time.monotonic() + max(1.0, timeout)
     _require_provider_ready("tavily")
     token = vault.get_key("TAVILY_API_KEY")
@@ -156,8 +202,8 @@ def _tavily_unmetered(query: str, source: str, limit: int, recency_days: int, ti
     domain = SOURCE_DOMAINS[source] or _requested_site_domain(query)
     provider_options = (
         {"include_domains": [domain]}
-        if domain else
-        {"exclude_domains": sorted(GENERAL_EXCLUDED_DOMAINS)}
+        if domain
+        else {"exclude_domains": sorted(GENERAL_EXCLUDED_DOMAINS)}
     )
     response = httpx.post(
         "https://api.tavily.com/search",
@@ -192,10 +238,17 @@ def _tavily_unmetered(query: str, source: str, limit: int, recency_days: int, ti
         if source == "reddit" and not published_at and remaining >= 0.25:
             published_at = _reddit_rss_published_at(str(row.get("url") or ""), min(1.5, remaining))
         item = _normalize(
-            row.get("title"), row.get("url"), extracted,
-            source, published_at,
+            row.get("title"),
+            row.get("url"),
+            extracted,
+            source,
+            published_at,
         )
-        hostname = urlsplit(item["url"]).hostname.lower() if item and urlsplit(item["url"]).hostname else ""
+        hostname = (
+            urlsplit(item["url"]).hostname.lower()
+            if item and urlsplit(item["url"]).hostname
+            else ""
+        )
         if item and (not domain or hostname == domain or hostname.endswith(f".{domain}")):
             normalized_result = {
                 **item,
@@ -220,13 +273,20 @@ def _reddit_rss_published_at(url: str, timeout: float) -> str | None:
     """Read the original post timestamp from Reddit's public Atom feed."""
     parsed = urlsplit(url)
     hostname = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or hostname not in {"reddit.com", "www.reddit.com"} or "/comments/" not in parsed.path:
+    if (
+        parsed.scheme != "https"
+        or hostname not in {"reddit.com", "www.reddit.com"}
+        or "/comments/" not in parsed.path
+    ):
         return None
     feed_url = f"https://www.reddit.com{parsed.path.rstrip('/')}.rss"
     try:
         response = httpx.get(
             feed_url,
-            headers={"User-Agent": "ToolGateResearch/2.0 (local owner-operated research)", "Accept": "application/atom+xml"},
+            headers={
+                "User-Agent": "ToolGateResearch/2.0 (local owner-operated research)",
+                "Accept": "application/atom+xml",
+            },
             timeout=timeout,
         )
         response.raise_for_status()

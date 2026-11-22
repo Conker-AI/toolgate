@@ -10,14 +10,18 @@ from toolgate.core.control_plane import _conn, _put, get
 def cache_research_result(result: dict, expires_at: str) -> dict:
     """Store a short-lived search result for provenance-bound page fetching."""
     result_id = "rr_" + secrets.token_urlsafe(18)
-    return _put("research_result", result_id, {
-        "title": result.get("title", ""),
-        "url": result["url"],
-        "source": result.get("source", "general"),
-        "published_at": result.get("published_at"),
-        "document": str(result.get("document", ""))[:20000] if result.get("document") else None,
-        "expires_at": expires_at,
-    })
+    return _put(
+        "research_result",
+        result_id,
+        {
+            "title": result.get("title", ""),
+            "url": result["url"],
+            "source": result.get("source", "general"),
+            "published_at": result.get("published_at"),
+            "document": str(result.get("document", ""))[:20000] if result.get("document") else None,
+            "expires_at": expires_at,
+        },
+    )
 
 
 def get_research_result(result_id: str) -> dict | None:

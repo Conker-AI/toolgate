@@ -206,11 +206,7 @@ class Envelope(Strict):
         if timestamp.tzinfo is None or not math.isfinite(timestamp.timestamp()):
             raise ValueError("timestamp")
         sections = [self.processes, self.containers, self.ports]
-        expected = (
-            "partial"
-            if any(s.status != "ok" or s.truncated for s in sections)
-            else "ok"
-        )
+        expected = "partial" if any(s.status != "ok" or s.truncated for s in sections) else "ok"
         if self.status != expected:
             raise ValueError("status")
         for section in sections:
@@ -291,10 +287,7 @@ def collect(limit=100, *, transport=None):
             ) as response:
                 if response.status_code != 200:
                     raise InventoryError("unavailable")
-                if (
-                    response.headers.get("content-encoding", "identity").lower()
-                    != "identity"
-                ):
+                if response.headers.get("content-encoding", "identity").lower() != "identity":
                     raise InventoryError("invalid_response")
                 raw = bytearray()
                 for chunk in response.iter_raw():
@@ -309,10 +302,7 @@ def collect(limit=100, *, transport=None):
         if key in json.dumps(data, ensure_ascii=False):
             raise InventoryError("invalid_response")
         result = Envelope.model_validate(data).model_dump()
-        if any(
-            len(result[s]["results"]) > limit
-            for s in ("processes", "containers", "ports")
-        ):
+        if any(len(result[s]["results"]) > limit for s in ("processes", "containers", "ports")):
             raise InventoryError("invalid_response")
         return result
     except InventoryError:

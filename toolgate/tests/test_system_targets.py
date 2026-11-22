@@ -34,8 +34,10 @@ def test_targets_are_configured_not_observed_and_require_scope(setup):
     assert client.get(route, headers=headers).status_code == 401
 
 
-@pytest.mark.parametrize("config,status", [(None, "not_configured"), ("bad", "invalid_configuration"),
-                                         ("[]", "configured")])
+@pytest.mark.parametrize(
+    "config,status",
+    [(None, "not_configured"), ("bad", "invalid_configuration"), ("[]", "configured")],
+)
 def test_configuration_states_are_honest(setup, monkeypatch, config, status):
     client, _, headers = setup
     if config is None:

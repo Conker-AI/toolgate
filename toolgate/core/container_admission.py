@@ -23,12 +23,19 @@ class ContainerBusy(ValueError):
 
 
 def reserve(conn, action_id, container_id):
-    if (not conn.in_transaction or not isinstance(container_id, str)
-            or not re.fullmatch(r"[a-f0-9]{64}", container_id)):
+    if (
+        not conn.in_transaction
+        or not isinstance(container_id, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", container_id)
+    ):
         raise ContainerBusy()
     parent = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
-    if (not parent or parent["subject_type"] != "tool" or parent["status"] != "dispatching"
-            or json.loads(parent["args"]).get("container_id") != container_id):
+    if (
+        not parent
+        or parent["subject_type"] != "tool"
+        or parent["status"] != "dispatching"
+        or json.loads(parent["args"]).get("container_id") != container_id
+    ):
         raise ContainerBusy()
     conflict = conn.execute(
         "SELECT 1 FROM v2_actions a LEFT JOIN v2_container_claims c ON c.action_id=a.action_id"
@@ -36,10 +43,13 @@ def reserve(conn, action_id, container_id):
         " AND (c.container_id=? OR (a.subject_type='tool'"
         " AND a.subject_id IN ('system.container-control','system.port-control')"
         " AND json_extract(a.args,'$.container_id')=?)) LIMIT 1",
-        (action_id, container_id, container_id),).fetchone()
+        (action_id, container_id, container_id),
+    ).fetchone()
     if conflict:
         raise ContainerBusy()
-    existing = conn.execute("SELECT container_id FROM v2_container_claims WHERE action_id=?", (action_id,)).fetchone()
+    existing = conn.execute(
+        "SELECT container_id FROM v2_container_claims WHERE action_id=?", (action_id,)
+    ).fetchone()
     if existing:
         if existing["container_id"] != container_id:
             raise ContainerBusy()

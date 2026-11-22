@@ -184,8 +184,12 @@ def test_reading_them_never_creates_the_database(tmp_path, monkeypatch):
 
 
 def test_one_value_this_version_no_longer_allows_drops_only_that_value(store):
-    stored = {"tool_seconds": 999, "web_skip_sites": ["example.com"], "web_safe_search": "strict",
-              "a_retired_setting": True}
+    stored = {
+        "tool_seconds": 999,
+        "web_skip_sites": ["example.com"],
+        "web_safe_search": "strict",
+        "a_retired_setting": True,
+    }
     cp._put("settings", "tools", {"settings": stored, "revision": 2})
     chosen = tool_settings.current()
     assert chosen.tool_seconds is None
@@ -208,7 +212,11 @@ def test_a_database_that_cannot_be_read_refuses_rather_than_dropping_the_owners_
     path = tmp_path / "gate.db"
     path.write_bytes(b"not a database " * 100)
     monkeypatch.setattr(cp, "DB_PATH", path)
-    for read in (tool_settings.current, tool_settings.skip_sites, lambda: tool_settings.seconds(30)):
+    for read in (
+        tool_settings.current,
+        tool_settings.skip_sites,
+        lambda: tool_settings.seconds(30),
+    ):
         with pytest.raises(OwnerError) as refused:
             read()
         assert (refused.value.code, refused.value.status) == ("settings_unreadable", 503)
@@ -231,8 +239,10 @@ def test_the_owner_route_says_when_the_settings_cannot_be_read(gate, monkeypatch
 def test_a_save_whose_event_cannot_be_written_is_not_applied(store):
     choose(tool_seconds=30)
     with closing(sqlite3.connect(cp.DB_PATH)) as db:
-        db.execute("CREATE TRIGGER no_events BEFORE INSERT ON v2_events "
-                   "BEGIN SELECT RAISE(ABORT, 'events refused'); END")
+        db.execute(
+            "CREATE TRIGGER no_events BEFORE INSERT ON v2_events "
+            "BEGIN SELECT RAISE(ABORT, 'events refused'); END"
+        )
         db.commit()
     with pytest.raises(sqlite3.Error):
         choose(tool_seconds=60)

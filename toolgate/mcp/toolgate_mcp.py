@@ -25,9 +25,7 @@ SERVER_VERSION = "0.17.0"
 def _request(method: str, path: str, body: dict | None = None) -> Any:
     key = os.environ.get("TOOLGATE_EXECUTION_KEY", "").strip()
     if not key:
-        raise RuntimeError(
-            "Set TOOLGATE_EXECUTION_KEY to a scoped agent key before starting MCP"
-        )
+        raise RuntimeError("Set TOOLGATE_EXECUTION_KEY to a scoped agent key before starting MCP")
     base = os.environ.get("TOOLGATE_URL", "http://127.0.0.1:8010").rstrip("/")
     url = urlsplit(base)
     if (
@@ -38,17 +36,12 @@ def _request(method: str, path: str, body: dict | None = None) -> Any:
         or url.query
         or url.fragment
         or url.path not in {"", "/"}
-        or (
-            url.scheme == "http"
-            and url.hostname not in {"localhost", "127.0.0.1", "::1"}
-        )
+        or (url.scheme == "http" and url.hostname not in {"localhost", "127.0.0.1", "::1"})
     ):
         raise RuntimeError("Set TOOLGATE_URL to an HTTPS origin, or HTTP on loopback")
     try:
         # Redirects and environment proxies must never receive the execution key.
-        with httpx.Client(
-            follow_redirects=False, trust_env=False, timeout=300
-        ) as client:
+        with httpx.Client(follow_redirects=False, trust_env=False, timeout=300) as client:
             response = client.request(
                 method,
                 base + path,
@@ -155,8 +148,14 @@ def _tool_input_schema(tool: dict) -> dict:
         "type": "object",
         "properties": {
             "args": args,
-            "action_id": {"type": "string", "description": "Stable ID for one logical action; reuse on retry."},
-            "job_id": {"type": "string", "description": "Owner-issued budget job shared by this workflow."},
+            "action_id": {
+                "type": "string",
+                "description": "Stable ID for one logical action; reuse on retry.",
+            },
+            "job_id": {
+                "type": "string",
+                "description": "Owner-issued budget job shared by this workflow.",
+            },
             "approval_request_id": {
                 "type": "string",
                 "description": "Exact approved request to consume once.",
@@ -199,9 +198,7 @@ def _invoke(tool_name: str, arguments: dict) -> dict:
     if not isinstance(arguments, dict):
         raise TypeError("Tool arguments must be an object")
     if tool_name == "toolgate_request_status":
-        return _request(
-            "GET", "/v2/agent/requests/" + quote(str(arguments["request_id"]), safe="")
-        )
+        return _request("GET", "/v2/agent/requests/" + quote(str(arguments["request_id"]), safe=""))
     tool = next(
         (item for item in _visible_tools() if _mcp_tool_name(item["id"]) == tool_name),
         None,
@@ -216,9 +213,7 @@ def _invoke(tool_name: str, arguments: dict) -> dict:
         raise RuntimeError(
             "Supply tool inputs inside args, with optional action_id, job_id and approval_request_id alongside"
         )
-    return _request(
-        "POST", "/v2/tools/" + quote(tool["id"], safe="") + "/invoke", arguments
-    )
+    return _request("POST", "/v2/tools/" + quote(tool["id"], safe="") + "/invoke", arguments)
 
 
 def respond(message_id: Any, result: Any = None, error: str | None = None) -> None:
@@ -276,9 +271,7 @@ def main() -> int:
                 raise TypeError("MCP request must be an object")
             _handle_request(request)
         except (RuntimeError, ValueError, KeyError, TypeError) as exc:
-            respond(
-                request.get("id") if isinstance(request, dict) else None, error=str(exc)
-            )
+            respond(request.get("id") if isinstance(request, dict) else None, error=str(exc))
     return 0
 
 

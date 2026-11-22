@@ -35,8 +35,13 @@ def setup(tmp_path, monkeypatch):
 
 
 def body(**changes):
-    return models.V2Invoke(**{"action_id": "service-action-01",
-                              "args": {"service_id": SERVICE, "action": "restart"}, **changes})
+    return models.V2Invoke(
+        **{
+            "action_id": "service-action-01",
+            "args": {"service_id": SERVICE, "action": "restart"},
+            **changes,
+        }
+    )
 
 
 def approve(agent):
@@ -50,8 +55,10 @@ def test_approval_binds_scope_target_action_and_replays_only_receipt(setup):
     agent, _, calls = setup
     pending = approve(agent)
     assert calls == []
-    changed = body(args={"service_id": "system:worker.service", "action": "restart"},
-                   approval_request_id=pending)
+    changed = body(
+        args={"service_id": "system:worker.service", "action": "restart"},
+        approval_request_id=pending,
+    )
     with pytest.raises(HTTPException):
         tools_routes.run_tool(TOOL, changed, agent)
     result = tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent)
@@ -88,8 +95,11 @@ def test_reserved_identity_and_confirmation_cannot_be_replaced(setup):
     _, _, calls = setup
     tool = cp.get("tool", TOOL)
     assert definitions.tool_definition_errors(tool) == []
-    for changes in ({"authorization": "auto"}, {"execution": {"type": "echo"}},
-                    {"execution": {"type": "process_control", "command": "whoami"}}):
+    for changes in (
+        {"authorization": "auto"},
+        {"execution": {"type": "echo"}},
+        {"execution": {"type": "process_control", "command": "whoami"}},
+    ):
         value = {**tool, **changes}
         assert definitions.tool_definition_errors(value)
         assert invocation._dispatch_tool(value, body().args)["ok"] is False
@@ -126,8 +136,10 @@ def test_actual_adapter_runs_fixed_arguments_behind_approved_journal(tmp_path, m
         assert kwargs["shell"] is False
         assert kwargs["stdin"] == kwargs["stderr"] == subprocess.DEVNULL
         invocations.append(argv)
-        result = (b"Id=worker.service\nLoadState=loaded\nActiveState=active\n"
-                  b"SubState=running\nMainPID=1234\n")
+        result = (
+            b"Id=worker.service\nLoadState=loaded\nActiveState=active\n"
+            b"SubState=running\nMainPID=1234\n"
+        )
         return subprocess.CompletedProcess(argv, 0, stdout=result)
 
     actual = process_control.control
@@ -138,7 +150,14 @@ def test_actual_adapter_runs_fixed_arguments_behind_approved_journal(tmp_path, m
     assert result["code"] == "OK"
     assert result["result"]["result"]["serviceId"] == SERVICE
     assert len(invocations) == 3
-    assert invocations[1] == ["/usr/bin/systemctl", "--user", "--no-pager", "--no-ask-password",
-                              "restart", "--", "worker.service"]
+    assert invocations[1] == [
+        "/usr/bin/systemctl",
+        "--user",
+        "--no-pager",
+        "--no-ask-password",
+        "restart",
+        "--",
+        "worker.service",
+    ]
     assert tools_routes.run_tool(TOOL, body(approval_request_id=pending), agent) == result
     assert len(invocations) == 3

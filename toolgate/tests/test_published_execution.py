@@ -17,15 +17,33 @@ from toolgate.core import publications as pub
 @pytest.fixture
 def published(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "published-runs.db")
-    tool = cp.create_tool({"id": "child", "name": "Child", "description": "Local echo",
-                           "execution": {"type": "echo"}, "status": "active"})
-    flow = cp.create_automation({"id": "flow", "name": "Flow", "description": "Local workflow",
-                                 "status": "active", "workflow": [{"type": "tool_call", "tool_id": "child"}]})
+    tool = cp.create_tool(
+        {
+            "id": "child",
+            "name": "Child",
+            "description": "Local echo",
+            "execution": {"type": "echo"},
+            "status": "active",
+        }
+    )
+    flow = cp.create_automation(
+        {
+            "id": "flow",
+            "name": "Flow",
+            "description": "Local workflow",
+            "status": "active",
+            "workflow": [{"type": "tool_call", "tool_id": "child"}],
+        }
+    )
     pub.publish("tool", "child", 1)
     pub.publish("automation", "flow", 1)
     agent, _ = cp.issue_agent_key("Caller", ["child", "automation:flow"])
     calls = []
-    monkeypatch.setattr(invocation, "_dispatch_tool", lambda tool, args: calls.append(tool) or {"ok": True, "result": {}})
+    monkeypatch.setattr(
+        invocation,
+        "_dispatch_tool",
+        lambda tool, args: calls.append(tool) or {"ok": True, "result": {}},
+    )
     return tool, flow, agent, calls
 
 
@@ -33,7 +51,9 @@ def test_published_workflow_uses_exact_old_workflow_and_child_after_edits(publis
     tool, flow, agent, calls = published
     cp.update_tool("child", {**tool, "execution": {"type": "local_echo"}})
     cp.update_automation("flow", {**flow, "workflow": [{"type": "return", "value": "new"}]})
-    payload = models.V2Invoke(action_id="published-run", published_version=1, job_id="scheduled-job")
+    payload = models.V2Invoke(
+        action_id="published-run", published_version=1, job_id="scheduled-job"
+    )
     result = automations_routes.run_automation("flow", payload, agent)
     assert result["code"] == "OK"
     assert calls == [tool]
@@ -59,7 +79,9 @@ def test_publication_is_part_of_idempotency_identity(published, kind):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("edit", ["blocked", "inactive", "policy", "confirmation", "delete", "recreate"])
+@pytest.mark.parametrize(
+    "edit", ["blocked", "inactive", "policy", "confirmation", "delete", "recreate"]
+)
 def test_current_revocation_of_child_prevents_published_dispatch(published, edit):
     tool, _, agent, calls = published
     if edit in {"delete", "recreate"}:
@@ -67,12 +89,17 @@ def test_current_revocation_of_child_prevents_published_dispatch(published, edit
         if edit == "recreate":
             cp.create_tool(tool)
     else:
-        fields = {"blocked": {"authorization": "blocked"}, "inactive": {"status": "inactive"},
-                  "policy": {"policy": {"usage_limits": {"max_per_day": 1}}},
-                  "confirmation": {"authorization": "owner_confirmation"}}[edit]
+        fields = {
+            "blocked": {"authorization": "blocked"},
+            "inactive": {"status": "inactive"},
+            "policy": {"policy": {"usage_limits": {"max_per_day": 1}}},
+            "confirmation": {"authorization": "owner_confirmation"},
+        }[edit]
         cp.update_tool("child", {**tool, **fields})
     with pytest.raises(pub.PublicationInvalid):
-        automations_routes.run_automation("flow", models.V2Invoke(action_id="revoked", published_version=1), agent)
+        automations_routes.run_automation(
+            "flow", models.V2Invoke(action_id="revoked", published_version=1), agent
+        )
     assert calls == [] and journal.get("revoked") is None
 
 
@@ -84,7 +111,10 @@ def test_confirmation_binds_publication_and_survives_definition_only_edits(publi
     payload = models.V2Invoke(action_id="confirm", published_version=2)
     pending = automations_routes.run_automation("flow", payload, agent)
     request = cp.get("request", pending["request_id"])
-    assert request["payload"]["binding"]["publication_digest"] == pub.get("automation", "flow", 2, published=True)["digest"]
+    assert (
+        request["payload"]["binding"]["publication_digest"]
+        == pub.get("automation", "flow", 2, published=True)["digest"]
+    )
     approvals.decide_request(pending["request_id"], "approved", "owner")
     payload.approval_request_id = pending["request_id"]
     cp.update_tool("child", {**tool, "name": "Renamed after approval"})
@@ -100,8 +130,13 @@ def test_live_approval_cannot_authorize_published_tool(published):
     pending = tools_routes.run_tool("child", models.V2Invoke(action_id="approve"), agent)
     approvals.decide_request(pending["request_id"], "approved", "owner")
     with pytest.raises(HTTPException) as error:
-        tools_routes.run_tool("child", models.V2Invoke(action_id="approve", published_version=2,
-                        approval_request_id=pending["request_id"]), agent)
+        tools_routes.run_tool(
+            "child",
+            models.V2Invoke(
+                action_id="approve", published_version=2, approval_request_id=pending["request_id"]
+            ),
+            agent,
+        )
     assert error.value.detail["code"] == "APPROVAL_INVALID"
     assert calls == [] and journal.get("approve") is None
     assert cp.get("request", pending["request_id"])["payload"]["binding"]["consumed_at"] is None
@@ -113,9 +148,17 @@ def test_http_missing_publication_never_falls_back_and_validation_is_strict(publ
     try:
         client = TestClient(server.app)
         url = "/v2/automations/flow/run"
-        assert client.post(url, json={"action_id": "missing", "published_version": 99}).status_code == 409
+        assert (
+            client.post(url, json={"action_id": "missing", "published_version": 99}).status_code
+            == 409
+        )
         for invalid in [0, True, "1"]:
-            assert client.post(url, json={"action_id": "invalid", "published_version": invalid}).status_code == 422
+            assert (
+                client.post(
+                    url, json={"action_id": "invalid", "published_version": invalid}
+                ).status_code
+                == 422
+            )
         assert client.post(url, json={"published_version": 1}).status_code == 422
         assert calls == []
     finally:
@@ -125,25 +168,40 @@ def test_http_missing_publication_never_falls_back_and_validation_is_strict(publ
 def test_current_scope_and_lockdown_still_apply(published):
     _, _, agent, calls = published
     with pytest.raises(HTTPException):
-        automations_routes.run_automation("flow", models.V2Invoke(action_id="scope", published_version=1), {**agent, "scopes": []})
+        automations_routes.run_automation(
+            "flow", models.V2Invoke(action_id="scope", published_version=1), {**agent, "scopes": []}
+        )
     cp.set_lockdown(True, "owner")
     with pytest.raises(HTTPException) as error:
-        automations_routes.run_automation("flow", models.V2Invoke(action_id="lock", published_version=1), agent)
+        automations_routes.run_automation(
+            "flow", models.V2Invoke(action_id="lock", published_version=1), agent
+        )
     assert error.value.detail["code"] == "LOCKED_DOWN"
     assert calls == []
 
 
 def test_owner_published_review_projects_exact_target_and_rechecks_revocation(published):
     tool, flow, agent, _ = published
-    flow = cp.update_automation("flow", {**flow, "authorization": "owner_confirmation",
-                                         "inputs": [{"name": "exact", "type": "string"}]})
+    flow = cp.update_automation(
+        "flow",
+        {
+            **flow,
+            "authorization": "owner_confirmation",
+            "inputs": [{"name": "exact", "type": "string"}],
+        },
+    )
     publication = pub.publish("automation", "flow", 2)
-    pending = automations_routes.run_automation("flow", models.V2Invoke(action_id="owner-review", published_version=2,
-                                                          args={"exact": "arguments"}), agent)
+    pending = automations_routes.run_automation(
+        "flow",
+        models.V2Invoke(action_id="owner-review", published_version=2, args={"exact": "arguments"}),
+        agent,
+    )
     view = owner.get(pending["request_id"])
     assert view["reviewable"] and view["action"]["args"] == {"exact": "arguments"}
     assert view["action"]["publication"]["digest"] == publication["digest"]
-    assert view["action"]["publication"]["dependencies"] == approvals.child_bindings({"child": tool})
+    assert view["action"]["publication"]["dependencies"] == approvals.child_bindings(
+        {"child": tool}
+    )
     cp.update_tool("child", {**tool, "authorization": "blocked"})
     assert owner.get(pending["request_id"])["unavailable_reason"] == "publication_unavailable"
     with pytest.raises(owner.OwnerError):
@@ -153,6 +211,7 @@ def test_owner_published_review_projects_exact_target_and_rechecks_revocation(pu
 
 def test_tampered_publication_digest_cannot_be_reviewed_or_consumed(published):
     import json
+
     _, flow, agent, calls = published
     flow = cp.update_automation("flow", {**flow, "authorization": "owner_confirmation"})
     pub.publish("automation", "flow", 2)
@@ -163,7 +222,10 @@ def test_tampered_publication_digest_cannot_be_reviewed_or_consumed(published):
     request = cp.get("request", identity)
     request["payload"]["binding"]["publication_digest"] = "0" * 64
     with cp._conn() as conn:
-        conn.execute("UPDATE v2_objects SET body=? WHERE kind='request' AND id=?", (json.dumps(request), identity))
+        conn.execute(
+            "UPDATE v2_objects SET body=? WHERE kind='request' AND id=?",
+            (json.dumps(request), identity),
+        )
     assert owner.get(identity)["unavailable_reason"] == "invalid_origin"
     payload.approval_request_id = identity
     with pytest.raises(HTTPException) as error:
@@ -174,9 +236,11 @@ def test_tampered_publication_digest_cannot_be_reviewed_or_consumed(published):
 
 def test_unknown_published_receipt_retains_identity_and_never_redispatches(published, monkeypatch):
     _, _, agent, calls = published
+
     def lost_reply(tool, args):
         calls.append(tool)
         raise TimeoutError("lost reply")
+
     monkeypatch.setattr(invocation, "_dispatch_tool", lost_reply)
     payload = models.V2Invoke(action_id="unknown", published_version=1)
     first = tools_routes.run_tool("child", payload, agent)
@@ -192,9 +256,24 @@ def test_journal_upgrade_preserves_legacy_receipts(published):
         conn.execute("DROP TABLE v2_actions")
         conn.execute("DROP TABLE v2_schema_migrations")
         conn.executescript(journal.SCHEMA.replace("    publication_digest TEXT,\n", ""))
-        conn.execute("INSERT INTO v2_actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (
-            "legacy", journal.fingerprint("tool", "child", {}, "caller", None, None),
-            "caller", "tool", "child", 1, "{}", None, None, "completed", '{"code":"OK"}', 1, 1))
+        conn.execute(
+            "INSERT INTO v2_actions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "legacy",
+                journal.fingerprint("tool", "child", {}, "caller", None, None),
+                "caller",
+                "tool",
+                "child",
+                1,
+                "{}",
+                None,
+                None,
+                "completed",
+                '{"code":"OK"}',
+                1,
+                1,
+            ),
+        )
     record = journal.existing("legacy", "tool", "child", {}, "caller")
     assert record["publication_digest"] is None
     assert journal.response(record) == {"code": "OK", "action_id": "legacy", "status": "completed"}
@@ -205,12 +284,16 @@ def test_journal_upgrade_preserves_legacy_receipts(published):
 def test_revocation_race_at_dispatch_boundary_fails_without_effect(published, monkeypatch):
     tool, _, agent, calls = published
     original = journal.begin
+
     def revoke_then_begin(*args, **kwargs):
         cp.update_tool("child", {**tool, "authorization": "blocked"})
         return original(*args, **kwargs)
+
     monkeypatch.setattr(journal, "begin", revoke_then_begin)
     with pytest.raises(HTTPException):
-        tools_routes.run_tool("child", models.V2Invoke(action_id="race", published_version=1), agent)
+        tools_routes.run_tool(
+            "child", models.V2Invoke(action_id="race", published_version=1), agent
+        )
     assert calls == [] and journal.get("race") is None
 
 
@@ -226,4 +309,7 @@ def test_published_tool_owner_approval_and_journal_digest_immutability(published
     assert tools_routes.run_tool("child", payload, agent)["code"] == "OK"
     assert calls == [tool]
     with pytest.raises(sqlite3.IntegrityError), cp._conn() as conn:
-        conn.execute("UPDATE v2_actions SET publication_digest=? WHERE action_id=?", ("0" * 64, payload.action_id))
+        conn.execute(
+            "UPDATE v2_actions SET publication_digest=? WHERE action_id=?",
+            ("0" * 64, payload.action_id),
+        )

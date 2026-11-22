@@ -30,15 +30,24 @@ def _bindings(value):
             if not isinstance(entry, dict):
                 raise PlanError("invalid")
             port, address = entry.get("HostPort"), entry.get("HostIp")
-            if (not isinstance(port, str)
-                    or not re.fullmatch(r"[1-9][0-9]{0,4}", port)
-                    or int(port) > 65535
-                    or not isinstance(address, str) or not address):
+            if (
+                not isinstance(port, str)
+                or not re.fullmatch(r"[1-9][0-9]{0,4}", port)
+                or int(port) > 65535
+                or not isinstance(address, str)
+                or not address
+            ):
                 # Empty/zero ports are requests for daemon allocation. They cannot
                 # be frozen as exact replacements without a resolved observation.
                 raise PlanError("unsupported")
-            result.append({"containerPort": int(match[1]), "protocol": match[2],
-                           "hostAddress": address, "hostPort": int(port)})
+            result.append(
+                {
+                    "containerPort": int(match[1]),
+                    "protocol": match[2],
+                    "hostAddress": address,
+                    "hostPort": int(port),
+                }
+            )
             if len(result) > 200:
                 raise PlanError("invalid")
     return result
@@ -76,9 +85,15 @@ def from_inspection(container_id, inspection, operation, *, mapping=None, origin
                     # because runtime publication data is absent or incomplete.
                     raise PlanError("unsupported")
         result = plan(
-            container_id, _bindings(bindings), operation, mapping=mapping,
-            original=original, running=running, network_mode=host["NetworkMode"],
-            publish_all=host["PublishAllPorts"], auto_remove=host["AutoRemove"],
+            container_id,
+            _bindings(bindings),
+            operation,
+            mapping=mapping,
+            original=original,
+            running=running,
+            network_mode=host["NetworkMode"],
+            publish_all=host["PublishAllPorts"],
+            auto_remove=host["AutoRemove"],
         )
         result["bindingSource"] = "observed" if running else "configured"
         return result
@@ -98,12 +113,18 @@ def preview(container_id, operation, *, mapping=None, original=None, transport=N
     deadline = time.monotonic() + docker.DEADLINE_SECONDS
     try:
         with httpx.Client(
-            base_url="http://docker", transport=transport or httpx.HTTPTransport(uds=configuration[0]),
-            timeout=httpx.Timeout(12.0, connect=2.0), trust_env=False,
-            follow_redirects=False, headers={"Accept-Encoding": "identity"},
+            base_url="http://docker",
+            transport=transport or httpx.HTTPTransport(uds=configuration[0]),
+            timeout=httpx.Timeout(12.0, connect=2.0),
+            trust_env=False,
+            follow_redirects=False,
+            headers={"Accept-Encoding": "identity"},
         ) as client:
             status, body = docker._read(
-                client, "GET", f"/v1.45/containers/{container_id}/json", deadline,
+                client,
+                "GET",
+                f"/v1.45/containers/{container_id}/json",
+                deadline,
             )
         if docker._configuration(container_id) != configuration:
             raise docker.ControlError("configuration_changed")
@@ -111,12 +132,15 @@ def preview(container_id, operation, *, mapping=None, original=None, transport=N
             raise docker.ControlError("unavailable")
         try:
             inspection = json.loads(
-                body, object_pairs_hook=docker._pairs,
+                body,
+                object_pairs_hook=docker._pairs,
                 parse_constant=lambda value: (_ for _ in ()).throw(ValueError()),
             )
         except (ValueError, RecursionError):
             raise docker.ControlError("invalid_response") from None
-        return from_inspection(container_id, inspection, operation, mapping=mapping, original=original)
+        return from_inspection(
+            container_id, inspection, operation, mapping=mapping, original=original
+        )
     except (PlanError, docker.ControlError):
         raise
     except (httpx.HTTPError, OSError):

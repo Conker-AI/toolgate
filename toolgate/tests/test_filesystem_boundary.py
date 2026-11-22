@@ -22,8 +22,14 @@ def setup(tmp_path, monkeypatch):
 
     def listing(*args):
         calls.append(args)
-        return {"mode": "observed", "rootId": "project", "path": "", "entries": [],
-                "truncated": False, "sampledAt": "2026-09-21T12:00:00+00:00"}
+        return {
+            "mode": "observed",
+            "rootId": "project",
+            "path": "",
+            "entries": [],
+            "truncated": False,
+            "sampledAt": "2026-09-21T12:00:00+00:00",
+        }
 
     monkeypatch.setattr(files, "list_directory", listing)
     return agent, key, calls

@@ -39,9 +39,7 @@ def test_a_tool_called_inside_a_branch_links_its_automation():
             },
             {
                 "id": "a2",
-                "workflow": [
-                    {"type": "loop", "steps": [{"type": "tool_call", "tool_id": "t1"}]}
-                ],
+                "workflow": [{"type": "loop", "steps": [{"type": "tool_call", "tool_id": "t1"}]}],
             },
             {"id": "a3", "workflow": [{"type": "tool_call", "tool_id": "t2"}]},
         ],

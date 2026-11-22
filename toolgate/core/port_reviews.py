@@ -38,34 +38,60 @@ def initialize(conn):
 
 
 def _public(row):
-    return {"reviewId": row["id"], "preview": json.loads(row["preview"]),
-            "expiresAt": row["expires_at"], "consumed": row["consumed_action"] is not None,
-            "expired": row["expires_at"] <= time.time()}
+    return {
+        "reviewId": row["id"],
+        "preview": json.loads(row["preview"]),
+        "expiresAt": row["expires_at"],
+        "consumed": row["consumed_action"] is not None,
+        "expired": row["expires_at"] <= time.time(),
+    }
 
 
 def create(actor_id, replacement, *, ttl=300):
-    if (not isinstance(actor_id, str) or not actor_id or len(actor_id) > 200
-            or not isinstance(replacement, Replacement) or type(ttl) is not int or not 1 <= ttl <= 600):
+    if (
+        not isinstance(actor_id, str)
+        or not actor_id
+        or len(actor_id) > 200
+        or not isinstance(replacement, Replacement)
+        or type(ttl) is not int
+        or not 1 <= ttl <= 600
+    ):
         raise ReviewError()
     review_id = secrets.token_hex(24)
     expires = time.time() + ttl
     public = json.dumps(replacement.preview, allow_nan=False)
-    payload = json.dumps({"reviewId": review_id, "actorId": actor_id, "expiresAt": expires,
-                          "preview": replacement.preview, "body": replacement._body,
-                          "source": replacement._source, "name": replacement.name}, allow_nan=False)
+    payload = json.dumps(
+        {
+            "reviewId": review_id,
+            "actorId": actor_id,
+            "expiresAt": expires,
+            "preview": replacement.preview,
+            "body": replacement._body,
+            "source": replacement._source,
+            "name": replacement.name,
+        },
+        allow_nan=False,
+    )
     if len(payload.encode()) > 2 * 1024 * 1024:
         raise ReviewError()
     sealed = vault._encrypt(payload)
     with cp._conn() as conn:
         initialize(conn)
-        conn.execute("INSERT INTO v2_port_reviews VALUES (?,?,?,?,?,NULL)", (review_id, actor_id, public, sealed, expires))
-        return _public(conn.execute("SELECT * FROM v2_port_reviews WHERE id=?", (review_id,)).fetchone())
+        conn.execute(
+            "INSERT INTO v2_port_reviews VALUES (?,?,?,?,?,NULL)",
+            (review_id, actor_id, public, sealed, expires),
+        )
+        return _public(
+            conn.execute("SELECT * FROM v2_port_reviews WHERE id=?", (review_id,)).fetchone()
+        )
 
 
 def get(review_id, actor_id):
     with cp._conn() as conn:
         initialize(conn)
-        row = conn.execute("SELECT * FROM v2_port_reviews WHERE id=? AND actor_id=?", (review_id, actor_id)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM v2_port_reviews WHERE id=? AND actor_id=?", (review_id, actor_id)
+        ).fetchone()
         if not row:
             raise ReviewError()
         return _public(row)
@@ -73,7 +99,9 @@ def get(review_id, actor_id):
 
 def consume_in_transaction(conn, review_id, actor_id, action_id):
     """Journal.reserve callback, after owner approval and parent INSERT, same txn."""
-    row = conn.execute("SELECT * FROM v2_port_reviews WHERE id=? AND actor_id=?", (review_id, actor_id)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM v2_port_reviews WHERE id=? AND actor_id=?", (review_id, actor_id)
+    ).fetchone()
     if not row or row["consumed_action"] is not None or row["expires_at"] <= time.time():
         raise ReviewError()
     parent = records._parent(conn, action_id, active=True)
@@ -84,11 +112,16 @@ def consume_in_transaction(conn, review_id, actor_id, action_id):
         if not row["sealed"].startswith(vault.ENCRYPTED_PREFIX):
             raise ReviewError()
         payload = json.loads(vault._decrypt("port review", row["sealed"]))
-        if (payload["reviewId"] != review_id or payload["actorId"] != actor_id
-                or payload["expiresAt"] != row["expires_at"]
-                or payload["preview"] != json.loads(row["preview"])):
+        if (
+            payload["reviewId"] != review_id
+            or payload["actorId"] != actor_id
+            or payload["expiresAt"] != row["expires_at"]
+            or payload["preview"] != json.loads(row["preview"])
+        ):
             raise ReviewError()
-        replacement = Replacement(payload["preview"], payload["body"], payload["source"], payload["name"])
+        replacement = Replacement(
+            payload["preview"], payload["body"], payload["source"], payload["name"]
+        )
     except (vault.VaultError, KeyError, ValueError, TypeError):
         raise ReviewError() from None
     records.save_in_transaction(conn, action_id, replacement)

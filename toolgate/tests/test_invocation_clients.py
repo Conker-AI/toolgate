@@ -1,4 +1,5 @@
 """Invocation metadata must survive both CLI and MCP envelopes."""
+
 import importlib.machinery
 import importlib.util
 from pathlib import Path
@@ -17,12 +18,29 @@ def test_cli_preserves_action_job_and_arguments(tmp_path, monkeypatch, command):
     loader.exec_module(module)
     calls = []
     monkeypatch.setattr(module, "_request", lambda *args, **kw: calls.append((args, kw)) or 0)
-    monkeypatch.setattr(module.sys, "argv", ["toolgate", *command, "--value", "hello",
-                                            "--action-id", "123", "--job-id", "job-one",
-                                            "--approval-request-id", "approval-one"])
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "toolgate",
+            *command,
+            "--value",
+            "hello",
+            "--action-id",
+            "123",
+            "--job-id",
+            "job-one",
+            "--approval-request-id",
+            "approval-one",
+        ],
+    )
     assert module.main() == 0
-    assert calls[0][0][2] == {"args": {"value": "hello"}, "action_id": "123",
-                             "job_id": "job-one", "approval_request_id": "approval-one"}
+    assert calls[0][0][2] == {
+        "args": {"value": "hello"},
+        "action_id": "123",
+        "job_id": "job-one",
+        "approval_request_id": "approval-one",
+    }
 
 
 def test_mcp_preserves_action_job_and_arguments(monkeypatch):

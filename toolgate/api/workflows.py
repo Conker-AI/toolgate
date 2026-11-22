@@ -269,10 +269,12 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
                         step.get("steps", []), state, actor, approval_granted
                     )
                     if final is not None:
-                        state["results"].append({
-                            "type": kind,
-                            "result": {"code": "LOOP_RETURNED", "iterations": iterations},
-                        })
+                        state["results"].append(
+                            {
+                                "type": kind,
+                                "result": {"code": "LOOP_RETURNED", "iterations": iterations},
+                            }
+                        )
                         return final
             finally:
                 if had_previous:
@@ -286,10 +288,12 @@ def _run_workflow_steps(steps: list, state: dict, actor: str, approval_granted: 
                 try:
                     final = _run_workflow_steps([step["step"]], state, actor, approval_granted)
                     if final is not None:
-                        state["results"].append({
-                            "type": kind,
-                            "result": {"code": "RETRY_COMPLETE", "attempts": attempt + 1},
-                        })
+                        state["results"].append(
+                            {
+                                "type": kind,
+                                "result": {"code": "RETRY_COMPLETE", "attempts": attempt + 1},
+                            }
+                        )
                         return final
                     last_error = None
                     break

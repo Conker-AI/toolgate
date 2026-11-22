@@ -6,14 +6,22 @@ from toolgate.tests.test_owner_channel import ADMIN, HEADERS, gate  # noqa: F401
 
 
 def save(client, value=None, revision=0):
-    return client.post("/v2/owner/editor-drafts/example", headers=HEADERS, json={
-        "expected_revision": revision,
-        "document": value or linear(("result", "return", {"value": 7}))})
+    return client.post(
+        "/v2/owner/editor-drafts/example",
+        headers=HEADERS,
+        json={
+            "expected_revision": revision,
+            "document": value or linear(("result", "return", {"value": 7})),
+        },
+    )
 
 
 def publish(client, revision=1, previous=0, **fields):
-    return client.post("/v2/owner/editor-drafts/example/publish", headers=HEADERS, json={
-        "expected_revision": revision, "expected_publication_version": previous, **fields})
+    return client.post(
+        "/v2/owner/editor-drafts/example/publish",
+        headers=HEADERS,
+        json={"expected_revision": revision, "expected_publication_version": previous, **fields},
+    )
 
 
 def test_owner_publication_is_atomic_versioned_and_does_not_grant_execution(gate):
@@ -31,19 +39,25 @@ def test_owner_publication_is_atomic_versioned_and_does_not_grant_execution(gate
     second = publish(client, revision=2, previous=1)
     assert second.status_code == 200, second.text
     assert second.json()["version"] == 2
-    history = client.get("/v2/owner/editor-drafts/example/publications", headers=HEADERS).json()["items"]
+    history = client.get("/v2/owner/editor-drafts/example/publications", headers=HEADERS).json()[
+        "items"
+    ]
     assert [row["revision"] for row in history] == [2, 1]
     assert all(row["available"] for row in history)
 
 
 def test_missing_dependency_rolls_back_definition_and_publication(gate):
     client = gate[0]
-    graph = linear(("call", "tool_call", {"tool": "missing", "args": {}}),
-                   ("result", "return", {"value": "$last"}))
+    graph = linear(
+        ("call", "tool_call", {"tool": "missing", "args": {}}),
+        ("result", "return", {"value": "$last"}),
+    )
     assert save(client, graph).status_code == 200
     assert publish(client).status_code == 422
     assert cp.list_objects("automation") == []
-    assert client.get("/v2/owner/editor-drafts/example/publications", headers=HEADERS).json() == {"items": []}
+    assert client.get("/v2/owner/editor-drafts/example/publications", headers=HEADERS).json() == {
+        "items": []
+    }
 
 
 def test_channels_and_exact_saved_revision_are_enforced(gate):

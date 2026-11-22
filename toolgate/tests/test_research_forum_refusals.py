@@ -48,10 +48,16 @@ def feed(*entries):
     return f'<?xml version="1.0"?><feed xmlns="{ATOM}">{body}</feed>'.encode()
 
 
-def entry(title, updated, href="https://www.reddit.com/r/smallbusiness/comments/a/b/",
-          content="We copy every invoice by hand and dispatch takes hours."):
-    return (f"<entry><title>{title}</title><updated>{updated}</updated>"
-            f'<link rel="alternate" href="{href}" /><content type="html">{content}</content></entry>')
+def entry(
+    title,
+    updated,
+    href="https://www.reddit.com/r/smallbusiness/comments/a/b/",
+    content="We copy every invoice by hand and dispatch takes hours.",
+):
+    return (
+        f"<entry><title>{title}</title><updated>{updated}</updated>"
+        f'<link rel="alternate" href="{href}" /><content type="html">{content}</content></entry>'
+    )
 
 
 def now(days=0):
@@ -65,14 +71,21 @@ def test_hackernews_skips_untitled_and_dead_stories_and_stops_at_the_limit(monke
     hits = [
         {"story_title": "", "story_id": 1, "comment_text": "no title"},
         {"story_title": "[dead]", "story_id": 2, "comment_text": "dead story"},
-        {"story_title": "Invoices by hand", "story_id": 3, "comment_text": "<p>We still type them.</p>",
-         "created_at": "2026-07-01T00:00:00Z"},
+        {
+            "story_title": "Invoices by hand",
+            "story_id": 3,
+            "comment_text": "<p>We still type them.</p>",
+            "created_at": "2026-07-01T00:00:00Z",
+        },
         {"story_title": "Second story", "story_id": 4, "comment_text": "also manual"},
     ]
     calls = serve(monkeypatch, lambda url, **_: answer(json={"hits": hits}))
     rows = research_forums._hackernews("invoices", "hackernews", 1, 30, 5)
     assert [row["url"] for row in rows] == ["https://news.ycombinator.com/item?id=3"]
-    assert rows[0]["document"] == "Hacker News story: Invoices by hand\nPublic comment: We still type them."
+    assert (
+        rows[0]["document"]
+        == "Hacker News story: Invoices by hand\nPublic comment: We still type them."
+    )
     assert "<p>" not in rows[0]["snippet"]
     params = calls[0][1]["params"]
     assert params["tags"] == "comment" and params["hitsPerPage"] == 4
@@ -107,8 +120,16 @@ def test_reddit_search_skips_bad_dates_old_and_future_entries_and_stops_at_the_l
         entry("Bad date dispatch invoice", "not-a-date"),
         entry("Old dispatch invoice", now(400)),
         entry("Future dispatch invoice", (datetime.now(UTC) + timedelta(days=5)).isoformat()),
-        entry("Dispatch invoice pain", now(), href="https://www.reddit.com/r/smallbusiness/comments/c/d/"),
-        entry("Dispatch invoice again", now(), href="https://www.reddit.com/r/smallbusiness/comments/e/f/"),
+        entry(
+            "Dispatch invoice pain",
+            now(),
+            href="https://www.reddit.com/r/smallbusiness/comments/c/d/",
+        ),
+        entry(
+            "Dispatch invoice again",
+            now(),
+            href="https://www.reddit.com/r/smallbusiness/comments/e/f/",
+        ),
     )
     calls = serve(monkeypatch, lambda url, **_: answer(content=body))
     rows = research_forums._reddit_rss_search("dispatch invoice", "reddit", 1, 30, 5)
@@ -135,13 +156,18 @@ def test_reddit_search_refuses_an_oversized_or_malformed_feed(monkeypatch):
 def test_reddit_search_drops_entries_that_do_not_match_the_terms(monkeypatch):
     body = feed(entry("Gardening tips", now(), content="Tomatoes grow well in pots."))
     serve(monkeypatch, lambda url, **_: answer(content=body))
-    assert research_forums._reddit_rss_search('"dispatch board" invoices hours', "reddit", 5, 90, 5) == []
+    assert (
+        research_forums._reddit_rss_search('"dispatch board" invoices hours', "reddit", 5, 90, 5)
+        == []
+    )
 
 
 # Reddit subreddit feed
 
 
-def test_subreddit_feed_cools_down_after_a_quota_refusal_and_then_refuses_without_a_call(monkeypatch):
+def test_subreddit_feed_cools_down_after_a_quota_refusal_and_then_refuses_without_a_call(
+    monkeypatch,
+):
     calls = serve(monkeypatch, lambda url, **_: answer(429, url=url))
     with pytest.raises(httpx.HTTPStatusError):
         research_forums._reddit_subreddit_feed("subreddit:smallbusiness", "reddit", 5, 90, 5)
@@ -172,7 +198,9 @@ def test_subreddit_feed_skips_bad_dates_old_entries_and_stops_at_the_limit(monke
         entry("Bad date", "yesterday"),
         entry("Old post", now(200)),
         entry("Fresh post", now(), href="https://www.reddit.com/r/smallbusiness/comments/g/h/"),
-        entry("Another fresh post", now(), href="https://www.reddit.com/r/smallbusiness/comments/i/j/"),
+        entry(
+            "Another fresh post", now(), href="https://www.reddit.com/r/smallbusiness/comments/i/j/"
+        ),
     )
     serve(monkeypatch, lambda url, **_: answer(content=body))
     rows = research_forums._reddit_subreddit_feed("subreddit:smallbusiness", "reddit", 1, 90, 5)
@@ -204,7 +232,11 @@ def test_subreddit_fallbacks_keep_only_that_communitys_threads(monkeypatch, name
         return rows
 
     monkeypatch.setattr(research_forums, name, provider)
-    wrapper = research_forums._reddit_subreddit_searx if name == "_searx" else research_forums._reddit_subreddit_tavily
+    wrapper = (
+        research_forums._reddit_subreddit_searx
+        if name == "_searx"
+        else research_forums._reddit_subreddit_tavily
+    )
     assert wrapper("subreddit:smallbusiness", "reddit", 5, 90, 5) == rows[:1]
     assert seen == ["site:reddit.com/r/smallbusiness manual workflow software problem"]
 
@@ -237,15 +269,25 @@ def test_discourse_stops_searching_when_the_deadline_is_spent(monkeypatch):
 def search_page(host):
     return {
         "topics": [
-            {"id": 1, "title": "Invoice reconciliation", "slug": "Bad Slug!", "archetype": "regular"},
+            {
+                "id": 1,
+                "title": "Invoice reconciliation",
+                "slug": "Bad Slug!",
+                "archetype": "regular",
+            },
             {"id": 2, "title": "Private message", "slug": "pm", "archetype": "private_message"},
         ],
         "posts": [
             "not an object",
             {"topic_id": 99, "post_number": 1, "blurb": "topic missing"},
             {"topic_id": 2, "post_number": 1, "blurb": "a private message"},
-            {"topic_id": 1, "post_number": 3, "username": "helper", "blurb": f"invoice reply on {host}",
-             "created_at": "2026-07-02T00:00:00Z"},
+            {
+                "topic_id": 1,
+                "post_number": 3,
+                "username": "helper",
+                "blurb": f"invoice reply on {host}",
+                "created_at": "2026-07-02T00:00:00Z",
+            },
         ],
     }
 
@@ -263,7 +305,9 @@ def test_discourse_skips_broken_posts_and_keeps_unhydrated_topics(monkeypatch):
         if host == second:
             return answer(json={"post_stream": {"posts": []}}, url=url)
         if host == third:
-            return answer(json={"post_stream": {"posts": [{"post_number": 1, "cooked": ""}]}}, url=url)
+            return answer(
+                json={"post_stream": {"posts": [{"post_number": 1, "cooked": ""}]}}, url=url
+            )
         return answer(json={"post_stream": {"posts": [{"post_number": "x"}]}}, url=url)
 
     serve(monkeypatch, handler)

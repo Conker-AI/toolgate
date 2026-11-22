@@ -29,24 +29,36 @@ def setup(tmp_path, monkeypatch):
     builtin_capabilities.ensure_builtin_system_capabilities()
     daemon = Daemon()
     inspect, execute = port_control.inspect_review, port_control.execute
-    monkeypatch.setattr(port_control, "inspect_review", lambda *args, **kw: inspect(
-        *args, **kw, transport=httpx.MockTransport(daemon.handle)))
-    monkeypatch.setattr(port_control, "execute", lambda *args, **kw: execute(
-        *args, **kw, transport=httpx.MockTransport(daemon.handle)))
+    monkeypatch.setattr(
+        port_control,
+        "inspect_review",
+        lambda *args, **kw: inspect(*args, **kw, transport=httpx.MockTransport(daemon.handle)),
+    )
+    monkeypatch.setattr(
+        port_control,
+        "execute",
+        lambda *args, **kw: execute(*args, **kw, transport=httpx.MockTransport(daemon.handle)),
+    )
     agent, key = cp.issue_agent_key("Port controls", [f"tool:{TOOL}"])
     return daemon, agent, key
 
 
 def review(agent):
-    response = system_routes.create_port_review(models.PortReviewRequest(
-        container_id=CID, operation="create", mapping=MAPPING), agent)
+    response = system_routes.create_port_review(
+        models.PortReviewRequest(container_id=CID, operation="create", mapping=MAPPING), agent
+    )
     assert response.headers["cache-control"] == "no-store"
     return json.loads(response.body)
 
 
 def payload(review_id, **changes):
-    return models.V2Invoke(**{"action_id": "change-1",
-                             "args": {"container_id": CID, "review_id": review_id}, **changes})
+    return models.V2Invoke(
+        **{
+            "action_id": "change-1",
+            "args": {"container_id": CID, "review_id": review_id},
+            **changes,
+        }
+    )
 
 
 def test_full_review_owner_approval_real_executor_receipt_replay(setup):
@@ -78,7 +90,10 @@ def test_review_http_auth_scope_and_private_projection(setup):
     body = {"container_id": CID, "operation": "create", "mapping": MAPPING}
     assert client.post(path, json=body).status_code == 401
     _other, other_key = cp.issue_agent_key("Other", ["tool:system.inventory"])
-    assert client.post(path, json=body, headers={"X-ToolGate-Execution-Key": other_key}).status_code == 403
+    assert (
+        client.post(path, json=body, headers={"X-ToolGate-Execution-Key": other_key}).status_code
+        == 403
+    )
     response = client.post(path, json=body, headers={"X-ToolGate-Execution-Key": key})
     assert response.status_code == 200, response.text
     assert "private-value" not in response.text and response.headers["cache-control"] == "no-store"
@@ -91,7 +106,9 @@ def test_changed_review_cannot_borrow_approval(setup):
     pending = tools_routes.run_tool(TOOL, payload(first["reviewId"]), agent)
     approvals.decide_request(pending["request_id"], "approved", "owner")
     with pytest.raises(HTTPException):
-        tools_routes.run_tool(TOOL, payload(second["reviewId"], approval_request_id=pending["request_id"]), agent)
+        tools_routes.run_tool(
+            TOOL, payload(second["reviewId"], approval_request_id=pending["request_id"]), agent
+        )
     assert journal.get("change-1") is None
     assert all(request.method == "GET" for request in daemon.requests)
 

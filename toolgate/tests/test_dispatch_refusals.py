@@ -12,7 +12,11 @@ from toolgate.executors import container_control, process_control, research_base
 
 
 def tool(kind, **execution):
-    return {"id": f"t.{kind}", "authorization": "owner_confirmation", "execution": {"type": kind, **execution}}
+    return {
+        "id": f"t.{kind}",
+        "authorization": "owner_confirmation",
+        "execution": {"type": kind, **execution},
+    }
 
 
 def refusal(call, *args):
@@ -28,7 +32,10 @@ def test_templates_render_inside_lists_and_keep_other_values():
 
 def test_a_result_path_must_exist_in_the_upstream_answer():
     assert dispatch._extract_result({"data": {"items": [1]}}, "data.items") == [1]
-    assert refusal(dispatch._extract_result, {"data": {}}, "data.items") == (502, "UPSTREAM_SCHEMA_ERROR")
+    assert refusal(dispatch._extract_result, {"data": {}}, "data.items") == (
+        502,
+        "UPSTREAM_SCHEMA_ERROR",
+    )
 
 
 def ok_research(monkeypatch):
@@ -57,7 +64,9 @@ RESEARCH = [
 
 
 @pytest.mark.parametrize(("definition", "args", "code", "status"), RESEARCH)
-def test_research_results_pass_through_and_refusals_keep_their_reason(monkeypatch, definition, args, code, status):
+def test_research_results_pass_through_and_refusals_keep_their_reason(
+    monkeypatch, definition, args, code, status
+):
     ok_research(monkeypatch)
     assert dispatch._dispatch_tool(definition, args)["ok"] is True
     failing_research(monkeypatch)
@@ -75,8 +84,11 @@ def test_memorygate_reads_need_their_credential(monkeypatch):
         raise KeyError(_ref)
 
     monkeypatch.setattr(dispatch.vault, "get_key", missing)
-    assert refusal(dispatch._dispatch_tool, tool("memorygate", operation="ask", secret_ref="MG_KEY"),
-                   {"question": "q"}) == (503, "SECRET_UNAVAILABLE")
+    assert refusal(
+        dispatch._dispatch_tool,
+        tool("memorygate", operation="ask", secret_ref="MG_KEY"),
+        {"question": "q"},
+    ) == (503, "SECRET_UNAVAILABLE")
 
 
 def test_memorygate_answers_and_failures(monkeypatch):
@@ -87,39 +99,69 @@ def test_memorygate_answers_and_failures(monkeypatch):
         return httpx.Response(200, json={"items": []}, request=httpx.Request("POST", url))
 
     definition = memorygate(monkeypatch, answer)
-    assert dispatch._dispatch_tool(definition, {"query": "q"}) == {"ok": True, "result": {"items": []}}
-    assert sent["url"].endswith("/runtime/context") and sent["headers"]["X-MemoryGate-Key"] == "mg-read-key"
+    assert dispatch._dispatch_tool(definition, {"query": "q"}) == {
+        "ok": True,
+        "result": {"items": []},
+    }
+    assert (
+        sent["url"].endswith("/runtime/context")
+        and sent["headers"]["X-MemoryGate-Key"] == "mg-read-key"
+    )
     assert sent["json"] == {"query": "q", "max_items": 12, "include_evidence": False}
 
     def broken(url, **_kwargs):
         return httpx.Response(500, request=httpx.Request("POST", url))
 
     definition = memorygate(monkeypatch, broken)
-    assert refusal(dispatch._dispatch_tool, definition, {"query": "q"}) == (502, "MEMORYGATE_UNAVAILABLE")
+    assert refusal(dispatch._dispatch_tool, definition, {"query": "q"}) == (
+        502,
+        "MEMORYGATE_UNAVAILABLE",
+    )
 
 
 def test_a_local_ai_answer_without_text_is_a_failure(monkeypatch):
     monkeypatch.setattr(dispatch.pi_inference, "configured", lambda: None)
     monkeypatch.setattr(dispatch.control_plane, "settings", lambda: {})
-    monkeypatch.setattr(dispatch.httpx, "post",
-                        lambda url, **_k: httpx.Response(200, json={}, request=httpx.Request("POST", url)))
-    assert refusal(dispatch._dispatch_tool, tool("ollama_generate", prompt_template="Hi {name}"),
-                   {"name": "Ann"}) == (502, "AI_UNAVAILABLE")
+    monkeypatch.setattr(
+        dispatch.httpx,
+        "post",
+        lambda url, **_k: httpx.Response(200, json={}, request=httpx.Request("POST", url)),
+    )
+    assert refusal(
+        dispatch._dispatch_tool,
+        tool("ollama_generate", prompt_template="Hi {name}"),
+        {"name": "Ann"},
+    ) == (502, "AI_UNAVAILABLE")
 
 
 def test_hosted_ai_refuses_unbounded_models_and_prompts_before_sending():
-    assert refusal(dispatch._execute_gemini, {"model": "other", "prompt_template": "x"}, {}) == (422, "AI_MODEL_DENIED")
+    assert refusal(dispatch._execute_gemini, {"model": "other", "prompt_template": "x"}, {}) == (
+        422,
+        "AI_MODEL_DENIED",
+    )
     model = dispatch.spending.MODEL
-    assert refusal(dispatch._execute_gemini, {"model": model, "prompt_template": "{text}"},
-                   {"text": "x" * 20001}) == (422, "VALIDATION_ERROR")
+    assert refusal(
+        dispatch._execute_gemini,
+        {"model": model, "prompt_template": "{text}"},
+        {"text": "x" * 20001},
+    ) == (422, "VALIDATION_ERROR")
 
 
-@pytest.mark.parametrize(("kind", "module", "target"), [
-    ("process_control", process_control, "service_id"),
-    ("container_control", container_control, "container_id"),
-])
-def test_lifecycle_tools_take_exactly_their_two_arguments_and_report_refusals(monkeypatch, kind, module, target):
-    definition = {"id": f"t.{kind}", "authorization": "owner_confirmation", "execution": {"type": kind}}
+@pytest.mark.parametrize(
+    ("kind", "module", "target"),
+    [
+        ("process_control", process_control, "service_id"),
+        ("container_control", container_control, "container_id"),
+    ],
+)
+def test_lifecycle_tools_take_exactly_their_two_arguments_and_report_refusals(
+    monkeypatch, kind, module, target
+):
+    definition = {
+        "id": f"t.{kind}",
+        "authorization": "owner_confirmation",
+        "execution": {"type": kind},
+    }
     assert dispatch._dispatch_tool(definition, {target: "x"})["error_code"] == "invalid_arguments"
 
     def refuse(*_a):
@@ -132,4 +174,7 @@ def test_lifecycle_tools_take_exactly_their_two_arguments_and_report_refusals(mo
 
 def test_an_unknown_executor_never_runs():
     result = dispatch._dispatch_tool({"id": "t.x", "execution": {"type": "shell"}}, {})
-    assert result == {"ok": False, "error": "No restricted executor is configured for this typed tool."}
+    assert result == {
+        "ok": False,
+        "error": "No restricted executor is configured for this typed tool.",
+    }

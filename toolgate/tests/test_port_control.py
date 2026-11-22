@@ -60,7 +60,9 @@ class Daemon:
         elif path.endswith("/rename"):
             self.original["Name"] = "/" + request.url.params["name"]
         elif path.endswith("/update"):
-            self.original["HostConfig"]["RestartPolicy"] = json.loads(request.content)["RestartPolicy"]
+            self.original["HostConfig"]["RestartPolicy"] = json.loads(request.content)[
+                "RestartPolicy"
+            ]
             status = 200
         elif path.endswith("/disconnect"):
             assert json.loads(request.content) == {"Container": CID, "Force": False}
@@ -73,8 +75,11 @@ class Daemon:
             assert body["Env"] == ["SECRET=private-value"]
             self.replacement = source()
             self.replacement.update(Id=NEW, Image=IMAGE, HostConfig=body["HostConfig"])
-            self.replacement["Config"] = {key: value for key, value in body.items()
-                                          if key not in ("HostConfig", "NetworkingConfig")}
+            self.replacement["Config"] = {
+                key: value
+                for key, value in body.items()
+                if key not in ("HostConfig", "NetworkingConfig")
+            }
             self.replacement["State"].update(Running=False, Status="created")
             self.replacement["NetworkSettings"]["Ports"] = body["HostConfig"]["PortBindings"]
             status, response = 201, {"Id": NEW}
@@ -83,7 +88,9 @@ class Daemon:
             self.replacement["State"].update(Running=True, Status="running")
         else:
             raise AssertionError(path)
-        return httpx.Response(status, stream=Stream(json.dumps(response).encode() if response else b""))
+        return httpx.Response(
+            status, stream=Stream(json.dumps(response).encode() if response else b"")
+        )
 
 
 @pytest.fixture
@@ -101,7 +108,9 @@ def setup(tmp_path, monkeypatch):
 
 
 def run(daemon, authorize=lambda conn: None):
-    return port_control.execute(daemon.action_id, authorize=authorize, transport=httpx.MockTransport(daemon.handle))
+    return port_control.execute(
+        daemon.action_id, authorize=authorize, transport=httpx.MockTransport(daemon.handle)
+    )
 
 
 def test_actual_executor_uses_journal_and_preserves_original(setup):
@@ -110,7 +119,16 @@ def test_actual_executor_uses_journal_and_preserves_original(setup):
     assert setup.original["State"]["Running"] is False
     assert setup.original["HostConfig"]["RestartPolicy"]["Name"] == "no"
     assert setup.replacement["HostConfig"]["RestartPolicy"]["Name"] == "unless-stopped"
-    assert [x["name"] for x in records.steps("change-1")] == ["stop", "snapshot", "retire", "rename", "disconnect", "create", "start", "verify"]
+    assert [x["name"] for x in records.steps("change-1")] == [
+        "stop",
+        "snapshot",
+        "retire",
+        "rename",
+        "disconnect",
+        "create",
+        "start",
+        "verify",
+    ]
     assert all(x["status"] == "observed" for x in records.steps("change-1"))
     assert all(request.method != "DELETE" for request in setup.requests)
     assert "private-value" not in json.dumps(result)
@@ -120,7 +138,9 @@ def test_actual_executor_uses_journal_and_preserves_original(setup):
     assert len(setup.requests) == count
 
 
-@pytest.mark.parametrize("phase", ["/stop", "/commit", "/update", "/rename", "/disconnect", "/create", "/start"])
+@pytest.mark.parametrize(
+    "phase", ["/stop", "/commit", "/update", "/rename", "/disconnect", "/create", "/start"]
+)
 def test_lost_reply_halts_and_never_retries_any_effect(setup, phase):
     setup.fail = phase
     with pytest.raises(port_control.ReplacementUnknown) as error:
@@ -186,7 +206,12 @@ def test_revocation_between_steps_stops_further_effects(setup, monkeypatch):
         count += 1
         if count == 2:
             raise PermissionError("revoked")
+
     with pytest.raises(port_control.ReplacementUnknown):
         run(setup, authorize)
-    assert [request.url.path.rsplit("/", 1)[-1] for request in setup.requests if request.method == "POST"] == ["stop"]
+    assert [
+        request.url.path.rsplit("/", 1)[-1]
+        for request in setup.requests
+        if request.method == "POST"
+    ] == ["stop"]
     assert journal.get("change-1")["status"] == "outcome_unknown"

@@ -227,7 +227,8 @@ def test_a_lost_answer_after_start_is_unknown_and_the_container_still_goes(make)
 
 
 @pytest.mark.parametrize(
-    ("error", "code"), [("docker_500: no such volume", "start_failed"), ("docker_unreachable: X", "outcome_unknown")]
+    ("error", "code"),
+    [("docker_500: no such volume", "start_failed"), ("docker_unreachable: X", "outcome_unknown")],
 )
 def test_a_refused_start_is_a_failure_a_lost_one_unknown(make, error, code):
     sandbox, docker, _ = make()

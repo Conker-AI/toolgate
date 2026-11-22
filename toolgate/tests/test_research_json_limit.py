@@ -47,7 +47,8 @@ class ResearchJsonLimitTests(unittest.TestCase):
             response = Mock()
             response.content = at_limit + b" "
             with self.assertRaisesRegex(
-                research_base.ResearchError, "Example response exceeded the safe size limit",
+                research_base.ResearchError,
+                "Example response exceeded the safe size limit",
             ):
                 research_base.json_body(response, "Example", limit=64)
 
@@ -71,20 +72,38 @@ class ResearchJsonLimitTests(unittest.TestCase):
     def test_discourse_skips_oversized_host_and_uses_the_next_host(self):
         first, second = research_base.DISCOURSE_HOSTS[0], research_base.DISCOURSE_HOSTS[1]
         normal_search = {
-            "topics": [{
-                "id": 2, "title": "Invoice reconciliation on community.n8n.io",
-                "slug": "invoice-reconciliation-2", "archetype": "regular",
-                "created_at": "2026-07-01T00:00:00Z",
-            }],
-            "posts": [{
-                "id": 12, "topic_id": 2, "post_number": 2, "username": "helper2",
-                "created_at": "2026-07-02T00:00:00Z", "blurb": "<p>Try a scheduled workflow.</p>",
-            }],
+            "topics": [
+                {
+                    "id": 2,
+                    "title": "Invoice reconciliation on community.n8n.io",
+                    "slug": "invoice-reconciliation-2",
+                    "archetype": "regular",
+                    "created_at": "2026-07-01T00:00:00Z",
+                }
+            ],
+            "posts": [
+                {
+                    "id": 12,
+                    "topic_id": 2,
+                    "post_number": 2,
+                    "username": "helper2",
+                    "created_at": "2026-07-02T00:00:00Z",
+                    "blurb": "<p>Try a scheduled workflow.</p>",
+                }
+            ],
         }
-        normal_topic = {"post_stream": {"posts": [{
-            "post_number": 1, "username": "owner2", "created_at": "2026-07-01T00:00:00Z",
-            "cooked": "<p>At our company, we manually reconcile invoices every week.</p>",
-        }]}}
+        normal_topic = {
+            "post_stream": {
+                "posts": [
+                    {
+                        "post_number": 1,
+                        "username": "owner2",
+                        "created_at": "2026-07-01T00:00:00Z",
+                        "cooked": "<p>At our company, we manually reconcile invoices every week.</p>",
+                    }
+                ]
+            }
+        }
 
         def fake_get(url, **_kwargs):
             response = Mock()
@@ -104,7 +123,11 @@ class ResearchJsonLimitTests(unittest.TestCase):
             patch.object(research_forums.time, "monotonic", return_value=0.0),
         ):
             rows = research_forums._discourse(
-                "invoice reconciliation workflow", "discourse", 6, 365, 5,
+                "invoice reconciliation workflow",
+                "discourse",
+                6,
+                365,
+                5,
             )
         self.assertEqual([second], [row["community"] for row in rows])
         self.assertTrue(all("manually reconcile" in row["document"] for row in rows))
@@ -122,23 +145,37 @@ class ResearchJsonLimitTests(unittest.TestCase):
     def test_youtube_skips_a_video_whose_comments_are_oversized(self):
         videos = Mock()
         videos.raise_for_status.return_value = None
-        videos.json.return_value = {"items": [
-            {"id": {"videoId": "abcdefghijk"}, "snippet": {"title": "Oversized comments"}},
-            {"id": {"videoId": "bcdefghijkl"}, "snippet": {"title": "Spreadsheet workflows"}},
-        ]}
+        videos.json.return_value = {
+            "items": [
+                {"id": {"videoId": "abcdefghijk"}, "snippet": {"title": "Oversized comments"}},
+                {"id": {"videoId": "bcdefghijkl"}, "snippet": {"title": "Spreadsheet workflows"}},
+            ]
+        }
         comments = Mock()
         comments.raise_for_status.return_value = None
-        comments.json.return_value = {"items": [{"snippet": {"topLevelComment": {
-            "id": "comment_12345", "snippet": {
-                "textOriginal": "We manually copy every invoice and it takes hours.",
-                "likeCount": 12, "publishedAt": "2026-07-29T10:00:00Z",
-            },
-        }}}]}
+        comments.json.return_value = {
+            "items": [
+                {
+                    "snippet": {
+                        "topLevelComment": {
+                            "id": "comment_12345",
+                            "snippet": {
+                                "textOriginal": "We manually copy every invoice and it takes hours.",
+                                "likeCount": 12,
+                                "publishedAt": "2026-07-29T10:00:00Z",
+                            },
+                        }
+                    }
+                }
+            ]
+        }
         with (
             patch.object(research_sites.vault, "get_key", return_value="test-google-key"),
             patch.object(research_base, "_public_https_url", return_value=True),
             patch.object(
-                research_sites.httpx, "get", side_effect=[videos, oversized_response(), comments],
+                research_sites.httpx,
+                "get",
+                side_effect=[videos, oversized_response(), comments],
             ),
         ):
             rows = research_sites._youtube("invoice workflow complaints", "youtube", 5, 30, 5)

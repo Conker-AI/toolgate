@@ -40,16 +40,11 @@ def _mapping(value, *, editable=False):
 
 
 def _identity(value):
-    return tuple(
-        value[key] for key in ("protocol", "hostAddress", "hostPort", "containerPort")
-    )
+    return tuple(value[key] for key in ("protocol", "hostAddress", "hostPort", "containerPort"))
 
 
 def _conflicts(first, second):
-    if (
-        first["protocol"] != second["protocol"]
-        or first["hostPort"] != second["hostPort"]
-    ):
+    if first["protocol"] != second["protocol"] or first["hostPort"] != second["hostPort"]:
         return False
     a, b = (
         ipaddress.ip_address(first["hostAddress"]),

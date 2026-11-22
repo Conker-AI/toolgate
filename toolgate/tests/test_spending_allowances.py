@@ -1,4 +1,5 @@
 """Real SQLite allowance accounting; no provider or network calls."""
+
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -16,13 +17,27 @@ from toolgate.core import spending_allowances as allowances
 def target(tmp_path, monkeypatch):
     monkeypatch.setattr(control_plane, "DB_PATH", tmp_path / "gate.db")
     spending.configure(True, 1000, 100)
-    return {"kind": "tool", "id": "paid", "publishedVersion": 2,
-            "digest": "a" * 64, "args": {"x": 1, "nested": {"b": 2, "a": 1}}}
+    return {
+        "kind": "tool",
+        "id": "paid",
+        "publishedVersion": 2,
+        "digest": "a" * 64,
+        "args": {"x": 1, "nested": {"b": 2, "a": 1}},
+    }
 
 
 def grant(target, **overrides):
-    return allowances.create(**{"actor_id": "agent", "target": target, "per_run_cap": 100,
-        "total_cap": 250, "max_runs": 3, "expires_at": time.time() + 3600, **overrides})
+    return allowances.create(
+        **{
+            "actor_id": "agent",
+            "target": target,
+            "per_run_cap": 100,
+            "total_cap": 250,
+            "max_runs": 3,
+            "expires_at": time.time() + 3600,
+            **overrides,
+        }
+    )
 
 
 def allocate(row, target, root="root", actor="agent"):
@@ -30,10 +45,23 @@ def allocate(row, target, root="root", actor="agent"):
 
 
 def enforce(job, target):
-    return journal.begin(job["root_action_id"], target["kind"], target["id"], target["args"],
-        job["actor_id"], target["publishedVersion"], job_id=job["job_id"],
-        publication_digest=target["digest"], reserve=lambda conn: allowances.enforce(conn, job,
-            conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (job["root_action_id"],)).fetchone()))
+    return journal.begin(
+        job["root_action_id"],
+        target["kind"],
+        target["id"],
+        target["args"],
+        job["actor_id"],
+        target["publishedVersion"],
+        job_id=job["job_id"],
+        publication_digest=target["digest"],
+        reserve=lambda conn: allowances.enforce(
+            conn,
+            job,
+            conn.execute(
+                "SELECT * FROM v2_actions WHERE action_id=?", (job["root_action_id"],)
+            ).fetchone(),
+        ),
+    )
 
 
 def test_canonical_target_and_permanent_full_cap_accounting(target):
@@ -45,7 +73,12 @@ def test_canonical_target_and_permanent_full_cap_accounting(target):
     with pytest.raises(spending.BudgetDenied, match="exhausted"):
         allocate(row, target, "third")
     read = allowances.get(row["allowance_id"], "agent")
-    assert (read["allocated_runs"], read["allocated_cap"], read["remaining_cap"], read["remaining_runs"]) == (2, 200, 50, 0)
+    assert (
+        read["allocated_runs"],
+        read["allocated_cap"],
+        read["remaining_cap"],
+        read["remaining_runs"],
+    ) == (2, 200, 50, 0)
     assert spending.status()["accounted_and_reserved_microusd"] == 0
     assert allowances.get(row["allowance_id"], "impostor") is None
     assert allowances.get("missing") is None
@@ -58,9 +91,19 @@ def test_real_reservation_rechecks_allowance(target):
     job = allocate(row, target)
     allowances.revoke(row["allowance_id"])
     with pytest.raises(spending.BudgetDenied):
-        journal.begin("root", "tool", target["id"], target["args"], "agent", 2,
-            job_id=job["job_id"], publication_digest=target["digest"],
-            reserve=lambda conn: spending.reserve(conn, "root", job["job_id"], "agent", None, price))
+        journal.begin(
+            "root",
+            "tool",
+            target["id"],
+            target["args"],
+            "agent",
+            2,
+            job_id=job["job_id"],
+            publication_digest=target["digest"],
+            reserve=lambda conn: spending.reserve(
+                conn, "root", job["job_id"], "agent", None, price
+            ),
+        )
     assert journal.get("root") is None
 
 
@@ -68,6 +111,7 @@ def test_allowance_api_authority_and_actor_isolation(target, monkeypatch, tmp_pa
     from fastapi.testclient import TestClient
 
     from toolgate.api import server
+
     # Startup writes the vault, so it gets files of its own.
     monkeypatch.setattr(server.vault, "ENV_PATH", tmp_path / "vault.env")
     monkeypatch.setenv("TOOLGATE_VAULT_KEY_FILE", str(tmp_path / "vault.key"))
@@ -78,9 +122,17 @@ def test_allowance_api_authority_and_actor_isolation(target, monkeypatch, tmp_pa
         app.dependency_overrides[deps.require_admin] = lambda: "admin"
         app.dependency_overrides[deps.require_agent] = lambda: {"id": "agent", "scopes": ["*"]}
         try:
-            response = client.post("/v2/spending/allowances", json={"actor_id": "agent",
-                "target": target, "per_run_cap": 100, "total_cap": 200,
-                "max_runs": 2, "expires_at": time.time() + 3600})
+            response = client.post(
+                "/v2/spending/allowances",
+                json={
+                    "actor_id": "agent",
+                    "target": target,
+                    "per_run_cap": 100,
+                    "total_cap": 200,
+                    "max_runs": 2,
+                    "expires_at": time.time() + 3600,
+                },
+            )
             assert response.status_code == 200
             identity = response.json()["allowance_id"]
             path = f"/v2/agent/spending/allowances/{identity}/allocate"
@@ -136,8 +188,16 @@ def test_existing_jobs_cannot_dispatch_after_authority_changes(target, monkeypat
     assert journal.get("root") is None
 
 
-@pytest.mark.parametrize("field,value", [("kind", "automation"), ("id", "other"),
-    ("publishedVersion", 3), ("digest", "b" * 64), ("args", {"x": 2})])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("kind", "automation"),
+        ("id", "other"),
+        ("publishedVersion", 3),
+        ("digest", "b" * 64),
+        ("args", {"x": 2}),
+    ],
+)
 def test_actual_root_must_match_every_target_field(target, field, value):
     row = grant(target)
     different = {**target, field: value}
@@ -171,27 +231,51 @@ def test_ordinary_jobs_are_unaffected_and_enforcement_does_not_commit(target):
         assert conn.in_transaction
 
 
-@pytest.mark.parametrize("table", ["v2_spend_allowances", "v2_spend_allowance_allocations", "v2_spend_allowance_revocations"])
+@pytest.mark.parametrize(
+    "table",
+    ["v2_spend_allowances", "v2_spend_allowance_allocations", "v2_spend_allowance_revocations"],
+)
 def test_grants_allocations_and_revocation_receipts_are_immutable(target, table):
     row = grant(target)
     allocate(row, target)
     allowances.revoke(row["allowance_id"])
-    for query in [f"DELETE FROM {table}", f"UPDATE {table} SET allowance_id='changed'",
-                  f"INSERT OR REPLACE INTO {table} SELECT * FROM {table}"]:
+    for query in [
+        f"DELETE FROM {table}",
+        f"UPDATE {table} SET allowance_id='changed'",
+        f"INSERT OR REPLACE INTO {table} SELECT * FROM {table}",
+    ]:
         with control_plane._conn() as conn, pytest.raises(sqlite3.IntegrityError):
             conn.execute(query)
 
 
-@pytest.mark.parametrize("overrides", [{"per_run_cap": True}, {"total_cap": 99}, {"max_runs": 0},
-    {"expires_at": float("inf")}, {"expires_at": float("nan")}, {"expires_at": 0},
-    {"actor_id": ""}, {"per_run_cap": 101}])
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"per_run_cap": True},
+        {"total_cap": 99},
+        {"max_runs": 0},
+        {"expires_at": float("inf")},
+        {"expires_at": float("nan")},
+        {"expires_at": 0},
+        {"actor_id": ""},
+        {"per_run_cap": 101},
+    ],
+)
 def test_invalid_grants_fail_closed(target, overrides):
     with pytest.raises(spending.BudgetDenied):
         grant(target, **overrides)
 
 
-@pytest.mark.parametrize("patch", [{"extra": True}, {"publishedVersion": True},
-    {"args": {"x": float("nan")}}, {"args": {1: "not a JSON key"}}, {"digest": ""}])
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"extra": True},
+        {"publishedVersion": True},
+        {"args": {"x": float("nan")}},
+        {"args": {1: "not a JSON key"}},
+        {"digest": ""},
+    ],
+)
 def test_invalid_target_fails_closed(target, patch):
     with pytest.raises(spending.BudgetDenied):
         grant({**target, **patch})

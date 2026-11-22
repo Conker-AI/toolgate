@@ -39,7 +39,11 @@ def ensure_builtin_sandbox_capabilities() -> None:
         # Small local models broke the JSON on nested double quotes; the new text tells them how.
         control_plane.update_tool(
             "sandbox.run",
-            {**existing, "description": TERMINAL_DESCRIPTION, "expected_version": existing.get("version", 1)},
+            {
+                **existing,
+                "description": TERMINAL_DESCRIPTION,
+                "expected_version": existing.get("version", 1),
+            },
         )
     if not control_plane.get("tool", "sandbox.run"):
         control_plane.create_tool(

@@ -25,6 +25,7 @@ cleartext, because the process reads them out of its own environment before
 this module can decrypt anything.  None of them is a provider credential, and
 they are neither listed nor writable as vault secrets.
 """
+
 import base64
 import contextlib
 import hashlib
@@ -77,7 +78,7 @@ _OWN_PREFIX = "TOOLGATE_"
 _OWN_SECRETS = {"TOOLGATE_CALLBACK_SECRET"}
 _NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
-_SCRYPT_N = 2 ** 14
+_SCRYPT_N = 2**14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 _derived_keys: dict[tuple[str, str], "Fernet"] = {}
@@ -187,8 +188,9 @@ def _fernet() -> Fernet:
     cache_key = (secret, salt.hex())
     cached = _derived_keys.get(cache_key)
     if cached is None:
-        derived = hashlib.scrypt(secret.encode("utf-8"), salt=salt,
-                                 n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=32)
+        derived = hashlib.scrypt(
+            secret.encode("utf-8"), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=32
+        )
         cached = Fernet(base64.urlsafe_b64encode(derived))
         _derived_keys[cache_key] = cached
     return cached
@@ -208,9 +210,11 @@ def _decrypt(name: str, raw: str) -> str:
     if not raw.startswith(ENCRYPTED_PREFIX):
         return raw
     try:
-        return _fernet().decrypt(raw[len(ENCRYPTED_PREFIX):].encode("ascii")).decode("utf-8")
+        return _fernet().decrypt(raw[len(ENCRYPTED_PREFIX) :].encode("ascii")).decode("utf-8")
     except (InvalidToken, ValueError) as exc:
-        raise VaultError(f"{name} is encrypted with a different vault key and cannot be read") from exc
+        raise VaultError(
+            f"{name} is encrypted with a different vault key and cannot be read"
+        ) from exc
 
 
 def _ensure_env_file() -> None:
@@ -246,7 +250,9 @@ def set_secret(name: str, value: str, *, allow_existing: bool = True) -> None:
     if name in _CONTROL_KEYS:
         raise ValueError(f"{name} is an internal control key, not a vault secret")
     if name in _CONFIG_KEYS:
-        raise ValueError(f"{name} is runtime configuration, not a vault secret; set it in the environment")
+        raise ValueError(
+            f"{name} is runtime configuration, not a vault secret; set it in the environment"
+        )
     if not _NAME_PATTERN.match(name):
         raise ValueError("Key name must be SCREAMING_SNAKE_CASE (e.g. GITHUB_TOKEN)")
     sealed = _encrypt(value)
@@ -259,7 +265,9 @@ def set_secret(name: str, value: str, *, allow_existing: bool = True) -> None:
 
 def delete_secret(name: str) -> None:
     if name in _CONFIG_KEYS:
-        raise ValueError(f"{name} is runtime configuration, not a vault secret; it cannot be deleted here")
+        raise ValueError(
+            f"{name} is runtime configuration, not a vault secret; it cannot be deleted here"
+        )
     with _write_lock:
         if name not in _load():
             raise KeyError(name)
@@ -289,12 +297,14 @@ def vault_status() -> dict:
     read and whether the configured key decrypts what it holds.
     """
     try:
-        source = "environment" if os.environ.get("TOOLGATE_VAULT_SECRET", "").strip() else "key_file"
+        source = (
+            "environment" if os.environ.get("TOOLGATE_VAULT_SECRET", "").strip() else "key_file"
+        )
         fernet = _fernet()
         for name, value in _load().items():
             if name in _CONFIG_KEYS or not value.startswith(ENCRYPTED_PREFIX):
                 continue
-            fernet.decrypt(value[len(ENCRYPTED_PREFIX):].encode("ascii"))
+            fernet.decrypt(value[len(ENCRYPTED_PREFIX) :].encode("ascii"))
             break
     except (VaultError, InvalidToken, ValueError, OSError) as exc:
         return {"status": "unavailable", "reason": type(exc).__name__}

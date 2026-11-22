@@ -21,15 +21,23 @@ def test_network_none_mode_and_loopback_only(docker):
 
     # Network connectivity tests
     tests = [
-        ("python3 -c 'import socket; socket.create_connection((\"1.1.1.1\", 443), timeout=2)'", "1.1.1.1:443"),
-        ("python3 -c 'import socket; socket.create_connection((\"8.8.8.8\", 53), timeout=2)'", "8.8.8.8:53"),
+        (
+            "python3 -c 'import socket; socket.create_connection((\"1.1.1.1\", 443), timeout=2)'",
+            "1.1.1.1:443",
+        ),
+        (
+            "python3 -c 'import socket; socket.create_connection((\"8.8.8.8\", 53), timeout=2)'",
+            "8.8.8.8:53",
+        ),
         ("python3 -c 'import socket; socket.gethostbyname(\"pypi.org\")'", "resolve pypi.org"),
     ]
 
     for cmd, target in tests:
         result = run(agent, cmd)
         assert result["exit_code"] != 0, f"Should fail to connect to {target}"
-        assert "FAIL" in result.get("stderr", "") or "error" in result.get("stderr", "").lower(), f"Expected error for {target}"
+        assert "FAIL" in result.get("stderr", "") or "error" in result.get("stderr", "").lower(), (
+            f"Expected error for {target}"
+        )
 
 
 def test_mounts_workspace_volume_only(docker):
@@ -48,14 +56,16 @@ def test_mounts_workspace_volume_only(docker):
     # No docker.sock in mount sources
     for mount in mounts:
         if "Source" in mount:
-            assert "docker.sock" not in mount["Source"], f"docker.sock found in mount source: {mount['Source']}"
+            assert "docker.sock" not in mount["Source"], (
+                f"docker.sock found in mount source: {mount['Source']}"
+            )
 
     # Inside container: check paths don't exist
     forbidden_paths = [
         "/var/run/docker.sock",
         "/run/docker.sock",
         "/run/conker-sandbox",
-        "/run/conker-proxy"
+        "/run/conker-proxy",
     ]
 
     for path in forbidden_paths:
@@ -78,9 +88,15 @@ def test_user_nonroot_65533(docker):
     gid_result = run(agent, "id -g")
     groups_result = run(agent, "id -G")
 
-    assert uid_result["stdout"].strip() == "65533", f"Expected UID 65533, got {uid_result['stdout']}"
-    assert gid_result["stdout"].strip() == "65533", f"Expected GID 65533, got {gid_result['stdout']}"
-    assert groups_result["stdout"].strip() == "65533", f"Expected only group 65533, got {groups_result['stdout']}"
+    assert uid_result["stdout"].strip() == "65533", (
+        f"Expected UID 65533, got {uid_result['stdout']}"
+    )
+    assert gid_result["stdout"].strip() == "65533", (
+        f"Expected GID 65533, got {gid_result['stdout']}"
+    )
+    assert groups_result["stdout"].strip() == "65533", (
+        f"Expected only group 65533, got {groups_result['stdout']}"
+    )
 
 
 def test_capabilities_dropped_all(docker):
@@ -94,7 +110,7 @@ def test_capabilities_dropped_all(docker):
 
     # Inside container: check capabilities are all zero
     status = run(agent, "cat /proc/self/status")
-    status_lines = status["stdout"].split('\n')
+    status_lines = status["stdout"].split("\n")
 
     fields = dict(line.split(":\t", 1) for line in status_lines if ":\t" in line)
     for field in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"):
@@ -134,7 +150,7 @@ def test_no_secrets_in_environment(docker):
 
     # Check environment inside container
     env_result = run(agent, "env")
-    env_lines = env_result["stdout"].split('\n')
+    env_lines = env_result["stdout"].split("\n")
 
     # No secret variables
     secret_keywords = ["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"]
@@ -146,7 +162,9 @@ def test_no_secrets_in_environment(docker):
     # No verifier variables
     verifier_vars = ["TOOLGATE_SANDBOX_SOCKET", "VERIFY_WORKSPACES_VOLUME"]
     for var in verifier_vars:
-        assert not any(line.startswith(var + "=") for line in env_lines), f"Verifier var {var} found in container"
+        assert not any(line.startswith(var + "=") for line in env_lines), (
+            f"Verifier var {var} found in container"
+        )
 
     # Check Config.Env is subset of image env plus sandbox env
     container_env = set(inspect["Config"]["Env"])
@@ -160,7 +178,7 @@ def test_no_secrets_in_environment(docker):
         "HOME=/tmp",
         "LANG=C.UTF-8",
         "TERM=dumb",
-        "CONKER_SANDBOX=1"
+        "CONKER_SANDBOX=1",
     ]
 
     for var in expected_sandbox_vars:
@@ -185,7 +203,9 @@ def test_namespaces_isolated(docker):
 
     # Check PID 1 is docker-init
     pid1_cmd = run(agent, "cat /proc/1/comm")
-    assert "init" in pid1_cmd["stdout"].lower(), f"Expected PID 1 to be init, got {pid1_cmd['stdout']}"
+    assert "init" in pid1_cmd["stdout"].lower(), (
+        f"Expected PID 1 to be init, got {pid1_cmd['stdout']}"
+    )
 
 
 def test_image_no_setuid_files():
@@ -250,6 +270,7 @@ def test_proxy_service_lockdown():
 def test_runner_peer_check_unknown_uid():
     def _run_as_unknown_uid():
         from conftest import sandbox
+
         request = {"v": 1, "op": "run", "agent": "test", "command": "echo test", "timeout": 30}
         return sandbox(request)
 

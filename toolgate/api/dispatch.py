@@ -129,7 +129,11 @@ def _execute_http_json(execution: dict, args: dict) -> dict:
             for chunk in response.iter_bytes():
                 content.extend(chunk)
                 if len(content) > max_bytes:
-                    deny("RESPONSE_TOO_LARGE", "The upstream response exceeded this tool's byte limit", 502)
+                    deny(
+                        "RESPONSE_TOO_LARGE",
+                        "The upstream response exceeded this tool's byte limit",
+                        502,
+                    )
         value = json.loads(bytes(content))
     except HTTPException:
         raise

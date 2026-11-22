@@ -21,14 +21,22 @@ from toolgate.tests.test_port_spec import CID, MAPPING
 @pytest.fixture
 def ready(request):
     daemon, _, _ = request.getfixturevalue("boundary_setup")
-    agent, _ = cp.issue_agent_key("Both operations", ["tool:system.container-control", "tool:system.port-control"])
-    response = system_routes.create_port_review(models.PortReviewRequest(
-        container_id=CID, operation="create", mapping=MAPPING), agent)
+    agent, _ = cp.issue_agent_key(
+        "Both operations", ["tool:system.container-control", "tool:system.port-control"]
+    )
+    response = system_routes.create_port_review(
+        models.PortReviewRequest(container_id=CID, operation="create", mapping=MAPPING), agent
+    )
     import json
+
     rid = json.loads(response.body)["reviewId"]
     requests = {
-        "system.port-control": models.V2Invoke(action_id="change-1", args={"container_id": CID, "review_id": rid}),
-        "system.container-control": models.V2Invoke(action_id="lifecycle-1", args={"container_id": CID, "action": "restart"}),
+        "system.port-control": models.V2Invoke(
+            action_id="change-1", args={"container_id": CID, "review_id": rid}
+        ),
+        "system.container-control": models.V2Invoke(
+            action_id="lifecycle-1", args={"container_id": CID, "action": "restart"}
+        ),
     }
     for tool, payload in requests.items():
         pending = tools_routes.run_tool(tool, payload, agent)
@@ -80,9 +88,18 @@ def test_mixed_approved_actions_cannot_dispatch_concurrently(ready, monkeypatch,
 
 def test_unknown_claim_never_expires_into_dispatch_permission(ready):
     _, _, _, _requests = ready
+
     def claim(identity):
-        return journal.begin(identity, "tool", "custom-container-alias", {"container_id": CID}, "actor", 1,
-                             reserve=lambda conn: admission.reserve(conn, identity, CID))
+        return journal.begin(
+            identity,
+            "tool",
+            "custom-container-alias",
+            {"container_id": CID},
+            "actor",
+            1,
+            reserve=lambda conn: admission.reserve(conn, identity, CID),
+        )
+
     claim("first")
     journal.recover_interrupted()
     with pytest.raises(admission.ContainerBusy):
@@ -92,6 +109,13 @@ def test_unknown_claim_never_expires_into_dispatch_permission(ready):
 
 def test_completed_claim_allows_next_action(ready):
     for identity in ("first", "second"):
-        journal.begin(identity, "tool", "custom-container-alias", {"container_id": CID}, "actor", 1,
-                      reserve=lambda conn, identity=identity: admission.reserve(conn, identity, CID))
+        journal.begin(
+            identity,
+            "tool",
+            "custom-container-alias",
+            {"container_id": CID},
+            "actor",
+            1,
+            reserve=lambda conn, identity=identity: admission.reserve(conn, identity, CID),
+        )
         journal.finish(identity, {"code": "OK"})

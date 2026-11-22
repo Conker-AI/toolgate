@@ -78,7 +78,9 @@ def save_owner_editor_draft(draft_id: str, payload: editor_drafts.SaveDraft):
     return editor_drafts.save(draft_id, payload)
 
 
-@router.get("/v2/owner/editor-drafts/{draft_id}/publications", dependencies=[Depends(require_owner)])
+@router.get(
+    "/v2/owner/editor-drafts/{draft_id}/publications", dependencies=[Depends(require_owner)]
+)
 def owner_editor_publications(draft_id: str):
     return {"items": editor_publication.history(draft_id)}
 

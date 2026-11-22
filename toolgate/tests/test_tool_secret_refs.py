@@ -1,4 +1,5 @@
 """A tool or verification method can name a vault secret, never ToolGate's own credentials."""
+
 import pytest
 from fastapi import HTTPException
 
@@ -27,8 +28,11 @@ def test_a_public_http_tool_cannot_send_a_control_credential(configured, monkeyp
     monkeypatch.setenv(name, f"private-{name.lower()}")
     monkeypatch.setattr(dispatch, "public_url", lambda _url: True)
     monkeypatch.setattr(dispatch, "public_client", _no_network)
-    execution = {"url": "https://api.example.com/v1", "allowed_hosts": ["api.example.com"],
-                 "secret_headers": {"X-Auth": name}}
+    execution = {
+        "url": "https://api.example.com/v1",
+        "allowed_hosts": ["api.example.com"],
+        "secret_headers": {"X-Auth": name},
+    }
     with pytest.raises(HTTPException) as refused:
         dispatch._execute_http_json(execution, {})
     assert refused.value.status_code == 503
@@ -54,8 +58,11 @@ def test_a_public_http_tool_still_sends_an_ordinary_vault_secret(configured, mon
 
     monkeypatch.setattr(dispatch, "public_url", lambda _url: True)
     monkeypatch.setattr(dispatch, "public_client", Client)
-    execution = {"url": "https://api.example.com/v1", "allowed_hosts": ["api.example.com"],
-                 "secret_headers": {"X-Auth": "PARTNER_TOKEN"}}
+    execution = {
+        "url": "https://api.example.com/v1",
+        "allowed_hosts": ["api.example.com"],
+        "secret_headers": {"X-Auth": "PARTNER_TOKEN"},
+    }
     with pytest.raises(HTTPException):
         dispatch._execute_http_json(execution, {})
     assert sent["X-Auth"] == "partner-value"
@@ -65,5 +72,7 @@ def test_a_public_http_tool_still_sends_an_ordinary_vault_secret(configured, mon
 def test_a_verification_method_cannot_sign_with_a_control_credential(configured, monkeypatch, name):
     monkeypatch.setenv(name, f"private-{name.lower()}")
     with pytest.raises(HTTPException) as refused:
-        settings.create_verification_method(VerificationMethodCreate(name="Phone", secret_ref=name), "admin")
+        settings.create_verification_method(
+            VerificationMethodCreate(name="Phone", secret_ref=name), "admin"
+        )
     assert refused.value.status_code == 422

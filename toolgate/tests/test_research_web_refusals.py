@@ -19,7 +19,9 @@ def answer(status=200, *, json=None, content=None, url="https://upstream.test/")
 
 @pytest.fixture(autouse=True)
 def public_and_ready(monkeypatch):
-    monkeypatch.setattr(research_base, "_public_https_url", lambda url: str(url).startswith("https://"))
+    monkeypatch.setattr(
+        research_base, "_public_https_url", lambda url: str(url).startswith("https://")
+    )
     research_base._PROVIDER_COOLDOWNS.clear()
     yield
     research_base._PROVIDER_COOLDOWNS.clear()
@@ -57,19 +59,27 @@ def test_a_hackernews_row_without_an_item_id_is_kept_as_it_is(monkeypatch):
 
 def test_a_stackoverflow_row_is_hydrated_with_the_question_body(monkeypatch):
     no_keys(monkeypatch, STACKEXCHANGE_KEY="se-key")
-    calls = serve(monkeypatch, lambda url, **_: answer(json={"items": [{"body": "<p>Invoices by hand.</p>"}]}))
+    calls = serve(
+        monkeypatch, lambda url, **_: answer(json={"items": [{"body": "<p>Invoices by hand.</p>"}]})
+    )
     item = {"title": "Invoices", "url": "https://stackoverflow.com/questions/123/invoices"}
     hydrated = research_web._community_snapshot(item, "stackoverflow", 5)
-    assert hydrated["document"] == "Stack Overflow question: Invoices\nQuestion body: Invoices by hand."
+    assert (
+        hydrated["document"]
+        == "Stack Overflow question: Invoices\nQuestion body: Invoices by hand."
+    )
     assert calls[0][0].endswith("/questions/123") and calls[0][1]["params"]["key"] == "se-key"
 
 
-@pytest.mark.parametrize("reply", [
-    answer(json={"items": []}),
-    answer(json={"items": [{"body": ""}]}),
-    answer(502),
-    answer(content=b"{broken"),
-])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        answer(json={"items": []}),
+        answer(json={"items": [{"body": ""}]}),
+        answer(502),
+        answer(content=b"{broken"),
+    ],
+)
 def test_a_stackoverflow_row_stays_unhydrated_when_the_question_cannot_be_read(monkeypatch, reply):
     no_keys(monkeypatch)
     serve(monkeypatch, lambda url, **_: reply)
@@ -100,7 +110,11 @@ def test_rows_with_unreadable_or_naive_dates():
 
 
 def test_searxng_drops_old_excluded_and_unsafe_rows_and_stops_at_the_limit(monkeypatch):
-    monkeypatch.setattr(research_web.control_plane, "settings", lambda: {"research_searxng_url": "https://search.test/"})
+    monkeypatch.setattr(
+        research_web.control_plane,
+        "settings",
+        lambda: {"research_searxng_url": "https://search.test/"},
+    )
     monkeypatch.setattr(research_web, "_community_snapshot", lambda item, *_args: item)
     old = (datetime.now(UTC) - timedelta(days=400)).isoformat()
     rows = [
@@ -133,14 +147,18 @@ def test_searxng_skips_snapshots_once_the_time_is_spent(monkeypatch):
     monkeypatch.setattr(research_web, "_community_snapshot", lambda *_a: pytest.fail("no snapshot"))
     rows = [{"title": "Kept", "url": "https://example.com/kept", "content": "x"}]
     serve(monkeypatch, lambda url, **_: answer(json={"results": rows}))
-    assert [row["title"] for row in research_web._searx("invoices", "general", 5, 30, 1)] == ["Kept"]
+    assert [row["title"] for row in research_web._searx("invoices", "general", 5, 30, 1)] == [
+        "Kept"
+    ]
 
 
 # Tavily
 
 
 def test_tavily_is_refused_without_a_spending_adapter():
-    with pytest.raises(ResearchError, match="Tavily is disabled until it has a bounded spending adapter"):
+    with pytest.raises(
+        ResearchError, match="Tavily is disabled until it has a bounded spending adapter"
+    ):
         research_web._tavily("invoices", "general", 5, 30, 5)
 
 
@@ -165,7 +183,9 @@ def test_tavily_server_error_does_not_cool_down(monkeypatch):
 
 def test_tavily_without_a_key_sends_nothing(monkeypatch):
     no_keys(monkeypatch)
-    calls = serve(monkeypatch, lambda url, **_: pytest.fail("no request without a key"), method="post")
+    calls = serve(
+        monkeypatch, lambda url, **_: pytest.fail("no request without a key"), method="post"
+    )
     with pytest.raises(KeyError):
         research_web._tavily_unmetered("invoices", "general", 5, 30, 5)
     assert calls == []
@@ -173,7 +193,9 @@ def test_tavily_without_a_key_sends_nothing(monkeypatch):
 
 def test_tavily_reddit_rows_take_their_date_from_the_feed(monkeypatch):
     no_keys(monkeypatch, TAVILY_API_KEY="tv-key")
-    monkeypatch.setattr(research_web, "_reddit_rss_published_at", lambda url, _t: "2026-07-01T00:00:00+00:00")
+    monkeypatch.setattr(
+        research_web, "_reddit_rss_published_at", lambda url, _t: "2026-07-01T00:00:00+00:00"
+    )
     monkeypatch.setattr(research_web, "_community_snapshot", lambda item, *_a: item)
     rows = [
         {"title": "Thread", "url": "https://www.reddit.com/r/a/comments/b/", "content": "manual"},
@@ -191,14 +213,20 @@ def atom(body):
     return f'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">{body}</feed>'.encode()
 
 
-@pytest.mark.parametrize("reply", [
-    answer(content=atom("") + b" " * 262144),
-    answer(content=atom("")),
-    answer(content=atom("<entry><title>No date</title></entry>")),
-    answer(content=atom("<entry><updated>soon</updated></entry>")),
-    answer(content=b"<feed"),
-    answer(404),
-])
+@pytest.mark.parametrize(
+    "reply",
+    [
+        answer(content=atom("") + b" " * 262144),
+        answer(content=atom("")),
+        answer(content=atom("<entry><title>No date</title></entry>")),
+        answer(content=atom("<entry><updated>soon</updated></entry>")),
+        answer(content=b"<feed"),
+        answer(404),
+    ],
+)
 def test_reddit_feed_dates_are_none_when_the_feed_cannot_say(monkeypatch, reply):
     serve(monkeypatch, lambda url, **_: reply)
-    assert research_web._reddit_rss_published_at("https://www.reddit.com/r/a/comments/b/topic/", 5) is None
+    assert (
+        research_web._reddit_rss_published_at("https://www.reddit.com/r/a/comments/b/topic/", 5)
+        is None
+    )

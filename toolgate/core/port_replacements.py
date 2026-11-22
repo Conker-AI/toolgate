@@ -63,9 +63,12 @@ def _initialize(conn):
 
 def _parent(conn, action_id, *, active=False):
     parent = conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
-    if (not parent or parent["subject_type"] != "tool"
-            or parent["subject_id"] != "system.port-control"
-            or (active and parent["status"] != "dispatching")):
+    if (
+        not parent
+        or parent["subject_type"] != "tool"
+        or parent["subject_id"] != "system.port-control"
+        or (active and parent["status"] != "dispatching")
+    ):
         raise ReplacementError()
     return parent
 
@@ -83,7 +86,9 @@ def save(action_id, replacement):
 def save_in_transaction(conn, action_id, replacement):
     """Attach payload atomically with parent admission/review consumption."""
     parent = _parent(conn, action_id, active=True)
-    if conn.execute("SELECT 1 FROM v2_port_replacements WHERE action_id=?", (action_id,)).fetchone():
+    if conn.execute(
+        "SELECT 1 FROM v2_port_replacements WHERE action_id=?", (action_id,)
+    ).fetchone():
         raise ReplacementError()
     args = json.loads(parent["args"])
     if args.get("container_id") != replacement.preview["containerId"]:
@@ -92,12 +97,21 @@ def save_in_transaction(conn, action_id, replacement):
     pending = conn.execute(
         "SELECT 1 FROM v2_port_replacements p JOIN v2_actions a ON a.action_id=p.action_id"
         " WHERE a.status IN ('dispatching','outcome_unknown') AND json_extract(a.args,'$.container_id')=?",
-        (replacement.preview["containerId"],)).fetchone()
+        (replacement.preview["containerId"],),
+    ).fetchone()
     if pending:
         raise ReplacementError()
-    payload = json.dumps({"action_id": action_id, "fingerprint": parent["fingerprint"],
-                          "preview": replacement.preview, "body": replacement._body,
-                          "source": replacement._source, "name": replacement.name}, allow_nan=False)
+    payload = json.dumps(
+        {
+            "action_id": action_id,
+            "fingerprint": parent["fingerprint"],
+            "preview": replacement.preview,
+            "body": replacement._body,
+            "source": replacement._source,
+            "name": replacement.name,
+        },
+        allow_nan=False,
+    )
     if len(payload.encode()) > 2 * 1024 * 1024:
         raise ReplacementError()
     sealed = vault._encrypt(payload)
@@ -109,14 +123,18 @@ def load_private(action_id):
     with cp._conn() as conn:
         _initialize(conn)
         parent = _parent(conn, action_id)
-        row = conn.execute("SELECT sealed FROM v2_port_replacements WHERE action_id=?", (action_id,)).fetchone()
+        row = conn.execute(
+            "SELECT sealed FROM v2_port_replacements WHERE action_id=?", (action_id,)
+        ).fetchone()
         if not row or not row["sealed"].startswith(vault.ENCRYPTED_PREFIX):
             raise ReplacementError()
         try:
             payload = json.loads(vault._decrypt("replacement payload", row["sealed"]))
             if payload["action_id"] != action_id or payload["fingerprint"] != parent["fingerprint"]:
                 raise ReplacementError()
-            return Replacement(payload["preview"], payload["body"], payload["source"], payload["name"])
+            return Replacement(
+                payload["preview"], payload["body"], payload["source"], payload["name"]
+            )
         except (vault.VaultError, KeyError, TypeError, ValueError):
             raise ReplacementError() from None
 
@@ -127,27 +145,44 @@ def save_verification_basis(action_id, inspection, socket):
         _initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
         parent = _parent(conn, action_id, active=True)
-        if (inspection.get("Id") != json.loads(parent["args"]).get("container_id")
-                or conn.execute("SELECT 1 FROM v2_port_steps WHERE action_id=?", (action_id,)).fetchone()):
+        if (
+            inspection.get("Id") != json.loads(parent["args"]).get("container_id")
+            or conn.execute(
+                "SELECT 1 FROM v2_port_steps WHERE action_id=?", (action_id,)
+            ).fetchone()
+        ):
             raise ReplacementError()
-        payload = json.dumps({"fingerprint": parent["fingerprint"], "inspection": inspection,
-                              "socket": hashlib.sha256(socket.encode()).hexdigest()}, allow_nan=False)
+        payload = json.dumps(
+            {
+                "fingerprint": parent["fingerprint"],
+                "inspection": inspection,
+                "socket": hashlib.sha256(socket.encode()).hexdigest(),
+            },
+            allow_nan=False,
+        )
         if len(payload.encode()) > 2 * 1024 * 1024:
             raise ReplacementError()
-        conn.execute("INSERT INTO v2_port_verification_basis VALUES (?,?)", (action_id, vault._encrypt(payload)))
+        conn.execute(
+            "INSERT INTO v2_port_verification_basis VALUES (?,?)",
+            (action_id, vault._encrypt(payload)),
+        )
 
 
 def load_verification_basis(action_id, socket):
     with cp._conn() as conn:
         _initialize(conn)
         parent = _parent(conn, action_id)
-        row = conn.execute("SELECT sealed FROM v2_port_verification_basis WHERE action_id=?", (action_id,)).fetchone()
+        row = conn.execute(
+            "SELECT sealed FROM v2_port_verification_basis WHERE action_id=?", (action_id,)
+        ).fetchone()
         if not row or not row["sealed"].startswith(vault.ENCRYPTED_PREFIX):
             raise ReplacementError()
         try:
             value = json.loads(vault._decrypt("verification basis", row["sealed"]))
-            if (value["fingerprint"] != parent["fingerprint"]
-                    or value["socket"] != hashlib.sha256(socket.encode()).hexdigest()):
+            if (
+                value["fingerprint"] != parent["fingerprint"]
+                or value["socket"] != hashlib.sha256(socket.encode()).hexdigest()
+            ):
                 raise ReplacementError()
             return value["inspection"]
         except (vault.VaultError, KeyError, TypeError, ValueError):
@@ -156,17 +191,35 @@ def load_verification_basis(action_id, socket):
 
 def begin_step(action_id, ordinal, name, *, authorize):
     """Commit before dispatch; a duplicate claim never permits a second effect."""
-    if (type(ordinal) is not int or not 0 <= ordinal < 150
-            or name not in ("stop", "snapshot", "retire", "rename", "disconnect", "create", "connect", "start", "verify")
-            or not callable(authorize)):
+    if (
+        type(ordinal) is not int
+        or not 0 <= ordinal < 150
+        or name
+        not in (
+            "stop",
+            "snapshot",
+            "retire",
+            "rename",
+            "disconnect",
+            "create",
+            "connect",
+            "start",
+            "verify",
+        )
+        or not callable(authorize)
+    ):
         raise ReplacementError()
     with cp._conn() as conn:
         _initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
         _parent(conn, action_id, active=True)
-        if not conn.execute("SELECT 1 FROM v2_port_replacements WHERE action_id=?", (action_id,)).fetchone():
+        if not conn.execute(
+            "SELECT 1 FROM v2_port_replacements WHERE action_id=?", (action_id,)
+        ).fetchone():
             raise ReplacementError()
-        previous = conn.execute("SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal", (action_id,)).fetchall()
+        previous = conn.execute(
+            "SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal", (action_id,)
+        ).fetchall()
         if ordinal < len(previous):
             if previous[ordinal]["name"] != name:
                 raise ReplacementError()
@@ -175,36 +228,46 @@ def begin_step(action_id, ordinal, name, *, authorize):
             raise ReplacementError()
         authorize(conn)
         now = time.time()
-        conn.execute("INSERT INTO v2_port_steps VALUES (?,?,?,'dispatching',NULL,?,?)",
-                     (action_id, ordinal, name, now, now))
+        conn.execute(
+            "INSERT INTO v2_port_steps VALUES (?,?,?,'dispatching',NULL,?,?)",
+            (action_id, ordinal, name, now, now),
+        )
         return True
 
 
 def observed(action_id, ordinal, *, reference=None):
     # No arbitrary Docker response/diagnostic can enter a public step receipt.
-    if reference is not None and (not isinstance(reference, str)
-                                  or not re.fullmatch(r"(?:sha256:)?[a-f0-9]{64}", reference)):
+    if reference is not None and (
+        not isinstance(reference, str) or not re.fullmatch(r"(?:sha256:)?[a-f0-9]{64}", reference)
+    ):
         raise ReplacementError()
     with cp._conn() as conn:
         _initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
         _parent(conn, action_id)
-        row = conn.execute("SELECT * FROM v2_port_steps WHERE action_id=? AND ordinal=?", (action_id, ordinal)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM v2_port_steps WHERE action_id=? AND ordinal=?", (action_id, ordinal)
+        ).fetchone()
         if not row:
             raise ReplacementError()
         if row["status"] == "observed":
             if row["reference"] != reference:
                 raise ReplacementError()
             return
-        conn.execute("UPDATE v2_port_steps SET status='observed',reference=?,updated_at=? WHERE action_id=? AND ordinal=?",
-                     (reference, time.time(), action_id, ordinal))
+        conn.execute(
+            "UPDATE v2_port_steps SET status='observed',reference=?,updated_at=? WHERE action_id=? AND ordinal=?",
+            (reference, time.time(), action_id, ordinal),
+        )
 
 
 def unknown(action_id, ordinal):
     with cp._conn() as conn:
         _initialize(conn)
-        conn.execute("UPDATE v2_port_steps SET status='outcome_unknown',updated_at=?"
-                     " WHERE action_id=? AND ordinal=? AND status='dispatching'", (time.time(), action_id, ordinal))
+        conn.execute(
+            "UPDATE v2_port_steps SET status='outcome_unknown',updated_at=?"
+            " WHERE action_id=? AND ordinal=? AND status='dispatching'",
+            (time.time(), action_id, ordinal),
+        )
     journal.unknown(action_id)
 
 
@@ -213,10 +276,18 @@ def steps(action_id):
         _initialize(conn)
         parent = _parent(conn, action_id)
         result = []
-        for row in conn.execute("SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal", (action_id,)):
+        for row in conn.execute(
+            "SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal", (action_id,)
+        ):
             status = row["status"]
             if status == "dispatching" and parent["status"] != "dispatching":
                 status = "outcome_unknown"
-            result.append({"ordinal": row["ordinal"], "name": row["name"],
-                           "status": status, "reference": row["reference"]})
+            result.append(
+                {
+                    "ordinal": row["ordinal"],
+                    "name": row["name"],
+                    "status": status,
+                    "reference": row["reference"],
+                }
+            )
         return result

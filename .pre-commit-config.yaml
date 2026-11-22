@@ -11,6 +11,12 @@ repos:
     language: system
     pass_filenames: false
     types: [python]
+  - id: ruff-format
+    name: ruff format --check
+    entry: python -m ruff format --check .
+    language: system
+    pass_filenames: false
+    types: [python]
   - id: file-sizes
     name: file sizes (600 lines)
     entry: python toolgate/scripts/check_file_sizes.py

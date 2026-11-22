@@ -24,24 +24,41 @@ def test_completed_and_new_receipts_replay_without_dispatch(databases, monkeypat
     journal.begin("after", "tool", "post", {"next": True}, "agent", 1)
     journal.finish("after", receipt)
     result = recovery_journal.reconcile(source, target)
-    assert result == {"recoveryHeld": True, "receipts": 2, "unresolved": [],
-                      "promotesRecovery": False, "spendingReconciled": False}
+    assert result == {
+        "recoveryHeld": True,
+        "receipts": 2,
+        "unresolved": [],
+        "promotesRecovery": False,
+        "spendingReconciled": False,
+    }
     assert recovery_journal.reconcile(source, target) == result
     monkeypatch.setattr(control_plane, "DB_PATH", target)
     for identity, args in [("before", {}), ("after", {"next": True})]:
-        record, dispatched = journal.begin(identity, "tool", "post", args, "agent", 1,
+        record, dispatched = journal.begin(
+            identity,
+            "tool",
+            "post",
+            args,
+            "agent",
+            1,
             authorize=lambda _: pytest.fail("must not authorize again"),
-            reserve=lambda _: pytest.fail("must not reserve again"))
+            reserve=lambda _: pytest.fail("must not reserve again"),
+        )
         assert not dispatched
         assert record["response"] == receipt
         assert journal.existing(identity, "tool", "post", args, "agent") == record
         assert journal.get(identity) == record
     assert {row["action_id"] for row in journal.list_actions()} == {"before", "after"}
     with sqlite3.connect(target) as db:
-        assert db.execute("SELECT status FROM v2_actions WHERE action_id='before'").fetchone()[0] == "dispatching"
+        assert (
+            db.execute("SELECT status FROM v2_actions WHERE action_id='before'").fetchone()[0]
+            == "dispatching"
+        )
     with pytest.raises(journal.ExecutionConflict, match="held"):
         journal.begin("fresh", "tool", "post", {}, "agent", 1)
-    monkeypatch.setattr(control_plane, "purge_legacy_state", lambda: pytest.fail("startup must stop first"))
+    monkeypatch.setattr(
+        control_plane, "purge_legacy_state", lambda: pytest.fail("startup must stop first")
+    )
     with pytest.raises(ValueError, match="held"):
         server.startup()
     with pytest.raises(ValueError, match="held"):

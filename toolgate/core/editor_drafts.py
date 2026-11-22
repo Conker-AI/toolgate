@@ -1,4 +1,5 @@
 """Durable owner editor documents. Drafts confer no execution authority."""
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,9 @@ class Position(StrictDocument):
 
 class Node(StrictDocument):
     id: Identifier
-    type: Literal["input", "tool_call", "workflow_call", "set", "calculation", "condition", "loop", "return"]
+    type: Literal[
+        "input", "tool_call", "workflow_call", "set", "calculation", "condition", "loop", "return"
+    ]
     label: Annotated[str, Field(min_length=1, max_length=100)]
     position: Position
     config: dict[str, JsonValue]
@@ -60,7 +63,10 @@ class EditorDocument(StrictDocument):
     edges: Annotated[list[Edge], Field(max_length=120)]
     inputs: Annotated[list[ToolField], Field(max_length=30)]
     outputs: Annotated[list[ToolField], Field(max_length=30)]
-    credentialRefs: Annotated[list[Annotated[str, Field(pattern=r"^connection:[a-zA-Z][a-zA-Z0-9_-]{0,63}$")]], Field(max_length=20)]
+    credentialRefs: Annotated[
+        list[Annotated[str, Field(pattern=r"^connection:[a-zA-Z][a-zA-Z0-9_-]{0,63}$")]],
+        Field(max_length=20),
+    ]
     effect: Literal["read", "prepare", "write"]
     agentVisible: bool
     budgets: Budgets
@@ -104,8 +110,12 @@ def _table(db):
 
 
 def _record(row):
-    return {"id": row["id"], "revision": row["revision"], "updated_at": row["updated_at"],
-            "document": json.loads(row["body"])}
+    return {
+        "id": row["id"],
+        "revision": row["revision"],
+        "updated_at": row["updated_at"],
+        "document": json.loads(row["body"]),
+    }
 
 
 def get(identity):
@@ -123,14 +133,22 @@ def list_drafts(limit=50, after=None):
         _identity(after)
     with cp._conn() as db:
         _table(db)
-        rows = db.execute("SELECT * FROM v2_editor_drafts WHERE id>? ORDER BY id LIMIT ?",
-                          (after or "", limit + 1)).fetchall()
+        rows = db.execute(
+            "SELECT * FROM v2_editor_drafts WHERE id>? ORDER BY id LIMIT ?",
+            (after or "", limit + 1),
+        ).fetchall()
         items = []
         for row in rows[:limit]:
             document = json.loads(row["body"])
-            items.append({"id": row["id"], "revision": row["revision"],
-                          "updated_at": row["updated_at"], "name": document["name"],
-                          "kind": document["kind"]})
+            items.append(
+                {
+                    "id": row["id"],
+                    "revision": row["revision"],
+                    "updated_at": row["updated_at"],
+                    "name": document["name"],
+                    "kind": document["kind"],
+                }
+            )
         return {"items": items, "next_after": items[-1]["id"] if len(rows) > limit else None}
 
 
@@ -138,7 +156,9 @@ def save(identity, payload: SaveDraft):
     _identity(identity)
     if payload.document.id != identity:
         raise OwnerError("draft_id_mismatch", "Document identity differs from its route.", 422)
-    body = json.dumps(payload.document.model_dump(exclude_unset=True), ensure_ascii=False, allow_nan=False)
+    body = json.dumps(
+        payload.document.model_dump(exclude_unset=True), ensure_ascii=False, allow_nan=False
+    )
     with cp._conn() as db:
         _table(db)
         db.execute("BEGIN IMMEDIATE")
@@ -147,8 +167,14 @@ def save(identity, payload: SaveDraft):
         if revision != payload.expected_revision:
             raise OwnerError("draft_revision_conflict", "Draft changed; reload before saving.", 409)
         now = cp._now()
-        db.execute("INSERT INTO v2_editor_drafts VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
-                   "revision=excluded.revision, body=excluded.body, updated_at=excluded.updated_at",
-                   (identity, revision + 1, body, now))
-        return {"id": identity, "revision": revision + 1, "updated_at": now,
-                "document": json.loads(body)}
+        db.execute(
+            "INSERT INTO v2_editor_drafts VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET "
+            "revision=excluded.revision, body=excluded.body, updated_at=excluded.updated_at",
+            (identity, revision + 1, body, now),
+        )
+        return {
+            "id": identity,
+            "revision": revision + 1,
+            "updated_at": now,
+            "document": json.loads(body),
+        }

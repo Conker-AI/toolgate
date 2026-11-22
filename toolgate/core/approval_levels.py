@@ -30,16 +30,60 @@ CARD_LEVELS = {
     "delete": SERIOUS,
     "pay": SERIOUS,
 }
-SERIOUS_WORDS = frozenset({
-    "delete", "del", "remove", "rm", "unlink", "destroy", "drop", "purge", "wipe", "erase",
-    "truncate", "uninstall", "revoke", "forget", "shred", "reset", "overwrite",
-    "pay", "payment", "payout", "purchase", "buy", "checkout", "charge", "transfer",
-    "withdraw", "refund", "donate",
-})
-OUTWARD_WORDS = frozenset({
-    "send", "post", "publish", "email", "mail", "message", "reply", "tweet", "share", "upload",
-    "push", "deploy", "ship", "release", "invite", "comment", "notify", "sms",
-})
+SERIOUS_WORDS = frozenset(
+    {
+        "delete",
+        "del",
+        "remove",
+        "rm",
+        "unlink",
+        "destroy",
+        "drop",
+        "purge",
+        "wipe",
+        "erase",
+        "truncate",
+        "uninstall",
+        "revoke",
+        "forget",
+        "shred",
+        "reset",
+        "overwrite",
+        "pay",
+        "payment",
+        "payout",
+        "purchase",
+        "buy",
+        "checkout",
+        "charge",
+        "transfer",
+        "withdraw",
+        "refund",
+        "donate",
+    }
+)
+OUTWARD_WORDS = frozenset(
+    {
+        "send",
+        "post",
+        "publish",
+        "email",
+        "mail",
+        "message",
+        "reply",
+        "tweet",
+        "share",
+        "upload",
+        "push",
+        "deploy",
+        "ship",
+        "release",
+        "invite",
+        "comment",
+        "notify",
+        "sms",
+    }
+)
 # Host controls carry their own exact review and change the machine Conker runs on.
 SERIOUS_EXECUTIONS = frozenset({"port_control", "container_control", "process_control"})
 

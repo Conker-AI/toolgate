@@ -34,8 +34,10 @@ def record(action_id, source_id, target_id, socket, *, verification_ordinal=None
     The executor supplies its completed Docker verification, not a recovery guess.
     A crash must not persist a successful verification without its lineage.
     """
-    if (source_id == target_id or any(not isinstance(value, str) or not re.fullmatch(
-            r"[a-f0-9]{64}", value) for value in (source_id, target_id))):
+    if source_id == target_id or any(
+        not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value)
+        for value in (source_id, target_id)
+    ):
         raise records.ReplacementError()
     with cp._conn() as conn:
         records._initialize(conn)
@@ -47,23 +49,35 @@ def record(action_id, source_id, target_id, socket, *, verification_ordinal=None
         if verification_ordinal is not None:
             if type(verification_ordinal) is not int or not callable(authorize):
                 raise records.ReplacementError()
-            steps = conn.execute("SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal",
-                                 (action_id,)).fetchall()
-            if (not steps or steps[-1]["ordinal"] != verification_ordinal
-                    or steps[-1]["name"] != "verify" or steps[-1]["status"] != "dispatching"
-                    or any(step["status"] != "observed" for step in steps[:-1])
-                    or [step["reference"] for step in steps if step["name"] == "create"] != [target_id]):
+            steps = conn.execute(
+                "SELECT * FROM v2_port_steps WHERE action_id=? ORDER BY ordinal", (action_id,)
+            ).fetchall()
+            if (
+                not steps
+                or steps[-1]["ordinal"] != verification_ordinal
+                or steps[-1]["name"] != "verify"
+                or steps[-1]["status"] != "dispatching"
+                or any(step["status"] != "observed" for step in steps[:-1])
+                or [step["reference"] for step in steps if step["name"] == "create"] != [target_id]
+            ):
                 raise records.ReplacementError()
             authorize(conn)
-            conn.execute("UPDATE v2_port_steps SET status='observed',reference=?,updated_at=?"
-                         " WHERE action_id=? AND ordinal=?",
-                         (target_id, time.time(), action_id, verification_ordinal))
-        verified = conn.execute("SELECT reference FROM v2_port_steps WHERE action_id=?"
-                                " AND name='verify' AND status='observed'", (action_id,)).fetchall()
+            conn.execute(
+                "UPDATE v2_port_steps SET status='observed',reference=?,updated_at=?"
+                " WHERE action_id=? AND ordinal=?",
+                (target_id, time.time(), action_id, verification_ordinal),
+            )
+        verified = conn.execute(
+            "SELECT reference FROM v2_port_steps WHERE action_id=?"
+            " AND name='verify' AND status='observed'",
+            (action_id,),
+        ).fetchall()
         if len(verified) != 1 or verified[0]["reference"] != target_id:
             raise records.ReplacementError()
-        conn.execute("INSERT INTO v2_container_lineage VALUES (?,?,?,?)",
-                     (action_id, source_id, target_id, _digest(socket)))
+        conn.execute(
+            "INSERT INTO v2_container_lineage VALUES (?,?,?,?)",
+            (action_id, source_id, target_id, _digest(socket)),
+        )
 
 
 def targets(socket, roots):
@@ -72,21 +86,29 @@ def targets(socket, roots):
         return frozenset(roots)
     with sqlite3.connect(cp.DB_PATH.resolve().as_uri() + "?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_container_lineage'").fetchone():
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_container_lineage'"
+        ).fetchone():
             return frozenset(roots)
         rows = conn.execute(
             "SELECT l.*, a.response FROM v2_container_lineage l JOIN v2_actions a ON a.action_id=l.action_id"
             " WHERE l.socket_digest=? AND a.status='completed' AND a.subject_id='system.port-control'"
-            " AND a.subject_type='tool'", (_digest(socket),)).fetchall()
+            " AND a.subject_type='tool'",
+            (_digest(socket),),
+        ).fetchall()
     edges = {}
     for row in rows:
         value = json.loads(row["response"])
         result = value.get("result", {})
         observed = result.get("result", {})
-        if (value.get("code") != "OK" or result.get("ok") is not True
-                or observed.get("containerId") != row["source_id"]
-                or observed.get("replacementId") != row["target_id"]
-                or observed.get("outcome") != "observed" or observed.get("originalRetained") is not True):
+        if (
+            value.get("code") != "OK"
+            or result.get("ok") is not True
+            or observed.get("containerId") != row["source_id"]
+            or observed.get("replacementId") != row["target_id"]
+            or observed.get("outcome") != "observed"
+            or observed.get("originalRetained") is not True
+        ):
             continue
         if row["source_id"] in edges:
             raise records.ReplacementError()
@@ -109,9 +131,15 @@ def busy(container_id):
     if not cp.DB_PATH.exists():
         return False
     with sqlite3.connect(cp.DB_PATH.resolve().as_uri() + "?mode=ro", uri=True) as conn:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_port_replacements'").fetchone():
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_port_replacements'"
+        ).fetchone():
             return False
-        return conn.execute(
-            "SELECT 1 FROM v2_port_replacements p JOIN v2_actions a ON p.action_id=a.action_id"
-            " WHERE a.status IN ('dispatching','outcome_unknown') AND json_extract(a.args,'$.container_id')=?",
-            (container_id,)).fetchone() is not None
+        return (
+            conn.execute(
+                "SELECT 1 FROM v2_port_replacements p JOIN v2_actions a ON p.action_id=a.action_id"
+                " WHERE a.status IN ('dispatching','outcome_unknown') AND json_extract(a.args,'$.container_id')=?",
+                (container_id,),
+            ).fetchone()
+            is not None
+        )

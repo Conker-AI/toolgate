@@ -208,13 +208,8 @@ def test_late_decision_cannot_restore_a_consumed_token(gate, monkeypatch):
     if first is None:
         first = consume(gate, request_id)
     assert first[0], first
-    assert not consume(gate, request_id)[0], (
-        "late approval resurrected an already consumed token"
-    )
-    assert (
-        len([e for e in cp.events(500) if e["event_type"] == "verification_consumed"])
-        == 1
-    )
+    assert not consume(gate, request_id)[0], "late approval resurrected an already consumed token"
+    assert len([e for e in cp.events(500) if e["event_type"] == "verification_consumed"]) == 1
 
 
 def test_generic_request_replacement_cannot_undo_consumption(gate):
@@ -242,26 +237,20 @@ def test_restart_never_widens_or_revives_bootstrap_key(gate, monkeypatch):
     server.startup()
     assert cp.authenticate_agent(raw) is None
     persisted = next(k for k in cp.list_agent_keys() if k["id"] == initial["id"])
-    assert (
-        persisted["scopes"] == [f"tool:{TOOL_ID}"] and persisted["status"] == "revoked"
-    )
+    assert persisted["scopes"] == [f"tool:{TOOL_ID}"] and persisted["status"] == "revoked"
     # A scope edit is not a key-reactivation operation either.
     cp.update_agent_key_scopes(initial["id"], [])
     assert cp.authenticate_agent(raw) is None
 
 
-def test_bootstrap_defaults_to_no_scope_and_concurrent_seed_is_idempotent(
-    gate, monkeypatch
-):
+def test_bootstrap_defaults_to_no_scope_and_concurrent_seed_is_idempotent(gate, monkeypatch):
     raw = "tgx_empty_bootstrap_for_integrity_test"
     monkeypatch.setenv("TOOLGATE_BOOTSTRAP_EXECUTION_KEY", raw)
     server.startup()
     assert cp.authenticate_agent(raw)["scopes"] == []
     other = "tgx_concurrent_bootstrap_for_integrity"
     with ThreadPoolExecutor(max_workers=8) as pool:
-        records = list(
-            pool.map(lambda _: cp.ensure_bootstrap_agent_key(other, []), range(8))
-        )
+        records = list(pool.map(lambda _: cp.ensure_bootstrap_agent_key(other, []), range(8)))
     assert len({record["id"] for record in records}) == 1
     assert len([k for k in cp.list_agent_keys() if k["id"] == records[0]["id"]]) == 1
 
@@ -302,9 +291,7 @@ def test_altered_issuance_cannot_be_approved_or_consumed(gate, field):
         approvals.decide_request(request_id, "approved", "admin")
 
 
-@pytest.mark.parametrize(
-    "phase", ["request_created", "request_decided", "verification_consumed"]
-)
+@pytest.mark.parametrize("phase", ["request_created", "request_decided", "verification_consumed"])
 def test_audit_failure_rolls_back_the_request_transition(gate, phase):
     request_id = None
     if phase != "request_created":
@@ -325,9 +312,7 @@ def test_audit_failure_rolls_back_the_request_transition(gate, phase):
     assert cp.list_objects("request") == before
 
 
-def test_competing_signed_callbacks_return_conflict_without_rewriting(
-    gate, monkeypatch
-):
+def test_competing_signed_callbacks_return_conflict_without_rewriting(gate, monkeypatch):
     request_id = mint(gate)
     vault.set_secret("INTEGRITY_CALLBACK_SECRET", "callback-test-secret")
     method = cp.create_verification_method(
@@ -341,9 +326,7 @@ def test_competing_signed_callbacks_return_conflict_without_rewriting(
         "nonce": record["payload"]["binding"]["nonce"],
     }
     timestamp = int(time.time())
-    canonical = json.dumps(
-        body, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    )
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     signature = hmac.new(
         b"callback-test-secret", f"{timestamp}.{canonical}".encode(), hashlib.sha256
     ).hexdigest()

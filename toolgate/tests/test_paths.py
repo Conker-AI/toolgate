@@ -26,17 +26,22 @@ class RuntimePathsTests(unittest.TestCase):
             self.assertEqual(reloaded.ENV_PATH, Path(root) / "vault.env")
         importlib.reload(paths)
 
-
     def test_bootstrap_agent_key_is_idempotent_and_authenticates(self):
         from toolgate.core import control_plane
 
         # Patch the storage boundary without recreating exception classes already
         # registered by the HTTP server during test collection.
         with patch.object(control_plane, "DB_PATH", Path(self.root) / "toolgate.db"):
-            first = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
-            second = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
+            first = control_plane.ensure_bootstrap_agent_key(
+                "tgx_test_bootstrap_key_123", ["tool:*"]
+            )
+            second = control_plane.ensure_bootstrap_agent_key(
+                "tgx_test_bootstrap_key_123", ["tool:*"]
+            )
             self.assertEqual(first["id"], second["id"])
-            self.assertEqual(control_plane.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"])
+            self.assertEqual(
+                control_plane.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"]
+            )
 
     def test_bootstrap_agent_key_does_not_reconcile_deployment_scopes(self):
         from toolgate.core import control_plane
@@ -44,11 +49,16 @@ class RuntimePathsTests(unittest.TestCase):
         # Patch the storage boundary without recreating exception classes already
         # registered by the HTTP server during test collection.
         with patch.object(control_plane, "DB_PATH", Path(self.root) / "toolgate.db"):
-            first = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:*"])
-            second = control_plane.ensure_bootstrap_agent_key("tgx_test_bootstrap_key_123", ["tool:research.*"])
+            first = control_plane.ensure_bootstrap_agent_key(
+                "tgx_test_bootstrap_key_123", ["tool:*"]
+            )
+            second = control_plane.ensure_bootstrap_agent_key(
+                "tgx_test_bootstrap_key_123", ["tool:research.*"]
+            )
             self.assertEqual(first["id"], second["id"])
-            self.assertEqual(control_plane.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"])
-
+            self.assertEqual(
+                control_plane.authenticate_agent("tgx_test_bootstrap_key_123")["scopes"], ["tool:*"]
+            )
 
     def test_explicit_admin_key_is_persisted_instead_of_replaced(self):
         from toolgate.core import vault
@@ -67,6 +77,8 @@ class RuntimePathsTests(unittest.TestCase):
             generated = reloaded.ensure_control_keys()
             self.assertEqual(generated, {})
             self.assertEqual(reloaded.get_control_key("TOOLGATE_ADMIN_KEY"), "explicit-admin-key")
-            self.assertIn("TOOLGATE_ADMIN_KEY=explicit-admin-key", Path(f"{root}/vault.env").read_text())
+            self.assertIn(
+                "TOOLGATE_ADMIN_KEY=explicit-admin-key", Path(f"{root}/vault.env").read_text()
+            )
         importlib.reload(paths)
         importlib.reload(vault)

@@ -255,7 +255,9 @@ class TestPackages:
         assert result == ["requests"]
 
     def test_pip_accepts_versions(self):
-        result = validation.packages("pip", ["requests==2.32.3", "pandas>=2,<3", "uvicorn[standard]"])
+        result = validation.packages(
+            "pip", ["requests==2.32.3", "pandas>=2,<3", "uvicorn[standard]"]
+        )
         assert result == ["requests==2.32.3", "pandas>=2,<3", "uvicorn[standard]"]
 
     def test_npm_accepts_valid(self):

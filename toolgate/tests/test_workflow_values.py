@@ -19,8 +19,10 @@ def test_last_and_its_paths_still_resolve():
     assert _workflow_value({"x": ["$last.items.0", "$args.who"]}, STATE) == {"x": [5, "Ada"]}
 
 
-SCHEMA = [{"name": "title", "type": "string", "required": True, "min_length": 3},
-          {"name": "note", "type": "string"}]
+SCHEMA = [
+    {"name": "title", "type": "string", "required": True, "min_length": 3},
+    {"name": "note", "type": "string"},
+]
 
 
 def test_a_required_input_sent_as_null_is_missing():

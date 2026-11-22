@@ -1,4 +1,5 @@
 """Narrow owner review: exact bounded arguments, never a vault or execution channel."""
+
 from __future__ import annotations
 
 import hashlib
@@ -28,15 +29,22 @@ def authenticate(raw: str | None) -> None:
     if not re.fullmatch(r"[0-9a-f]{64}", pinned):
         raise OwnerError("owner_channel_unavailable", "The owner channel is not configured.", 503)
     if not isinstance(raw, str) or not 32 <= len(raw) <= 256:
-        raise OwnerError("owner_credential_required", "A dedicated owner credential is required.", 401)
+        raise OwnerError(
+            "owner_credential_required", "A dedicated owner credential is required.", 401
+        )
     hashed = hashlib.sha256(raw.encode()).hexdigest()
     # Accidental reuse of an admin/execution credential must never widen that channel.
     admin = vault.get_control_key("TOOLGATE_ADMIN_KEY")
     with cp._conn() as db:
         execution = db.execute("SELECT 1 FROM v2_agent_keys WHERE key_hash=?", (hashed,)).fetchone()
-    if (not secrets.compare_digest(hashed, pinned) or execution or
-            (admin and secrets.compare_digest(raw.encode(), admin.encode()))):
-        raise OwnerError("owner_credential_required", "A dedicated owner credential is required.", 401)
+    if (
+        not secrets.compare_digest(hashed, pinned)
+        or execution
+        or (admin and secrets.compare_digest(raw.encode(), admin.encode()))
+    ):
+        raise OwnerError(
+            "owner_credential_required", "A dedicated owner credential is required.", 401
+        )
 
 
 def _text(value, maximum):
@@ -44,7 +52,7 @@ def _text(value, maximum):
         return ""
     # These are display labels only. Action arguments are never truncated.
     value = value.encode("utf-8", errors="replace").decode("utf-8")
-    return value if len(value) <= maximum else value[:maximum - 1] + "…"
+    return value if len(value) <= maximum else value[: maximum - 1] + "…"
 
 
 def _date(value):
@@ -83,6 +91,7 @@ def _arguments(value):
             raise ValueError("number precision")
         elif not isinstance(item, (str, bool, int, float, type(None))):
             raise ValueError("value")
+
     try:
         check(value)
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")
@@ -103,19 +112,31 @@ def project(db, record):
     subject_type = binding.get("subject_type")
     subject_id = binding.get("subject_id")
     version = binding.get("version")
-    subject_type = subject_type if isinstance(subject_type, str) and subject_type in {
-        "tool", "automation"} else None
-    subject_id = subject_id if isinstance(subject_id, str) and re.fullmatch(
-        r"[A-Za-z0-9_.:-]{1,200}", subject_id) else None
+    subject_type = (
+        subject_type
+        if isinstance(subject_type, str) and subject_type in {"tool", "automation"}
+        else None
+    )
+    subject_id = (
+        subject_id
+        if isinstance(subject_id, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", subject_id)
+        else None
+    )
     version = version if type(version) is int and 1 <= version <= 2147483647 else None
     args = _arguments(payload.get("args")) if origin_valid else None
     expires, consumed = _date(binding.get("expires_at")), _date(binding.get("consumed_at"))
     reason = None
     if not origin_valid:
         reason = "invalid_origin"
-    elif (not subject_type or not subject_id or version is None
-          or "expires_at" not in binding or (binding.get("expires_at") is not None and not expires) or
-          payload.get("subject_type") != subject_type or payload.get("subject_id") != subject_id):
+    elif (
+        not subject_type
+        or not subject_id
+        or version is None
+        or "expires_at" not in binding
+        or (binding.get("expires_at") is not None and not expires)
+        or payload.get("subject_type") != subject_type
+        or payload.get("subject_id") != subject_id
+    ):
         reason = "invalid_action"
     elif args is None:
         reason = "arguments_unavailable"
@@ -129,40 +150,67 @@ def project(db, record):
     elif record.get("status") != "pending":
         reason = "already_decided"
     publication_view = None
-    if origin_valid and isinstance(binding.get("publication_digest"), str) and re.fullmatch(r"[a-f0-9]{64}", binding["publication_digest"]):
-        publication_view = {"version": version, "digest": binding["publication_digest"],
-                            "dependencies": binding.get("child_tools", {}),
-                            "automations": binding.get("child_automations", {})}
+    if (
+        origin_valid
+        and isinstance(binding.get("publication_digest"), str)
+        and re.fullmatch(r"[a-f0-9]{64}", binding["publication_digest"])
+    ):
+        publication_view = {
+            "version": version,
+            "digest": binding["publication_digest"],
+            "dependencies": binding.get("child_tools", {}),
+            "automations": binding.get("child_automations", {}),
+        }
     if reason is None and binding.get("publication_digest") is not None:
         from toolgate.core import publications
+
         try:
             publication = publications.for_execution(db, subject_type, subject_id, version)
-            if (binding["publication_digest"] != publication["digest"]
-                    or binding.get("child_tools") != approvals.child_bindings(publication["tools"])
-                    or binding.get("child_automations", {}) != publications.automation_bindings(publication)):
+            if (
+                binding["publication_digest"] != publication["digest"]
+                or binding.get("child_tools") != approvals.child_bindings(publication["tools"])
+                or binding.get("child_automations", {})
+                != publications.automation_bindings(publication)
+            ):
                 reason = "invalid_publication"
         except ValueError:
             reason = "publication_unavailable"
     decision = record.get("decision")
-    decision = ({"status": _text(record.get("status"), 32),
-                 "actor": _text(decision.get("actor"), 200),
-                 "note": _text(decision.get("note"), 2000),
-                 "at": _date(decision.get("at"))} if isinstance(decision, dict) else None)
+    decision = (
+        {
+            "status": _text(record.get("status"), 32),
+            "actor": _text(decision.get("actor"), 200),
+            "note": _text(decision.get("note"), 2000),
+            "at": _date(decision.get("at")),
+        }
+        if isinstance(decision, dict)
+        else None
+    )
     return {
-        "id": record["id"], "kind": "verification", "title": _text(record.get("title"), 500),
-        "details": _text(record.get("details"), 2000), "actor": _text(record.get("actor"), 200),
-        "severity": _text(record.get("severity"), 32), "status": _text(record.get("status"), 32),
-        "created_at": _date(record.get("created_at")), "updated_at": _date(record.get("updated_at")),
+        "id": record["id"],
+        "kind": "verification",
+        "title": _text(record.get("title"), 500),
+        "details": _text(record.get("details"), 2000),
+        "actor": _text(record.get("actor"), 200),
+        "severity": _text(record.get("severity"), 32),
+        "status": _text(record.get("status"), 32),
+        "created_at": _date(record.get("created_at")),
+        "updated_at": _date(record.get("updated_at")),
         "decision": decision,
-        "action": {"subject_type": subject_type, "subject_id": subject_id,
-                   "version": version, "args": args,
-                   **({"publication": publication_view} if publication_view else {})},
+        "action": {
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "version": version,
+            "args": args,
+            **({"publication": publication_view} if publication_view else {}),
+        },
         "approval": {"expires_at": expires, "consumed_at": consumed, "origin_valid": origin_valid},
         # The buttons he chose for this tool when he was asked; labels only.
         "card": ask_cards.valid(payload.get("card")),
         # What approving must prove (core/approval_levels.py); the gateway enforces it.
         "approval_level": approval_levels.stored(payload.get("level")),
-        "reviewable": reason is None, "unavailable_reason": reason,
+        "reviewable": reason is None,
+        "unavailable_reason": reason,
     }
 
 
@@ -173,7 +221,9 @@ def _record(row):
 def _row(db, identity):
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identity):
         raise OwnerError("not_found", "Owner request not found.", 404)
-    row = db.execute("SELECT * FROM v2_objects WHERE kind='request' AND id=?", (identity,)).fetchone()
+    row = db.execute(
+        "SELECT * FROM v2_objects WHERE kind='request' AND id=?", (identity,)
+    ).fetchone()
     if not row or cp._row(row).get("kind") != "verification":
         raise OwnerError("not_found", "Owner request not found.", 404)
     return row
@@ -201,11 +251,14 @@ def list_requests(limit=50, cursor=None):
             row = _row(db, cursor)
             before = " AND (created_at,id)<(?,?)"
             values = [row["created_at"], row["id"]]
-        rows = db.execute("SELECT * FROM v2_objects WHERE kind='request' "
-                          "AND json_extract(body,'$.kind')='verification' "
-                          "AND json_extract(body,'$.status') IS NOT ?" + before +
-                          " ORDER BY created_at DESC,id DESC LIMIT ?",
-                          (approvals.WITHDRAWN, *values, limit + 1)).fetchall()
+        rows = db.execute(
+            "SELECT * FROM v2_objects WHERE kind='request' "
+            "AND json_extract(body,'$.kind')='verification' "
+            "AND json_extract(body,'$.status') IS NOT ?"
+            + before
+            + " ORDER BY created_at DESC,id DESC LIMIT ?",
+            (approvals.WITHDRAWN, *values, limit + 1),
+        ).fetchall()
         results, size = [], 0
         for row in rows[:limit]:
             value = project(db, _record(row))
@@ -214,8 +267,10 @@ def list_requests(limit=50, cursor=None):
                 break
             results.append(value)
             size += length
-        return {"results": results,
-                "next_cursor": results[-1]["id"] if len(rows) > len(results) else None}
+        return {
+            "results": results,
+            "next_cursor": results[-1]["id"] if len(rows) > len(results) else None,
+        }
 
 
 def decide(identity, status, note):
@@ -229,13 +284,18 @@ def decide(identity, status, note):
             return
         view = project(db, record)
         if not view["approval"]["origin_valid"] or not view["reviewable"]:
-            raise OwnerError("not_reviewable", "This exact action cannot be approved from this view.")
+            raise OwnerError(
+                "not_reviewable", "This exact action cannot be approved from this view."
+            )
+
     try:
         record = approvals.decide_request(identity, status, "gateway-owner", note, guard=guard)
     except OwnerError:
         raise
     except ValueError:
-        raise OwnerError("decision_conflict", "The request cannot accept this decision. Reload it.") from None
+        raise OwnerError(
+            "decision_conflict", "The request cannot accept this decision. Reload it."
+        ) from None
     if record is None:
         raise OwnerError("not_found", "Owner request not found.", 404)
     return get(identity)

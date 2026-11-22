@@ -32,14 +32,21 @@ def test_an_mcp_server_with_an_odd_protocol_version_is_refused(peer, version):
 
 def test_a_provider_answering_a_list_falls_back_to_the_next_one(tmp_path, monkeypatch):
     monkeypatch.setattr(control_plane, "DB_PATH", tmp_path / "gate.db")
-    fallback = [{
-        "title": "Manual receipt workflow", "url": "https://www.reddit.com/r/accounting/comments/x/y/",
-        "snippet": "We manually enter every receipt.", "source": "reddit", "published_at": None,
-        "content_safety": {"risk": "low", "flags": []},
-    }]
+    fallback = [
+        {
+            "title": "Manual receipt workflow",
+            "url": "https://www.reddit.com/r/accounting/comments/x/y/",
+            "snippet": "We manually enter every receipt.",
+            "source": "reddit",
+            "published_at": None,
+            "content_safety": {"risk": "low", "flags": []},
+        }
+    ]
     malformed = AttributeError("'list' object has no attribute 'get'")
-    with patch.object(research, "_reddit_subreddit_feed", side_effect=malformed), \
-         patch.object(research, "_reddit_subreddit_searx", return_value=fallback):
+    with (
+        patch.object(research, "_reddit_subreddit_feed", side_effect=malformed),
+        patch.object(research, "_reddit_subreddit_searx", return_value=fallback),
+    ):
         result = research.search("subreddit:accounting", "reddit", 5, 14)
     assert result["provider"] == "searxng_subreddit"
     assert "reddit_atom_feed: AttributeError" in result["fallback_failures"]

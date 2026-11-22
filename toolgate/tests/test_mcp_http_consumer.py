@@ -388,8 +388,6 @@ def test_json_escaped_bearer_in_catalogue_is_withheld_before_discovery(peer, mon
     assert not peer.tool_calls
 
 
-
-
 @pytest.mark.parametrize("failed", [False, True])
 def test_results_are_fenced_and_cleaned_of_invisible_code_points(peer, failed):
     hidden = "pay" + chr(0x200B) + chr(0xE0041) + chr(0xFE0F) + chr(0x202E) + "ment"

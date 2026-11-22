@@ -86,13 +86,15 @@ class TestContainerSpec:
     """Test the container specification generated for requests."""
 
     def setup_method(self):
-        self.config = spec.Config.from_env({
-            "SANDBOX_IMAGE": "sha256:" + "a" * 64,
-            "SANDBOX_WORKSPACES_VOLUME": "ws",
-            "SANDBOX_PROXY_VOLUME": "px",
-            "SANDBOX_UID": "65533",
-            "SANDBOX_GID": "65533",
-        })
+        self.config = spec.Config.from_env(
+            {
+                "SANDBOX_IMAGE": "sha256:" + "a" * 64,
+                "SANDBOX_WORKSPACES_VOLUME": "ws",
+                "SANDBOX_PROXY_VOLUME": "px",
+                "SANDBOX_UID": "65533",
+                "SANDBOX_GID": "65533",
+            }
+        )
 
     def test_run_container_basic_properties(self):
         container_spec = spec.container(self.config, "companion", spec.run_argv("ls", ""))
@@ -346,19 +348,23 @@ class TestLoweredLimits:
     """The owner's settings may lower memory, CPU and workspace for one command, never raise them."""
 
     def setup_method(self):
-        self.config = spec.Config.from_env({
-            "SANDBOX_IMAGE": "sha256:" + "a" * 64,
-            "SANDBOX_WORKSPACES_VOLUME": "ws",
-            "SANDBOX_PROXY_VOLUME": "px",
-            "SANDBOX_MEMORY_MB": "256",
-        })
+        self.config = spec.Config.from_env(
+            {
+                "SANDBOX_IMAGE": "sha256:" + "a" * 64,
+                "SANDBOX_WORKSPACES_VOLUME": "ws",
+                "SANDBOX_PROXY_VOLUME": "px",
+                "SANDBOX_MEMORY_MB": "256",
+            }
+        )
 
     def test_no_limits_keep_the_configured_ones(self):
         assert spec.lowered(self.config, None) is self.config
         assert spec.lowered(self.config, {}) == self.config
 
     def test_lower_values_shape_the_container(self):
-        lowered = spec.lowered(self.config, {"memory_mb": 128, "cpus_milli": 500, "workspace_mb": 64})
+        lowered = spec.lowered(
+            self.config, {"memory_mb": 128, "cpus_milli": 500, "workspace_mb": 64}
+        )
         assert (lowered.limits.memory_mb, lowered.limits.cpus_milli) == (128, 500)
         assert lowered.limits.workspace_mb == 64
         assert lowered.limits.pids == self.config.limits.pids
@@ -392,11 +398,13 @@ class TestLoweredLimits:
             spec.lowered(self.config, limits)
 
     def test_the_defaults_are_todays_limits(self):
-        defaults = spec.Config.from_env({
-            "SANDBOX_IMAGE": "sha256:" + "a" * 64,
-            "SANDBOX_WORKSPACES_VOLUME": "ws",
-            "SANDBOX_PROXY_VOLUME": "px",
-        }).limits
+        defaults = spec.Config.from_env(
+            {
+                "SANDBOX_IMAGE": "sha256:" + "a" * 64,
+                "SANDBOX_WORKSPACES_VOLUME": "ws",
+                "SANDBOX_PROXY_VOLUME": "px",
+            }
+        ).limits
         assert (defaults.memory_mb, defaults.cpus_milli, defaults.workspace_mb) == (
             spec.MEMORY_MB,
             spec.CPUS_MILLI,

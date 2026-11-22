@@ -1,4 +1,5 @@
 """Strict value semantics shared by editor graph execution and its receipts."""
+
 from __future__ import annotations
 
 import copy
@@ -25,7 +26,9 @@ def bounded(value):
         elif isinstance(item, list):
             pending.extend((child, depth + 1) for child in item)
         elif type(item) in (int, float):
-            if (isinstance(item, float) and not math.isfinite(item)) or abs(item) > 9007199254740991:
+            if (isinstance(item, float) and not math.isfinite(item)) or abs(
+                item
+            ) > 9007199254740991:
                 raise GraphValueError("Number cannot be represented safely in the editor.")
         elif not isinstance(item, (str, bool, type(None))):
             raise GraphValueError("Only JSON values are supported.")
@@ -38,9 +41,13 @@ def bounded(value):
 
 
 def matches(value, field_type):
-    return {"string": isinstance(value, str), "number": type(value) in (int, float),
-            "boolean": type(value) is bool, "array": isinstance(value, list),
-            "object": isinstance(value, dict)}.get(field_type, False)
+    return {
+        "string": isinstance(value, str),
+        "number": type(value) in (int, float),
+        "boolean": type(value) is bool,
+        "array": isinstance(value, list),
+        "object": isinstance(value, dict),
+    }.get(field_type, False)
 
 
 def inputs(fields, supplied):
@@ -65,19 +72,30 @@ def resolve(value, supplied, steps, last, *, allow_missing=False):
     if isinstance(value, list):
         return [resolve(item, supplied, steps, last, allow_missing=allow_missing) for item in value]
     if isinstance(value, dict):
-        return {key: resolve(item, supplied, steps, last, allow_missing=allow_missing) for key, item in value.items()}
+        return {
+            key: resolve(item, supplied, steps, last, allow_missing=allow_missing)
+            for key, item in value.items()
+        }
     if not isinstance(value, str) or not value.startswith("$"):
         return value
     if value.startswith("$$"):
         return value[1:]
     root, *parts = value[1:].split(".")
-    if root not in {"input", "steps", "last"} or any(part in {"", "__proto__", "constructor", "prototype"} for part in parts):
+    if root not in {"input", "steps", "last"} or any(
+        part in {"", "__proto__", "constructor", "prototype"} for part in parts
+    ):
         raise GraphValueError("Invalid value reference.")
     current = {"input": supplied, "steps": steps, "last": last}[root]
     for part in parts:
         if isinstance(current, dict) and part in current:
             current = current[part]
-        elif isinstance(current, list) and part.isascii() and part.isdigit() and str(int(part)) == part and int(part) < len(current):
+        elif (
+            isinstance(current, list)
+            and part.isascii()
+            and part.isdigit()
+            and str(int(part)) == part
+            and int(part) < len(current)
+        ):
             current = current[int(part)]
         else:
             if allow_missing:
@@ -95,7 +113,9 @@ def equal(left, right):
     if isinstance(left, dict):
         return left.keys() == right.keys() and all(equal(left[key], right[key]) for key in left)
     if isinstance(left, list):
-        return len(left) == len(right) and all(equal(a, b) for a, b in zip(left, right, strict=True))
+        return len(left) == len(right) and all(
+            equal(a, b) for a, b in zip(left, right, strict=True)
+        )
     return left == right
 
 

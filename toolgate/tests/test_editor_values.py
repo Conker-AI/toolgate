@@ -5,8 +5,10 @@ from toolgate.core.editor_values import GraphValueError, bounded, compare, input
 
 
 def test_defaults_missing_fields_and_exact_input_types():
-    fields = [ToolField(name="count", type="number", required=True, default=2),
-              ToolField(name="note", type="string", required=False)]
+    fields = [
+        ToolField(name="count", type="number", required=True, default=2),
+        ToolField(name="note", type="string", required=False),
+    ]
     assert inputs(fields, {}) == {"count": 2}
     for supplied in ({"count": True}, {"extra": 1}, {"note": None}):
         with pytest.raises(GraphValueError):
@@ -46,8 +48,11 @@ def test_conditions_never_conflate_booleans_and_numbers():
         compare("greater", "2", 1)
 
 
-@pytest.mark.parametrize("value", [float("nan"), float("inf"), 9007199254740992, "x" * 65537],
-                         ids=["nan", "infinity", "unsafe-integer", "oversized-text"])
+@pytest.mark.parametrize(
+    "value",
+    [float("nan"), float("inf"), 9007199254740992, "x" * 65537],
+    ids=["nan", "infinity", "unsafe-integer", "oversized-text"],
+)
 def test_values_cannot_overflow_or_silently_round_in_browser_receipts(value):
     with pytest.raises(GraphValueError):
         bounded(value)

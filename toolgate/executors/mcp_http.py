@@ -487,7 +487,11 @@ def _untrusted(content: list, tool_name: str) -> list:
         if item["type"] == "text" and isinstance(item.get("text"), str):
             item["text"] = fenced("MCP", f"tool={tool_name}", item["text"])
         resource = item.get("resource")
-        if item["type"] == "resource" and isinstance(resource, dict) and isinstance(resource.get("text"), str):
+        if (
+            item["type"] == "resource"
+            and isinstance(resource, dict)
+            and isinstance(resource.get("text"), str)
+        ):
             resource["text"] = fenced("MCP", f"tool={tool_name}", resource["text"])
     return content
 

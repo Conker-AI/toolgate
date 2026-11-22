@@ -1,4 +1,5 @@
 """Executable-shape validation, separate from permissive editor draft storage."""
+
 from __future__ import annotations
 
 from .editor_drafts import EditorDocument
@@ -72,7 +73,9 @@ def validate_graph(document: EditorDocument) -> list[dict]:
         dominators[identity] = (set.intersection(*parents) if parents else set()) | {identity}
 
     allowed_configs = {
-        "input": (set(), set()), "set": ({"value"}, set()), "return": ({"value"}, set()),
+        "input": (set(), set()),
+        "set": ({"value"}, set()),
+        "return": ({"value"}, set()),
         "calculation": ({"operator", "left", "right"}, set()),
         "condition": ({"operator", "left"}, {"right"}),
         "loop": ({"items", "limit", "operation"}, set()),
@@ -86,7 +89,12 @@ def validate_graph(document: EditorDocument) -> list[dict]:
         if not required <= config.keys() or config.keys() - required - optional:
             issue("Step configuration has missing or unsupported fields.", node.id)
             continue
-        if node.type == "calculation" and config["operator"] not in ("add", "subtract", "multiply", "divide"):
+        if node.type == "calculation" and config["operator"] not in (
+            "add",
+            "subtract",
+            "multiply",
+            "divide",
+        ):
             issue("Choose a supported calculation operator.", node.id)
         if node.type == "condition":
             if config["operator"] not in ("equals", "greater", "less", "contains", "exists"):
@@ -94,14 +102,23 @@ def validate_graph(document: EditorDocument) -> list[dict]:
             if config["operator"] != "exists" and "right" not in config:
                 issue("Comparison needs a right value.", node.id)
         if node.type == "loop" and (
-                type(config["limit"]) is not int or not 1 <= config["limit"] <= document.budgets.maxLoopItems
-                or config["operation"] not in ("identity", "trim", "uppercase")):
-                issue("Use a supported loop operation within the item budget.", node.id)
+            type(config["limit"]) is not int
+            or not 1 <= config["limit"] <= document.budgets.maxLoopItems
+            or config["operation"] not in ("identity", "trim", "uppercase")
+        ):
+            issue("Use a supported loop operation within the item budget.", node.id)
         if node.type in ("tool_call", "workflow_call"):
             target = config["tool"] if node.type == "tool_call" else config["toolId"]
-            if not isinstance(target, str) or not target or target.startswith("$") or not isinstance(config["args"], dict):
+            if (
+                not isinstance(target, str)
+                or not target
+                or target.startswith("$")
+                or not isinstance(config["args"], dict)
+            ):
                 issue("Use a literal capability identity and an argument object.", node.id)
-            if node.type == "workflow_call" and (type(config["version"]) is not int or config["version"] < 1):
+            if node.type == "workflow_call" and (
+                type(config["version"]) is not int or config["version"] < 1
+            ):
                 issue("Select a positive published version.", node.id)
 
         def references(value):
@@ -114,11 +131,15 @@ def validate_graph(document: EditorDocument) -> list[dict]:
             elif isinstance(value, str) and value.startswith("$") and not value.startswith("$$"):
                 root, *parts = value[1:].split(".")
                 if root not in {"input", "steps", "last"} or any(
-                        part in {"", "__proto__", "constructor", "prototype"} for part in parts):
+                    part in {"", "__proto__", "constructor", "prototype"} for part in parts
+                ):
                     issue("Use a valid input, step or previous-result reference.", node.id)
                 elif root == "input" and parts and parts[0] not in inputs:
                     issue("Reference names an undeclared input.", node.id)
-                elif root == "steps" and (not parts or parts[0] == node.id or parts[0] not in dominators[node.id]):
+                elif root == "steps" and (
+                    not parts or parts[0] == node.id or parts[0] not in dominators[node.id]
+                ):
                     issue("Referenced step must run on every path to this node.", node.id)
+
         references(config)
     return issues

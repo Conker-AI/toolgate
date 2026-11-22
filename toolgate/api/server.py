@@ -84,8 +84,11 @@ async def owner_error(_request: Request, error: owner_channel.OwnerError):
 
 @app.exception_handler(mcp_http.MCPError)
 async def mcp_error(_request: Request, error: mcp_http.MCPError):
-    return JSONResponse({"detail": {"code": error.code, "message": str(error)}},
-                        status_code=error.status, headers={"Cache-Control": "no-store"})
+    return JSONResponse(
+        {"detail": {"code": error.code, "message": str(error)}},
+        status_code=error.status,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.exception_handler(RequestValidationError)

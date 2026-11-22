@@ -23,8 +23,9 @@ def verifier(monkeypatch):
     return module
 
 
-def fake_toolgate(monkeypatch, module, lockdown: bool, install: bool = True,
-                  accept_writes: bool = False) -> list[str]:
+def fake_toolgate(
+    monkeypatch, module, lockdown: bool, install: bool = True, accept_writes: bool = False
+) -> list[str]:
     """`install`: the owner's tools and approval method exist; `accept_writes`: every POST is 200."""
     seen: list[str] = []
 
@@ -35,8 +36,11 @@ def fake_toolgate(monkeypatch, module, lockdown: bool, install: bool = True,
             return httpx.Response(200, json={"lockdown": lockdown})
         if request.method == "DELETE":
             return httpx.Response(404)
-        if install and request.method == "GET" and path in {
-                "/v2/tools/memorygate-context", "/v2/tools/github-repos-count"}:
+        if (
+            install
+            and request.method == "GET"
+            and path in {"/v2/tools/memorygate-context", "/v2/tools/github-repos-count"}
+        ):
             return httpx.Response(200, json={"id": path.rsplit("/", 1)[1]})
         if install and path == "/v2/verification-methods":
             return httpx.Response(200, json=[{"id": "m1", "name": "Home approval adapter"}])
@@ -45,8 +49,11 @@ def fake_toolgate(monkeypatch, module, lockdown: bool, install: bool = True,
         return httpx.Response(500, text="fake ToolGate refuses the rest")
 
     real = httpx.Client
-    monkeypatch.setattr(module.httpx, "Client", lambda **kwargs: real(
-        transport=httpx.MockTransport(answer), base_url=kwargs["base_url"]))
+    monkeypatch.setattr(
+        module.httpx,
+        "Client",
+        lambda **kwargs: real(transport=httpx.MockTransport(answer), base_url=kwargs["base_url"]),
+    )
     return seen
 
 

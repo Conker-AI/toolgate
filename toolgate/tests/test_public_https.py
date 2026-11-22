@@ -14,25 +14,62 @@ from toolgate.executors import research, research_base
 
 
 def answers(*addresses):
-    return [(socket.AF_INET6 if ":" in address else socket.AF_INET,
-             socket.SOCK_STREAM, 6, "", (address, 443)) for address in addresses]
+    return [
+        (
+            socket.AF_INET6 if ":" in address else socket.AF_INET,
+            socket.SOCK_STREAM,
+            6,
+            "",
+            (address, 443),
+        )
+        for address in addresses
+    ]
 
 
-@pytest.mark.parametrize("address", [
-    "100.64.0.1", "100.127.255.254", "100.100.100.200", "127.0.0.1", "10.0.0.1",
-    "172.16.1.1", "192.168.1.1", "169.254.169.254", "168.63.129.16", "0.0.0.0",
-    "224.0.0.1", "198.18.0.1", "::1", "::", "fe80::1", "fd7a:115c:a1e0::1",
-    "ff02::1", "::ffff:100.64.0.1", "2002:6440:0001::1", "64:ff9b::6440:1",
-    "64:ff9b:1::1", "fec0::1", "192.0.0.8", "192.88.99.1",
-])
+@pytest.mark.parametrize(
+    "address",
+    [
+        "100.64.0.1",
+        "100.127.255.254",
+        "100.100.100.200",
+        "127.0.0.1",
+        "10.0.0.1",
+        "172.16.1.1",
+        "192.168.1.1",
+        "169.254.169.254",
+        "168.63.129.16",
+        "0.0.0.0",
+        "224.0.0.1",
+        "198.18.0.1",
+        "::1",
+        "::",
+        "fe80::1",
+        "fd7a:115c:a1e0::1",
+        "ff02::1",
+        "::ffff:100.64.0.1",
+        "2002:6440:0001::1",
+        "64:ff9b::6440:1",
+        "64:ff9b:1::1",
+        "fec0::1",
+        "192.0.0.8",
+        "192.88.99.1",
+    ],
+)
 def test_private_answers_are_denied_everywhere(address, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers(address))
     assert not research_base._public_https_url("https://public-looking.example/page")
     assert not dispatch._public_destination("public-looking.example")
-    assert research_base._normalize("title", "https://public-looking.example", "text", "web") is None
+    assert (
+        research_base._normalize("title", "https://public-looking.example", "text", "web") is None
+    )
     with pytest.raises(HTTPException) as denied:
-        dispatch._execute_http_json({"url": "https://public-looking.example/page",
-                                   "allowed_hosts": ["public-looking.example"]}, {})
+        dispatch._execute_http_json(
+            {
+                "url": "https://public-looking.example/page",
+                "allowed_hosts": ["public-looking.example"],
+            },
+            {},
+        )
     assert denied.value.detail["code"] == "DESTINATION_DENIED"
 
 
@@ -81,9 +118,14 @@ OK = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 6\r\n\r\np
 
 
 def handle(monkeypatch, url="https://example.com/page"):
-    monkeypatch.setattr(research.research_cache, "get_research_result", lambda _: {
-        "url": url, "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
-    })
+    monkeypatch.setattr(
+        research.research_cache,
+        "get_research_result",
+        lambda _: {
+            "url": url,
+            "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        },
+    )
 
 
 def test_socket_is_pinned_and_hostname_tls_and_host_header_survive(monkeypatch):
@@ -108,18 +150,29 @@ def test_dns_rebinding_is_denied_before_socket_connect(monkeypatch):
     assert connections == []
 
 
-@pytest.mark.parametrize("location", [
-    "https://tailnet.example/private", "https://100.64.0.5/private",
-    "https://169.254.169.254/latest/meta-data/", "http://example.com/plaintext",
-])
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://tailnet.example/private",
+        "https://100.64.0.5/private",
+        "https://169.254.169.254/latest/meta-data/",
+        "http://example.com/plaintext",
+    ],
+)
 def test_redirect_chain_never_contacts_private_target(location, monkeypatch):
     def resolve(host, *a, **k):
-        return answers("93.184.216.34" if host in {"example.com", "second.example"}
-                       else "100.64.0.5")
+        return answers(
+            "93.184.216.34" if host in {"example.com", "second.example"} else "100.64.0.5"
+        )
+
     monkeypatch.setattr(socket, "getaddrinfo", resolve)
-    responses = [(b"HTTP/1.1 302 Found\r\nLocation: https://second.example/page\r\n"
-                  b"Content-Length: 0\r\n\r\n"),
-                 f"HTTP/1.1 307 Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n".encode()]
+    responses = [
+        (
+            b"HTTP/1.1 302 Found\r\nLocation: https://second.example/page\r\n"
+            b"Content-Length: 0\r\n\r\n"
+        ),
+        f"HTTP/1.1 307 Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n".encode(),
+    ]
     connections, _, _ = network(monkeypatch, responses)
     handle(monkeypatch)
     with pytest.raises(research.ResearchError, match="redirect"):
@@ -136,21 +189,30 @@ def test_public_fetch_still_returns_content(monkeypatch):
 
 def test_compressed_page_is_capped_after_decompression(monkeypatch):
     import gzip
+
     body = gzip.compress(b"a" * (2 * 1024 * 1024))
-    bomb = (b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n"
-            + f"Content-Length: {len(body)}\r\n\r\n".encode() + body)
+    bomb = (
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+        + body
+    )
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers("93.184.216.34"))
     network(monkeypatch, [bomb])
     handle(monkeypatch)
     with pytest.raises(research.ResearchError, match="512 KiB decompressed"):
         research_base.fetch("issued-handle")
 
+
 def test_public_health_probe_cannot_rebind_into_tailnet(monkeypatch):
     replies = [answers("93.184.216.34"), answers("100.64.0.1")]
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: replies.pop(0))
-    monkeypatch.setattr(server.control_plane, "get", lambda *a: {
-        "destination_policy": {"health_url": "https://example.com/health"},
-    })
+    monkeypatch.setattr(
+        server.control_plane,
+        "get",
+        lambda *a: {
+            "destination_policy": {"health_url": "https://example.com/health"},
+        },
+    )
     monkeypatch.setattr(server.control_plane, "update_service", lambda sid, fields: fields)
     monkeypatch.setattr(server.control_plane, "event", lambda *a: None)
     connections, _, _ = network(monkeypatch, [OK])
@@ -160,10 +222,13 @@ def test_public_health_probe_cannot_rebind_into_tailnet(monkeypatch):
 
 def test_http_json_uses_pinned_transport_and_refuses_redirects(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers("93.184.216.34"))
-    connections, _, _ = network(monkeypatch, [
-        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
-        b"HTTP/1.1 302 Found\r\nLocation: https://100.64.0.1/\r\nContent-Length: 0\r\n\r\n",
-    ])
+    connections, _, _ = network(
+        monkeypatch,
+        [
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}",
+            b"HTTP/1.1 302 Found\r\nLocation: https://100.64.0.1/\r\nContent-Length: 0\r\n\r\n",
+        ],
+    )
     execution = {"url": "https://example.com/page", "allowed_hosts": ["example.com"]}
     assert dispatch._execute_http_json(execution, {}) == {"ok": True, "result": {}}
     with pytest.raises(HTTPException) as denied:
@@ -172,8 +237,16 @@ def test_http_json_uses_pinned_transport_and_refuses_redirects(monkeypatch):
     assert connections == [("93.184.216.34", 443), ("93.184.216.34", 443)]
 
 
-@pytest.mark.parametrize("url", ["https://example.com:80/", "https://user:pass@example.com/",
-                                 "http://example.com/", "https://[broken", "https://example.com:bad"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com:80/",
+        "https://user:pass@example.com/",
+        "http://example.com/",
+        "https://[broken",
+        "https://example.com:bad",
+    ],
+)
 def test_invalid_urls_never_connect(url, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: answers("93.184.216.34"))
     assert not public_https.public_url(url)
@@ -185,7 +258,8 @@ def test_invalid_urls_never_connect(url, monkeypatch):
 
 def test_missing_url_template_argument_is_a_validation_error():
     with pytest.raises(HTTPException) as denied:
-        dispatch._execute_http_json({"url": "https://example.com/items/{item_id}",
-                                     "allowed_hosts": ["example.com"]}, {})
+        dispatch._execute_http_json(
+            {"url": "https://example.com/items/{item_id}", "allowed_hosts": ["example.com"]}, {}
+        )
     assert denied.value.status_code == 422
     assert denied.value.detail["code"] == "VALIDATION_ERROR"

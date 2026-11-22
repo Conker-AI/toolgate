@@ -13,12 +13,19 @@ def branch_graph():
     value = document()
     value["inputs"] = [{"name": "enabled", "type": "boolean", "required": True}]
     template = value["nodes"][1]
+
     def node(identity, kind, config):
         return {**deepcopy(template), "id": identity, "type": kind, "config": config}
-    value["nodes"] = [value["nodes"][0],
-        node("choose", "condition", {"operator": "equals", "left": "$input.enabled", "right": True}),
-        node("yes", "set", {"value": "yes"}), node("no", "set", {"value": "no"}),
-        node("result", "return", {"value": "$last"})]
+
+    value["nodes"] = [
+        value["nodes"][0],
+        node(
+            "choose", "condition", {"operator": "equals", "left": "$input.enabled", "right": True}
+        ),
+        node("yes", "set", {"value": "yes"}),
+        node("no", "set", {"value": "no"}),
+        node("result", "return", {"value": "$last"}),
+    ]
     value["edges"] = [
         {"id": "start", "source": "input", "target": "choose"},
         {"id": "true", "source": "choose", "target": "yes", "branch": "true"},
@@ -55,7 +62,13 @@ def test_disconnected_drafts_and_cycles_cannot_execute():
 
 
 def test_invalid_references_and_configs_are_reported_with_node_identity():
-    for reference in ("$input.missing", "$steps.result", "$steps", "$last.__proto__", "$vault.secret"):
+    for reference in (
+        "$input.missing",
+        "$steps.result",
+        "$steps",
+        "$last.__proto__",
+        "$vault.secret",
+    ):
         value = branch_graph()
         value["nodes"][-1]["config"]["value"] = reference
         assert any(issue["node_id"] == "result" for issue in check(value))
@@ -66,17 +79,24 @@ def test_invalid_references_and_configs_are_reported_with_node_identity():
 
 def test_literal_dollar_and_nested_reference_values():
     value = branch_graph()
-    value["nodes"][-1]["config"]["value"] = {"literal": "$$vault.secret", "nested": ["$steps.choose", "$input.enabled"]}
+    value["nodes"][-1]["config"]["value"] = {
+        "literal": "$$vault.secret",
+        "nested": ["$steps.choose", "$input.enabled"],
+    }
     assert check(value) == []
 
 
 def test_loop_limits_and_version_types_are_strict():
-    for config in ({"items": [], "limit": True, "operation": "trim"},
-                   {"items": [], "limit": 21, "operation": "trim"},
-                   {"items": [], "limit": 2, "operation": "execute"}):
+    for config in (
+        {"items": [], "limit": True, "operation": "trim"},
+        {"items": [], "limit": 21, "operation": "trim"},
+        {"items": [], "limit": 2, "operation": "execute"},
+    ):
         value = branch_graph()
         value["nodes"][2].update(type="loop", config=config)
         assert any(issue["node_id"] == "yes" for issue in check(value))
     value = branch_graph()
-    value["nodes"][2].update(type="workflow_call", config={"toolId": "other", "version": True, "args": {}})
+    value["nodes"][2].update(
+        type="workflow_call", config={"toolId": "other", "version": True, "args": {}}
+    )
     assert any("published version" in issue["message"] for issue in check(value))
