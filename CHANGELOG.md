@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.17.1
+
+- **Internal refactors, no behaviour change.** Workflow block validation moved out of `api/definitions.py` (564 -> 416 lines) and the site research provider was split by site (590 -> 215 lines). (#118, #119)
+- **Style:** the code is formatted with `ruff format`, checked in CI and pre-commit. (#117)
+- **CI:** gitleaks secret scan; AGENTS.md for any AI model working in the repo. (#115, #116)
+
 ## 0.17.0
 
 - **More refusal tests.** Container replacement preparation, editor graph validation, threat-list feeds, research page fetching and MCP over HTTP are tested on malformed or hostile input; the CI coverage floor goes up with them. No behaviour change. (#112)
