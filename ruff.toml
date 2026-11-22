@@ -47,16 +47,8 @@ extend-immutable-calls = [
 ]
 
 [format]
-# Formatting the first three grows them past the 600-line limit; the rest carry text anchors of the
-# mutation drill (scripts/mutation_check.py). They join the format run when split or re-anchored.
+# Formatting these grows them past the 600-line limit; they join the format run once split.
 exclude = [
-    "toolgate/core/approvals.py",
-    "toolgate/core/editor_catalogue.py",
-    "toolgate/core/execution_journal.py",
-    "toolgate/core/spending.py",
-    "toolgate/core/control_plane.py",
-    "toolgate/scripts/mutation_check.py",
-    "toolgate/tests/test_research_search.py",
-    "toolgate/tests/test_research_providers.py",
-    "toolgate/tests/test_research_reddit.py",
+    "toolgate/core/control_plane.py",  # formats to 749 lines; split first
+    "toolgate/scripts/mutation_check.py",  # formats to 714 lines; split first
 ]
