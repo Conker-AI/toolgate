@@ -10,12 +10,6 @@ on:
   schedule:
     - cron: "17 5 * * 1"
   pull_request:
-    paths:
-      - ".github/workflows/security.yml"
-      - "toolgate/requirements.txt"
-      - "dashboard/package.json"
-      - "dashboard/package-lock.json"
-      - "dashboard/Dockerfile"
   workflow_dispatch:
 
 # Read-only token: the check reads code and public advisories; it writes nothing.
@@ -65,3 +59,24 @@ jobs:
           grep -oE '[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9_.]*' dashboard/Dockerfile > "$RUNNER_TEMP/server.txt"
           test -s "$RUNNER_TEMP/server.txt"
           pip-audit --strict --progress-spinner off -r "$RUNNER_TEMP/server.txt"
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: a pull request is scanned for its own commits, the schedule for everything.
+          fetch-depth: 0
+
+      - name: Scan
+        # gitleaks, pinned by tag; the default rules, no custom allowlist.
+        env:
+          GITLEAKS: ghcr.io/gitleaks/gitleaks:v8.28.0
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="--log-opts=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          else
+            range=""
+          fi
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" "$GITLEAKS" git /repo --no-banner --redact --exit-code 1 $range
