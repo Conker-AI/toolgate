@@ -49,5 +49,7 @@ extend-immutable-calls = [
 [format]
 # Formatting this grows it past the 600-line limit; it joins the format run once split.
 exclude = [
-    "toolgate/core/control_plane.py",  # formats to 749 lines; split first
+    "toolgate/core/control_plane.py",  # split from one 749-line file; formatted in the next commit
+    "toolgate/core/control_plane_rules.py",
+    "toolgate/core/control_plane_schema.py",
 ]
