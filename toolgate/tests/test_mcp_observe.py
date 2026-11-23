@@ -464,12 +464,29 @@ def test_a_longer_name_is_observe_only_when_its_server_says_read_only(api, peer)
         assert listed_class(api, tool["id"]) == "act_outward"
         response = invoke(api, action="mcp.observe-2", tool_id=tool["id"])
         assert response.json()["code"] == "CONFIRMATION_REQUIRED", response.text
-    # A server that drops the hint: the advert he confirmed is gone, so it is never sent unasked.
-    inject(tool["id"], read_class=stored)
+
+
+def test_a_server_that_drops_its_read_only_hint_after_a_long_name_observe_reverts_it(api, peer):
+    peer.tool = "get_echo_text"
+    peer.advert = {"annotations": {"readOnlyHint": True}}
+    names = {"id": "mcp.get-echo-text", "name": "Get echo text", "tool_name": "get_echo_text"}
+    tool = imported(api, **names)
+    assert set_class(api, "observe", tool_id=tool["id"]).status_code == 200
+    assert cp.get("tool", tool["id"])["read_class"]["read_only_hint"] is True
+    # The server now lists the tool without annotations: the call is refused before tools/call.
     peer.advert = {}
-    response = invoke(api, action="mcp.observe-3", tool_id=tool["id"])
+    response = invoke(api, tool_id=tool["id"])
     assert response.json()["result"]["error_code"] == "advert_changed", response.text
-    assert len(peer.tool_calls) == 1 and listed_class(api, tool["id"]) == "act_outward"
+    assert not peer.tool_calls and listed_class(api, tool["id"]) == "act_outward"
+    reverted = cp.events(event_type="mcp_class_reverted")
+    assert [event["payload"]["reason"] for event in reverted] == ["advert_changed"]
+    assert cp.get("tool", tool["id"])["read_class"] == {"class": "act_outward"}
+    response = invoke(api, action="mcp.observe-2", tool_id=tool["id"])
+    assert response.json()["code"] == "CONFIRMATION_REQUIRED", response.text
+    assert not peer.tool_calls
+    # Confirming again without the hint is refused: the long name needs it.
+    response = set_class(api, "observe", tool_id=tool["id"])
+    assert response.status_code == 422 and response.json()["detail"]["code"] == "act_outward_name"
 
 
 def test_a_pinned_long_name_needs_the_hint_its_tool_records(api, peer):

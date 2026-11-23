@@ -80,7 +80,8 @@ and the audit log apply exactly as before (`tool_executed` carries `"read_class"
   (`searchemails`, `list_notebooks`), and a word that acts inside or at the edge of another
   (`get_settings`, `get_address`, `get_market_data`, `list_posts`, `get_updates`,
   `list_skills`, `list_pages`, `list_models`, `get_string`, `get_display`, `get_context`,
-  `get_current_user`, `list_connections`, `list_builds`, `list_backups`). Without the hint, every
+  `get_current_user`, `list_connections`, `list_builds`, `list_backups`, `get_flags`,
+  `get_rates`, `get_strategy`, `get_release`, `list_releases`). Without the hint, every
   longer read asks too.
 - He can only mark Observe what the server still advertises as imported: the class route
   checks the names first (with the hint's longer shape), then rediscovers the endpoint (409

@@ -143,6 +143,19 @@ THIRD = [
 ]
 
 
+# The fourth review: more verbs that act, each after a read verb alone.
+FOURTH = ["checkin", "enroll", "unenroll", "renew", "extend", "lease", "hide", "unhide"]
+FOURTH += ["discard", "retry", "redo", "reload", "rate", "flag"]
+
+
+def test_the_fourth_reviews_verbs_act_after_a_read_verb():
+    assert set(FOURTH) <= observe.ACTS
+    for word in FOURTH:
+        for name in (f"get_{word}", f"list_{word}s", f"get{word.capitalize()}"):
+            assert observe.says_act_outward(name), name
+            assert observe.says_act_outward(name, read_only_hint=True), name
+
+
 @BOTH
 @pytest.mark.parametrize(
     "name",
@@ -263,6 +276,11 @@ def test_names_that_act(name, read_only_hint):
         "list_calls",
         "list_sent",
         "get_report",
+        "get_review",
+        "get_tag",
+        "get_label",
+        "get_record",
+        "get_link",
         "get_text",
         "get_contacts",
         "find_contact",
@@ -295,7 +313,6 @@ HINTED_READS = [
     "get_file_metadata",
     "list_recent_files",
     "list_unread_messages",
-    "get_latest_release",
     "get_job_status",
     "list_pull_requests",
     "Get echo text",
@@ -350,6 +367,10 @@ KNOWN_READS_THAT_ASK = [
     "list_backups",
     "list_forks",
     "list_notebooks",
+    "get_latest_release",
+    "list_releases",
+    "get_rates",
+    "get_strategy",
 ]
 
 
