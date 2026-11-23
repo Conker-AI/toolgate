@@ -19,7 +19,10 @@ def is_scoped(agent: dict, capability: str) -> bool:
 def _scoped(scopes: list, capability: str) -> bool:
     if "*" in scopes or capability in scopes:
         return True
-    if any(isinstance(scope, str) and scope.endswith("*") and capability.startswith(scope[:-1]) for scope in scopes):
+    if any(
+        isinstance(scope, str) and scope.endswith("*") and capability.startswith(scope[:-1])
+        for scope in scopes
+    ):
         return True
     if capability.startswith("automation:"):
         return "automation:*" in scopes
@@ -28,8 +31,17 @@ def _scoped(scopes: list, capability: str) -> bool:
         "tool:*" in scopes
         or f"tool:{tool_id}" in scopes
         or tool_id in scopes
-        or any(isinstance(scope, str) and scope.endswith("*") and tool_id.startswith(scope[:-1]) for scope in scopes)
-        or any(isinstance(scope, str) and scope.startswith("tool:") and scope.endswith("*") and tool_id.startswith(scope[5:-1]) for scope in scopes)
+        or any(
+            isinstance(scope, str) and scope.endswith("*") and tool_id.startswith(scope[:-1])
+            for scope in scopes
+        )
+        or any(
+            isinstance(scope, str)
+            and scope.startswith("tool:")
+            and scope.endswith("*")
+            and tool_id.startswith(scope[5:-1])
+            for scope in scopes
+        )
     )
 
 
@@ -77,12 +89,18 @@ def validate_inputs(schema: list[dict], args: dict) -> list[str]:
                 errors.append(f"'{name}' must contain at least {field['min_items']} items")
             if field.get("max_items") is not None and len(value) > field["max_items"]:
                 errors.append(f"'{name}' must contain at most {field['max_items']} items")
-            if field.get("unique_items") and len({json.dumps(item, sort_keys=True) for item in value}) != len(value):
+            if field.get("unique_items") and len(
+                {json.dumps(item, sort_keys=True) for item in value}
+            ) != len(value):
                 errors.append(f"'{name}' must not contain duplicate items")
-            if field.get("item_type") == "string" and any(not isinstance(item, str) for item in value):
+            if field.get("item_type") == "string" and any(
+                not isinstance(item, str) for item in value
+            ):
                 errors.append(f"'{name}' items must be text")
             pattern = field.get("item_pattern")
-            if pattern and any(not isinstance(item, str) or not re.fullmatch(pattern, item) for item in value):
+            if pattern and any(
+                not isinstance(item, str) or not re.fullmatch(pattern, item) for item in value
+            ):
                 errors.append(f"'{name}' contains an invalid item")
         allowed = field.get("allowed_values") or []
         if allowed and value not in allowed:
