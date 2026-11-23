@@ -359,7 +359,7 @@ def _shape_tool_result(tool: dict, result: dict) -> dict:
     return result
 
 
-def _dispatch_tool(tool: dict, args: dict) -> dict:
+def _dispatch_tool(tool: dict, args: dict, advert: str | None = None) -> dict:
     # v2 executes only typed, declared executors. Arbitrary Python is intentionally unsupported.
     executor_type = tool.get("execution", {}).get("type")
     if tool.get("id") == "system.port-control" or executor_type == "port_control":
@@ -411,7 +411,8 @@ def _dispatch_tool(tool: dict, args: dict) -> dict:
     elif executor_type == "http_json":
         result = _execute_http_json(tool["execution"], args)
     elif executor_type == "mcp_http":
-        result = mcp_http.execute(tool["execution"], args)
+        # An Observe call also checks the description and annotations he confirmed (`advert`).
+        result = mcp_http.execute(tool["execution"], args, advert)
     elif executor_type == "memorygate":
         result = _execute_memorygate(tool["execution"], args)
     elif executor_type == "ollama_generate":

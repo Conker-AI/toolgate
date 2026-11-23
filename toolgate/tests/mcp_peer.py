@@ -37,6 +37,7 @@ class Peer:
         self.unknown = False
         self.error = False
         self.extra_tools = []
+        self.advert = {}  # changes to what the echo tool's listing says besides its schema
         self.pages = None
         self.result = None
         self.session = "external-session-id"
@@ -98,7 +99,12 @@ class Peer:
         elif method == "tools/list":
             result = {
                 "tools": [
-                    {"name": "echo", "description": "Echo text", "inputSchema": self.schema},
+                    {
+                        "name": "echo",
+                        "description": "Echo text",
+                        "inputSchema": self.schema,
+                        **self.advert,
+                    },
                     *self.extra_tools,
                 ]
             }

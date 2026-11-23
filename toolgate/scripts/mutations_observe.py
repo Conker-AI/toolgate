@@ -7,7 +7,9 @@ mutation_check.py applies them after parts 1 and 2.
 from __future__ import annotations
 
 OBSERVE = "toolgate/tests/test_mcp_observe.py::"
+NAMES = "toolgate/tests/test_mcp_observe_names.py::"
 GUARD = "toolgate/core/mcp_observe.py"
+IMPORTS = "toolgate/core/mcp_imports.py"
 MUTANTS: list[tuple[str, str, str, str, str]] = [
     (
         "an Act outward tool runs unasked",
@@ -29,6 +31,13 @@ MUTANTS: list[tuple[str, str, str, str, str]] = [
         "        or {key: stored.get(key) for key in BOUND} != execution\n",
         "",
         OBSERVE + "test_a_stored_observe_for_another_schema_does_not_apply",
+    ),
+    (
+        "Observe without the advert he confirmed applies",
+        GUARD,
+        '        or not ADVERT.fullmatch(str(stored.get("advert_hash")))\n',
+        "",
+        OBSERVE + "test_a_stored_observe_without_the_advert_he_confirmed_does_not_apply",
     ),
     (
         "Observe ignores his sensitive mark",
@@ -58,26 +67,83 @@ MUTANTS: list[tuple[str, str, str, str, str]] = [
         "    if not isinstance(tool, dict):",
         OBSERVE + "test_observe_never_applies_outside_imported_mcp_tools",
     ),
+    # How a name is read: each rule has a name that only it catches.
     (
-        "a word with an ending can be Observe",
+        "a long word glued inside a part is missed",
         GUARD,
-        '_ENDINGS = ("", "s", "es", "d", "ed", "ing")',
-        '_ENDINGS = ("",)',
-        OBSERVE + "test_names_that_act[list_shared_drives]",
+        "    if any(stem in part for stem in _STEMS):",
+        "    if any(part.startswith(stem) for stem in _STEMS):",
+        NAMES + "test_names_that_act[quicksend]",
+    ),
+    (
+        "a long word with its e dropped is missed",
+        GUARD,
+        '        *((word[:-1] + "ing",) if word.endswith("e") else ()),\n',
+        "",
+        NAMES + "test_names_that_act[updating_profile]",
+    ),
+    (
+        "a long word with its y changed is missed",
+        GUARD,
+        '        *((word[:-1] + "ied",) if word.endswith("y") else ()),\n',
+        "",
+        NAMES + "test_names_that_act[replied_to_thread]",
+    ),
+    (
+        "a noun leading a name reads",
+        GUARD,
+        "_LEADING = LEADS | _SHORT",
+        "_LEADING = _SHORT",
+        NAMES + "test_names_that_act[message_user]",
+    ),
+    (
+        "a read word counts after a part it does not hold",
+        GUARD,
+        "        read_before = read_before or any(_inflects(part, word) for word in READS)",
+        "        read_before = True",
+        NAMES + "test_names_that_act[slack_message_user]",
+    ),
+    (
+        "a short word after a read word is missed",
+        GUARD,
+        "        if any(_inflects(bare, word) for word in _SHORT):\n            return True\n",
+        "",
+        NAMES + "test_names_that_act[get_or_add_label]",
     ),
     (
         "a leading re or un hides the word",
         GUARD,
-        '        if _says(word) or (word[:2] in ("re", "un") and _says(word[2:])):',
-        "        if _says(word):",
-        OBSERVE + "test_names_that_act[unsubscribe]",
+        '    for bare in (part, *((part[2:],) if part[:2] in ("re", "un") else ())):',
+        "    for bare in (part,):",
+        NAMES + "test_names_that_act[retweet]",
     ),
     (
-        "a glued name hides the word",
+        "a look-alike letter outside ASCII reads",
         GUARD,
-        "    if len(found) == 1:",
-        "    if False:",
-        OBSERVE + "test_names_that_act[sendmessage]",
+        "    if not text.isascii() or not text.isprintable():",
+        "    if not text.isprintable():",
+        NAMES + "test_names_that_act[cyrillic-s]",
+    ),
+    (
+        "a control character splits a word",
+        GUARD,
+        "    if not text.isascii() or not text.isprintable():",
+        "    if not text.isascii():",
+        NAMES + "test_names_that_act[control-character]",
+    ),
+    (
+        "a name with no letters reads",
+        GUARD,
+        "    if not parts:\n        return True\n",
+        "",
+        NAMES + "test_names_that_act[punctuation]",
+    ),
+    (
+        "a false readOnlyHint passes",
+        GUARD,
+        '        or annotations.get("readOnlyHint", True) is not True\n',
+        "",
+        NAMES + "test_server_hints_that_say_a_tool_changes_things",
     ),
     (
         "dispatch skips the class recheck",
@@ -85,6 +151,20 @@ MUTANTS: list[tuple[str, str, str, str, str]] = [
         '        if observed and not mcp_observe.runs_unasked(conn, tool, "owner_confirmation", decision):',
         "        if False:",
         OBSERVE + "test_a_class_change_during_a_call_is_caught_before_dispatch",
+    ),
+    (
+        "an Observe call is sent without the advert he confirmed",
+        "toolgate/api/invocation.py",
+        '            result = _dispatch_tool(tool, args, advert=confirmed["advert"])',
+        "            result = _dispatch_tool(tool, args)",
+        OBSERVE + "test_a_changed_description_or_annotation_at_a_call_reverts_to_act_outward",
+    ),
+    (
+        "the call ignores a changed advert",
+        "toolgate/executors/mcp_http.py",
+        '    if advert is not None and matches[0]["advertHash"] != advert:',
+        "    if False:",
+        OBSERVE + "test_a_changed_description_or_annotation_at_a_call_reverts_to_act_outward",
     ),
     (
         "a changed schema at a call keeps Observe",
@@ -101,15 +181,40 @@ MUTANTS: list[tuple[str, str, str, str, str]] = [
         OBSERVE + "test_his_discovery_of_a_renamed_or_changed_tool_reverts_it",
     ),
     (
+        "his discovery keeps a changed description",
+        GUARD,
+        '        elif advert_seen != stored.get("advert_hash"):',
+        "        elif False:",
+        OBSERVE + "test_his_discovery_of_a_changed_description_reverts_it",
+    ),
+    (
         "the class route marks a name that acts Observe",
-        "toolgate/core/mcp_imports.py",
-        "            if any(mcp_observe.says_act_outward(name) for name in names):",
-        "            if False:",
-        OBSERVE + "test_a_name_that_acts_can_never_be_marked_observe[changes0]",
+        IMPORTS,
+        "    if any(mcp_observe.says_act_outward(name) for name in names):",
+        "    if False:",
+        OBSERVE + "test_a_name_that_acts_can_never_be_marked_observe[changes2]",
+    ),
+    (
+        "the class route ignores a destructive hint",
+        IMPORTS,
+        '    if mcp_observe.hints_act(advertised.get("annotations")):',
+        "    if False:",
+        OBSERVE + "test_a_tool_its_server_says_changes_things_can_never_be_marked_observe",
+    ),
+    (
+        "the class route binds a tool the server no longer advertises",
+        IMPORTS,
+        (
+            '    mcp_observe.notice(execution["url"], execution["secret_ref"], discovered)\n'
+            '    mcp_http.require_match(discovered["tools"], execution, '
+            'discovered.get("unsupportedTools", []))\n'
+        ),
+        '    mcp_observe.notice(execution["url"], execution["secret_ref"], discovered)\n',
+        OBSERVE + "test_observe_needs_the_server_to_still_advertise_the_tool_he_imported",
     ),
     (
         "the class route ignores the version he saw",
-        "toolgate/core/mcp_imports.py",
+        IMPORTS,
         '        if tool.get("version") != payload.expected_version:',
         "        if False:",
         OBSERVE + "test_only_the_owner_channel_marks_observe_for_the_version_it_saw",

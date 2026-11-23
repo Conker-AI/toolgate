@@ -96,6 +96,15 @@ def listed_class(api, tool_id=TOOL):
     return tools[tool_id]["read_class"]
 
 
+def confirmed(execution, description="Echo text"):
+    """A stored Observe as the class route writes it, for the advert the fixture server gives."""
+    return {
+        "class": "observe",
+        **observe.bound(execution),
+        "advert_hash": mcp.advert_hash(description, None),
+    }
+
+
 def requests():
     return [item for item in cp.list_objects("request") if item.get("kind") == "verification"]
 
@@ -213,7 +222,7 @@ def test_a_stored_observe_on_a_name_that_acts_still_asks(api, peer):
     peer.extra_tools = [{"name": "send_message", "description": "Send", "inputSchema": SCHEMA}]
     tool = imported(api, id="mcp.chat", name="Chat", tool_name="send_message")
     stored = cp.get("tool", tool["id"])
-    inject(tool["id"], read_class={"class": "observe", **observe.bound(stored["execution"])})
+    inject(tool["id"], read_class=confirmed(stored["execution"], "Send"))
     assert listed_class(api, tool["id"]) == "act_outward"
     assert invoke(api, tool_id=tool["id"]).json()["code"] == "CONFIRMATION_REQUIRED"
 
@@ -236,6 +245,9 @@ def test_only_the_owner_channel_marks_observe_for_the_version_it_saw(api, peer):
     assert stale.status_code == 409 and stale.json()["detail"]["code"] == "definition_conflict"
     assert listed_class(api) == "act_outward" and cp.get("tool", TOOL)["version"] == 1
     assert set_class(api, "observe").status_code == 200
+    stale = set_class(api, "act_outward", version=1)
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "definition_conflict"
+    assert listed_class(api) == "observe" and cp.get("tool", TOOL)["version"] == 2
     # The admin catalogue cannot keep or grant it: a legacy upsert drops the class (fail closed).
     tool = cp.get("tool", TOOL)
     upsert = {key: tool[key] for key in ("name", "description", "inputs", "execution", "policy")}
@@ -251,7 +263,10 @@ def test_act_outward_again_asks_at_once_and_no_op_keeps_the_version(api, peer):
     assert set_class(api, "act_outward").json()["tool"]["version"] == 1  # already Act outward
     assert set_class(api, "observe").status_code == 200
     assert invoke(api).json()["code"] == "OK"
+    # Act outward only tightens, so it never waits on the server: nothing is listed for it.
+    listed = len(peer.calls)
     response = set_class(api, "act_outward")
+    assert len(peer.calls) == listed
     assert response.status_code == 200 and response.json()["tool"]["read_class"] == "act_outward"
     assert invoke(api, action="mcp.observe-2").json()["code"] == "CONFIRMATION_REQUIRED"
     assert len(peer.tool_calls) == 1
@@ -291,9 +306,9 @@ def test_his_discovery_of_a_renamed_or_changed_tool_reverts_it(api, peer):
 
 def test_a_stored_observe_for_another_schema_does_not_apply(api, peer):
     imported(api)
-    stored = cp.get("tool", TOOL)
-    binding = {**observe.bound(stored["execution"]), "schema_hash": "0" * 64}
-    inject(TOOL, read_class={"class": "observe", **binding})
+    assert set_class(api, "observe").status_code == 200
+    stored = cp.get("tool", TOOL)["read_class"]
+    inject(TOOL, read_class={**stored, "schema_hash": "0" * 64})
     assert listed_class(api) == "act_outward"
     assert invoke(api).json()["code"] == "CONFIRMATION_REQUIRED"
 
@@ -314,7 +329,9 @@ def test_observe_never_applies_outside_imported_mcp_tools(api, peer):
             }
         )
         read_class = {"class": "observe", **{key: execution[key] for key in observe.BOUND}}
-        inject(identity, read_class=read_class)
+        inject(
+            identity, read_class={**read_class, "advert_hash": mcp.advert_hash("Echo text", None)}
+        )
         cp.update_agent_key_scopes(cp.authenticate_agent(key)["id"], [identity])
         response = invoke(api, action=f"{identity}-1", tool_id=identity)
         assert response.json()["code"] == "CONFIRMATION_REQUIRED", response.text
@@ -381,84 +398,103 @@ def test_a_class_change_during_a_call_is_caught_before_dispatch(api, peer, monke
     assert not peer.tool_calls and journal.get("mcp.observe-1") is None
 
 
-def test_the_act_outward_words_hold_the_owner_list_and_every_serious_word():
-    named = {"send", "post", "reply", "react", "delete", "remove", "write", "create", "update"}
-    named |= {"move", "forward", "share", "invite", "pay", "buy"}
-    assert named <= observe.ACT_OUTWARD_WORDS
-    assert approval_levels.SERIOUS_WORDS <= observe.ACT_OUTWARD_WORDS
+@pytest.mark.parametrize(
+    "annotations",
+    [{"destructiveHint": True}, {"readOnlyHint": False}, {"destructiveHint": "no"}, ["readOnly"]],
+)
+def test_a_tool_its_server_says_changes_things_can_never_be_marked_observe(api, peer, annotations):
+    peer.advert = {"annotations": annotations}
+    imported(api)
+    response = set_class(api, "observe")
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "act_outward_hint"
+    assert cp.get("tool", TOOL)["version"] == 1 and listed_class(api) == "act_outward"
+
+
+def test_observe_binds_what_the_server_says_about_the_tool_as_he_confirmed_it(api, peer):
+    annotations = {"readOnlyHint": True, "destructiveHint": False, "title": "Echo"}
+    peer.advert = {"annotations": annotations}
+    imported(api)
+    assert set_class(api, "observe").status_code == 200
+    stored = cp.get("tool", TOOL)["read_class"]
+    assert stored["advert_hash"] == mcp.advert_hash("Echo text", annotations)
+    assert invoke(api).json()["code"] == "OK" and len(peer.tool_calls) == 1
+
+
+def test_observe_needs_the_server_to_still_advertise_the_tool_he_imported(api, peer):
+    imported(api)
+    peer.schema["properties"]["text"]["maxLength"] = 31
+    response = set_class(api, "observe")
+    assert response.status_code == 409 and response.json()["detail"]["code"] == "schema_changed"
+    assert cp.get("tool", TOOL)["version"] == 1 and listed_class(api) == "act_outward"
 
 
 @pytest.mark.parametrize(
-    "name",
+    "advert",
     [
-        "send_message",
-        "sendMessage",
-        "SendMessage",
-        "sendmessage",
-        "post_tweet",
-        "posted_reply",
-        "reply_to_thread",
-        "add_reaction",
-        "react",
-        "delete_file",
-        "DELETE_ALL",
-        "remove_label",
-        "write_file",
-        "create_event",
-        "update_event",
-        "move_email",
-        "forward_email",
-        "share_document",
-        "list_shared_drives",
-        "updating_profile",
-        "invite_user",
-        "pay_invoice",
-        "buy_ticket",
-        "mark_read",
-        "unsubscribe",
-        "resend_invite",
-        "respond_to_event",
-        "uploadFile",
-        "purchase",
-        "transfer-funds",
-        "publish.post",
-        "",
-        None,
-        7,
+        {"description": "Echo text, then forward it to everyone"},
+        {"annotations": {"destructiveHint": True}},
+        {"annotations": {"title": "Echo"}},
     ],
 )
-def test_names_that_act(name):
-    assert observe.says_act_outward(name)
+def test_a_changed_description_or_annotation_at_a_call_reverts_to_act_outward(api, peer, advert):
+    imported(api)
+    assert set_class(api, "observe").status_code == 200
+    peer.advert = advert
+    response = invoke(api)
+    assert response.json()["result"]["error_code"] == "advert_changed", response.text
+    assert not peer.tool_calls and listed_class(api) == "act_outward"
+    reverted = cp.events(event_type="mcp_class_reverted")
+    assert [event["payload"]["reason"] for event in reverted] == ["advert_changed"]
+    assert invoke(api, action="mcp.observe-2").json()["code"] == "CONFIRMATION_REQUIRED"
+    assert not peer.tool_calls
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "echo",
-        "list_messages",
-        "read_message",
-        "search_messages",
-        "get_thread",
-        "list_events",
-        "get_event",
-        "get_freebusy",
-        "list_chats",
-        "list_emails",
-        "draft_email",
-        "search",
-        "fetch",
-        "get_settings",
-        "get_address",
-        "display_profile",
-        "list_sent",
-        "dropbox_search",
-        "get_market_data",
-        "list_reactions",
-        "list_replies",
-        "get_followers",
-        "retrieve_page",
-        "research",
-    ],
-)
-def test_names_that_read(name):
-    assert not observe.says_act_outward(name)
+def test_his_discovery_of_a_changed_description_reverts_it(api, peer):
+    client, _, _ = api
+    imported(api)
+    assert set_class(api, "observe").status_code == 200
+    peer.advert = {"description": "Echo text and post it"}
+    response = client.post("/v2/owner/mcp/discover", json={"url": URL}, headers=owner())
+    assert response.status_code == 200, response.text
+    advertised = response.json()["tools"][0]["advertHash"]
+    assert advertised == mcp.advert_hash("Echo text and post it", None)
+    assert listed_class(api) == "act_outward"
+    reverted = cp.events(event_type="mcp_class_reverted")
+    assert [event["payload"]["reason"] for event in reverted] == ["advert_changed"]
+
+
+def test_a_stored_observe_without_the_advert_he_confirmed_does_not_apply(api, peer):
+    imported(api)
+    assert set_class(api, "observe").status_code == 200
+    stored = cp.get("tool", TOOL)["read_class"]
+    unbound = {key: value for key, value in stored.items() if key != "advert_hash"}
+    for read_class in (
+        unbound,
+        {**stored, "advert_hash": None},
+        {**stored, "advert_hash": "A" * 64},
+    ):
+        inject(TOOL, read_class=read_class)
+        assert listed_class(api) == "act_outward"
+    # A well-formed hash that is not what the server says now: the call is never sent.
+    inject(TOOL, read_class={**stored, "advert_hash": "0" * 64})
+    assert listed_class(api) == "observe"
+    response = invoke(api)
+    assert response.json()["result"]["error_code"] == "advert_changed", response.text
+    assert not peer.tool_calls and listed_class(api) == "act_outward"
+
+
+def test_a_change_while_his_observe_is_checked_with_the_server_is_refused(api, peer, monkeypatch):
+    imported(api)
+    discover = mcp.discover
+
+    def changed_meanwhile(*args):
+        inject(TOOL, name="Echo, renamed meanwhile")  # a new version lands during discovery
+        return discover(*args)
+
+    monkeypatch.setattr(mcp_imports.mcp_http, "discover", changed_meanwhile)
+    response = set_class(api, "observe", version=1)
+    assert (
+        response.status_code == 409 and response.json()["detail"]["code"] == "definition_conflict"
+    )
+    assert cp.get("tool", TOOL)["version"] == 2 and listed_class(api) == "act_outward"

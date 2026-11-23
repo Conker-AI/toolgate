@@ -266,6 +266,8 @@ def invoke_tool(
     except spending.BudgetDenied as exc:
         deny("BUDGET_DENIED", str(exc), 403)
 
+    confirmed: dict[str, str | None] = {}  # the advert an Observe call binds (authorize)
+
     def authorize(conn):
         require_current_dispatch_authority(conn, actor_id, authority_scope)
         if publication:
@@ -281,6 +283,8 @@ def invoke_tool(
                 409,
                 "Retry without an approval to queue a request",
             )
+        if observed:
+            confirmed["advert"] = mcp_observe.advert(conn, tool["id"])
         if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
             approved, reason = approvals.consume_verification_in_transaction(
                 conn,
@@ -368,6 +372,9 @@ def invoke_tool(
                 }
             else:
                 result = _shape_tool_result(tool, sandbox.execute(tool, args, agent, action_id))
+        elif observed:
+            # Sent only while the server still says about the tool what he confirmed.
+            result = _dispatch_tool(tool, args, advert=confirmed["advert"])
         else:
             result = _dispatch_tool(tool, args)
     except RefusedBeforeSend as exc:

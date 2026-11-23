@@ -440,12 +440,16 @@ class Session:
                 except MCPError as exc:
                     self.unsupported_tools.append({"name": value["name"], "reason": str(exc)[:500]})
                     continue
+                # What the server says about the tool besides its schema; an Observe binds it.
+                annotations = value.get("annotations")
                 tools.append(
                     {
                         "name": value["name"],
                         "description": description,
                         "inputSchema": schema,
                         "schemaHash": schema_hash(schema),
+                        **({"annotations": annotations} if "annotations" in value else {}),
+                        "advertHash": advert_hash(description, annotations),
                     }
                 )
             cursor = result.get("nextCursor")
@@ -465,7 +469,14 @@ def discover(url, secret_ref=None):
         return result
 
 
-def require_match(tools, execution, unsupported_tools=()):
+def advert_hash(description, annotations):
+    """The description and annotations a server advertises for one tool, as one hash."""
+    return schema_hash({"description": description, "annotations": annotations})
+
+
+def require_match(tools, execution, unsupported_tools=(), advert=None):
+    """The server still advertises the imported tool with its schema, and, for an Observe call,
+    the description and annotations the owner confirmed (`advert`)."""
     if any(tool["name"] == execution["tool_name"] for tool in unsupported_tools):
         _error("unsupported_schema", "The selected MCP tool's current input schema is unsupported.")
     matches = [tool for tool in tools if tool["name"] == execution["tool_name"]]
@@ -473,6 +484,12 @@ def require_match(tools, execution, unsupported_tools=()):
         _error(
             "schema_changed",
             "The MCP tool or input schema changed; rediscover and import a new reviewed tool.",
+            409,
+        )
+    if advert is not None and matches[0]["advertHash"] != advert:
+        _error(
+            "advert_changed",
+            "The MCP tool's description or annotations changed; it asks the owner again.",
             409,
         )
 
@@ -496,7 +513,7 @@ def _untrusted(content: list, tool_name: str) -> list:
     return content
 
 
-def execute(execution, args):
+def execute(execution, args, advert=None):
     try:
         validate_execution(execution)
         if not isinstance(args, dict) or set(args) != {"arguments"}:
@@ -506,7 +523,7 @@ def execute(execution, args):
         with Session(
             execution["url"], execution.get("secret_ref"), tool_settings.seconds(MAX_SECONDS)
         ) as session:
-            require_match(session.tools(), execution, session.unsupported_tools)
+            require_match(session.tools(), execution, session.unsupported_tools, advert)
             try:
                 result = session.rpc(
                     "tools/call",

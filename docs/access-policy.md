@@ -46,13 +46,32 @@ and the audit log apply exactly as before (`tool_executed` carries `"read_class"
   and every change is a new tool version with an `mcp_class_changed` event. Import never sets
   it, and an admin catalogue save of the tool drops it (back to Act outward).
 - Observe is an access grant: Pi's gateway asks his password for it (ADR-0010); Act outward only
-  takes power away and needs the session.
-- A tool whose ToolGate id, name or MCP tool name says it acts (`ACT_OUTWARD_WORDS`: send, post,
-  reply, react, delete, write, create, update, move, share, pay, buy and similar, with their
-  endings) is refused Observe (422 `act_outward_name`) and is never treated as Observe.
-- Observe is bound to the endpoint, credential reference, MCP tool name and schema hash he saw.
-  When the server advertises anything else, at a call (`schema_changed`) or at his discovery of
-  that endpoint, the tool goes back to Act outward (`mcp_class_reverted`) until he confirms again.
+  takes power away and needs the session. The `conker` CLI sets only `act_outward`, because it
+  cannot ask his password.
+- A tool whose ToolGate id, name or MCP tool name says it acts is refused Observe (422
+  `act_outward_name`) and is never treated as Observe. `says_act_outward` reads a name in parts
+  (split at punctuation and camelCase) and fails closed:
+  - a word in `ACTS` (send, post, reply, react, delete, write, create, update, move, share, pay,
+    buy, compose, enable, toggle, replace and similar) of four letters or more counts anywhere
+    inside a part (`quicksend`, `autopost`, `bulk_sendmessage`, `updating`, `replied`); a shorter
+    one (add, set, run, pin, pay, buy) counts as a whole part with its endings, or leading a part;
+  - a word in `LEADS` (message, email, sms, dm, text, call, comment, tweet, draft, report, book,
+    start, close, change, commit, patch, sync and similar) counts when it leads a part that no read
+    word (list, get, read, search, fetch, ...) comes before: `message_user` acts, `list_messages`
+    reads; a leading `re` or `un` keeps the word (`retweet`, `unlock`);
+  - after NFKC normalisation, any character outside printable ASCII (a Cyrillic look-alike, an
+    invisible or control character) counts as acting, and so does a name with no letters.
+  A read whose name holds such a word inside another word (`get_market_data`, `dropbox_search`)
+  therefore always asks; that is the accepted cost of failing closed.
+- He can only mark Observe what the server still advertises as imported: the class route
+  rediscovers the endpoint first (409 `schema_changed` otherwise) and refuses a tool the server
+  annotates `destructiveHint: true` or `readOnlyHint: false` (422 `act_outward_hint`; a hint that
+  is not a boolean counts the same).
+- Observe is bound to the endpoint, credential reference, MCP tool name and schema hash he saw,
+  and to the hash of the tool's description and annotations (`advert_hash`). When the server
+  advertises anything else, at a call (`schema_changed`, `advert_changed`; nothing is sent) or
+  at any discovery of that endpoint, the tool goes back to Act outward (`mcp_class_reverted`)
+  until he confirms again.
 - Anyone's `ask` and his sensitive mark still ask. Built-in tools never have a read class.
 - The class is read from the stored tool for every call, again inside the dispatch transaction,
   and never from a pinned publication. `GET /v2/agent/tools` lists an Observe tool as

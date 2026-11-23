@@ -195,18 +195,56 @@ def set_state(identity, payload: State, validate):
     return {"schemaVersion": 1, "tool": projection(saved)}
 
 
+def _stored_tool(conn, identity):
+    row = conn.execute(
+        "SELECT * FROM v2_objects WHERE kind='tool' AND id=?", (identity,)
+    ).fetchone()
+    return cp._row(row) if row else None
+
+
+def _confirmable(identity, payload: ReadClass, not_found):
+    """Before his Observe is saved, and outside the write transaction: the name does not say it
+    acts, and the server still advertises this exact tool and schema with no annotation that says
+    it changes anything. Returns what Observe binds: the execution and the advert hash."""
+    with cp._conn() as conn:
+        tool = _stored_tool(conn, identity)
+    execution = mcp_observe.bound(tool.get("execution")) if tool else None
+    if not tool or execution is None:
+        raise not_found
+    if tool["version"] != payload.expected_version:
+        raise OwnerError("definition_conflict", "The MCP tool changed; reload it first.", 409)
+    names = (identity, tool.get("name"), execution["tool_name"])
+    if any(mcp_observe.says_act_outward(name) for name in names):
+        raise OwnerError(
+            "act_outward_name",
+            "A tool whose name says it sends, posts, changes, deletes or pays always asks.",
+            422,
+        )
+    discovered = mcp_http.discover(execution["url"], execution["secret_ref"])
+    mcp_observe.notice(execution["url"], execution["secret_ref"], discovered)
+    mcp_http.require_match(discovered["tools"], execution, discovered.get("unsupportedTools", []))
+    (advertised,) = [item for item in discovered["tools"] if item["name"] == execution["tool_name"]]
+    if mcp_observe.hints_act(advertised.get("annotations")):
+        raise OwnerError(
+            "act_outward_hint",
+            "The server says this tool changes or deletes things, so it always asks.",
+            422,
+        )
+    return execution, advertised["advertHash"]
+
+
 def set_class(identity, payload: ReadClass):
-    """Mark one imported tool Observe or Act outward. A tool whose name says it acts is refused
-    Observe; a stale version is refused; the change is its own audited tool version."""
+    """Mark one imported tool Observe or Act outward. Observe is refused for a name that says it
+    acts, for a tool its server annotates as changing things, and for one the server no longer
+    advertises as imported; a stale version is refused; the change is its own audited version."""
     not_found = OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
     if not mcp_observe.MCP_ID.fullmatch(identity):
         raise not_found
+    observe = payload.read_class == mcp_observe.OBSERVE
+    confirmable = _confirmable(identity, payload, not_found) if observe else None
     with cp._conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT * FROM v2_objects WHERE kind='tool' AND id=?", (identity,)
-        ).fetchone()
-        tool = cp._row(row) if row else None
+        tool = _stored_tool(conn, identity)
         execution = mcp_observe.bound(tool.get("execution")) if tool else None
         if not tool or execution is None:
             raise not_found
@@ -216,15 +254,13 @@ def set_class(identity, payload: ReadClass):
                 "The MCP tool changed; reload before changing its class.",
                 409,
             )
-        if payload.read_class == mcp_observe.OBSERVE:
-            names = (identity, tool.get("name"), execution["tool_name"])
-            if any(mcp_observe.says_act_outward(name) for name in names):
+        if confirmable is not None:
+            confirmed, advert_hash = confirmable
+            if confirmed != execution:
                 raise OwnerError(
-                    "act_outward_name",
-                    "A tool whose name says it sends, posts, changes, deletes or pays always asks.",
-                    422,
+                    "definition_conflict", "The MCP tool changed; reload it first.", 409
                 )
-            read_class = {"class": mcp_observe.OBSERVE, **execution}
+            read_class = {"class": mcp_observe.OBSERVE, **execution, "advert_hash": advert_hash}
         else:
             read_class = {"class": mcp_observe.ACT_OUTWARD}
         if tool.get("read_class", {"class": mcp_observe.ACT_OUTWARD}) == read_class:
