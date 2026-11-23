@@ -6,8 +6,8 @@ usage limits, spending, the action journal and the audit log apply exactly as be
 approval card is skipped. Observe is a class per tool, never a blanket switch:
 - only the owner channel sets it, for the exact tool version he saw (`mcp_imports.set_class`);
   Pi's gateway asks his password for it, as for every other access grant (ADR-0010);
-- a tool whose name says it acts (says_act_outward) can never be Observe, nor one whose server
-  annotates it destructive or not read-only (hints_act);
+- only a tool whose names read (says_act_outward: an allow-list, led by a read verb) can be
+  Observe, and only if its server's annotations, when it gives any, say read-only (hints_act);
 - it binds the endpoint, credential reference, MCP tool name, schema hash, description and
   annotations he saw: when the server advertises anything else (at a call or at his discovery)
   the tool is back to Act outward until he confirms it again;
@@ -34,58 +34,99 @@ ADVERT = re.compile(r"[a-f0-9]{64}")
 # A call that found the server advertising another tool, schema, description or annotations.
 CHANGED_ADVERT = frozenset({"schema_changed", "unsupported_schema", "advert_changed"})
 
-# How a name is read (says_act_outward). Words that act wherever they stand: one of four letters
-# or more counts inside any part of a name (quicksend, autopost, bulk_sendmessage); a shorter one
-# counts as a whole part with its endings (add, adds, added, pinned) or leading a part that no
-# read word comes before (addlabel). Every word that makes an approval serious is here too.
+# How a name is read (says_act_outward). Only a name led by one of these can be Observe.
+READ_VERBS = frozenset(
+    {
+        "browse",
+        "count",
+        "describe",
+        "fetch",
+        "find",
+        "get",
+        "inspect",
+        "list",
+        "lookup",
+        "preview",
+        "query",
+        "read",
+        "search",
+        "show",
+        "stat",
+        "status",
+        "summarise",
+        "summarize",
+        "view",
+    }
+)
+# A name that joins its read to something else asks: get_and_message_user, getThenChatUser.
+CONNECTORS = frozenset({"after", "also", "and", "or", "plus", "then", "to", "via", "with"})
+# Words that act wherever they stand after the read verb: one of four letters or more counts
+# inside any part (get_quicksend), a shorter one as a whole part with its endings (get_tag_add).
+# Every word that makes an approval serious is here too.
 ACTS = approval_levels.SERIOUS_WORDS | frozenset(
     {
         "accept",
         "add",
+        "alert",
+        "announce",
         "append",
+        "apply",
         "approve",
         "archive",
         "assign",
+        "authorize",
         "ban",
         "block",
+        "broadcast",
+        "burn",
         "cancel",
+        "cleanup",
         "clear",
         "compose",
         "create",
         "decline",
         "deploy",
+        "deposit",
+        "dial",
         "disable",
         "dismiss",
+        "dispatch",
         "edit",
         "enable",
+        "eval",
         "exec",
         "execute",
         "export",
         "follow",
         "forward",
         "grant",
+        "halt",
         "import",
         "insert",
         "install",
         "invite",
         "join",
         "kick",
+        "kill",
         "launch",
         "leave",
         "like",
         "mark",
         "merge",
+        "mint",
         "modify",
         "move",
         "mute",
         "notify",
         "pin",
         "post",
+        "poweroff",
         "publish",
         "push",
         "put",
         "react",
         "reboot",
+        "register",
         "reject",
         "rename",
         "replace",
@@ -103,21 +144,28 @@ ACTS = approval_levels.SERIOUS_WORDS | frozenset(
         "set",
         "share",
         "shutdown",
+        "sign",
+        "spend",
+        "sql",
         "submit",
         "subscribe",
+        "terminate",
         "toggle",
+        "transact",
         "trash",
         "trigger",
         "undo",
         "unlock",
         "update",
         "upload",
+        "upsert",
         "vote",
         "write",
     }
 )
-# Words that name a thing a read returns as often as an act on it (list_messages reads,
-# message_user acts): they act when they lead a part of the name that no read word comes before.
+# Words that name what a read returns as often as an act on it (list_messages reads,
+# read_mail_schedule_meeting asks): the part right after the read verb is what it reads, so
+# there one of these reads; in any later part it asks.
 LEADS = frozenset(
     {
         "book",
@@ -150,35 +198,10 @@ LEADS = frozenset(
         "tweet",
     }
 )
-READS = frozenset(
-    {
-        "browse",
-        "check",
-        "count",
-        "describe",
-        "download",
-        "fetch",
-        "find",
-        "get",
-        "inspect",
-        "list",
-        "look",
-        "lookup",
-        "preview",
-        "query",
-        "read",
-        "retrieve",
-        "search",
-        "show",
-        "summarize",
-        "view",
-    }
-)
 # Every word the approval level calls outward or serious is one of these (a test holds it).
 ACT_OUTWARD_WORDS = ACTS | LEADS
 _ENDINGS = ("", "s", "es", "d", "ed", "ing")
 _SHORT = frozenset(word for word in ACTS if len(word) < 4)
-_LEADING = LEADS | _SHORT
 # A long word and the forms of it that do not contain it whole (updating, replied).
 _STEMS = frozenset(
     stem
@@ -214,49 +237,53 @@ def _parts(text: str) -> list[str]:
     return [part for part in re.split(r"[^a-z0-9]+", spaced.lower()) if part]
 
 
-def _acts(part: str, read_before: bool) -> bool:
+def _acts(part: str, leads: bool) -> bool:
+    """Whether one part after the read verb says it acts; `leads`: a LEADS word counts too."""
+    if part in CONNECTORS:
+        return True
     if any(stem in part for stem in _STEMS):
         return True
-    # A leading "re" or "un" keeps the word it comes before (retweet, unpin, rerun).
+    # A leading "re" or "un" keeps the word it comes before (get_status_retweet, unpin, rerun).
     for bare in (part, *((part[2:],) if part[:2] in ("re", "un") else ())):
         if any(_inflects(bare, word) for word in _SHORT):
             return True
-        if not read_before and any(bare.startswith(word) for word in _LEADING):
+        if leads and any(bare.startswith(word) for word in LEADS):
             return True
     return False
 
 
 def says_act_outward(name: object) -> bool:
-    """Whether a tool name says it acts (see ACTS and LEADS). Fail closed: anything that is not
-    printable text, or still holds a character outside ASCII after NFKC (a Cyrillic letter that
-    looks Latin, an invisible one), counts as acting."""
+    """Whether a tool name says it acts: every name does unless it reads. A name reads when its
+    own part (after the last dot; words before a dot are its namespace, as in mcp.list-events or
+    social.list_chats, and must not act themselves) starts with a READ_VERB and no later part is
+    a connector or a word that acts (ACTS anywhere, LEADS after the read's object). Fail closed:
+    anything that is not printable text, or still holds a character outside ASCII after NFKC (a
+    Cyrillic letter that looks Latin, an invisible one), counts as acting."""
     if not isinstance(name, str):
         return True
     text = unicodedata.normalize("NFKC", name)
     if not text.isascii() or not text.isprintable():
         return True
-    parts = _parts(text)
-    if not parts:
+    *namespace, own = text.split(".")
+    if any(_acts(part, True) for segment in namespace for part in _parts(segment)):
         return True
-    read_before = False
-    for part in parts:
-        if _acts(part, read_before):
-            return True
-        read_before = read_before or any(_inflects(part, word) for word in READS)
-    return False
+    parts = _parts(own)
+    if not parts or parts[0] not in READ_VERBS:
+        return True
+    return any(_acts(part, index > 1) for index, part in enumerate(parts) if index)
 
 
 def hints_act(annotations: object) -> bool:
-    """Whether the server's own annotations for a tool say it may change something:
-    destructiveHint true or readOnlyHint false. A hint that is not true or false, or annotations
-    that are not an object, count as saying so."""
+    """Whether the server's own annotations keep a tool asking. Without annotations the name
+    alone decides. With them, Observe needs readOnlyHint true and destructiveHint absent or
+    false; anything else (none, a title only, a hint that is not a boolean) asks."""
     if annotations is None:
         return False
     if not isinstance(annotations, dict):
         return True
     return (
-        annotations.get("destructiveHint", False) is not False
-        or annotations.get("readOnlyHint", True) is not True
+        annotations.get("readOnlyHint") is not True
+        or annotations.get("destructiveHint", False) is not False
     )
 
 

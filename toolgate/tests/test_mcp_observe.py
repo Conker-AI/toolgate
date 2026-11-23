@@ -28,7 +28,9 @@ from toolgate.tests.mcp_peer import (
     peer,  # noqa: F401 - pytest fixture used by name
 )
 
-TOOL = "mcp.test-echo"
+# Only a name led by a read verb can be Observe, so the fixture tool reads in all its names.
+TOOL = "mcp.get-echo"
+READ_NAME = "get_echo"
 
 
 @pytest.fixture
@@ -36,6 +38,7 @@ def api(tmp_path, monkeypatch, peer):
     monkeypatch.setattr(cp, "DB_PATH", tmp_path / "gate.db")
     monkeypatch.setattr(server.vault, "get_control_key", lambda _: ADMIN)
     monkeypatch.setenv("TOOLGATE_OWNER_KEY_SHA256", hashlib.sha256(OWNER.encode()).hexdigest())
+    peer.tool = READ_NAME
     agent, key = cp.issue_agent_key("Conker", [])
     client = TestClient(server.app)
     yield client, agent, key
@@ -49,10 +52,10 @@ def owner(key=None):
 def import_body(**changes):
     return {
         "id": TOOL,
-        "name": "External echo",
+        "name": "Get echo",
         "description": "Echo through MCP",
         "url": URL,
-        "tool_name": "echo",
+        "tool_name": READ_NAME,
         "input_schema": SCHEMA,
         "schema_hash": mcp.schema_hash(SCHEMA),
         **changes,
@@ -204,7 +207,7 @@ def test_observe_keeps_scope_lockdown_limits_audit_and_spending(api, peer, monke
     "changes",
     [
         {"id": "mcp.chat-send", "tool_name": "send_message"},
-        {"id": "mcp.echo-delete"},
+        {"id": "mcp.get-echo-delete"},
         {"name": "Post a reply"},
     ],
 )
@@ -315,13 +318,13 @@ def test_a_stored_observe_for_another_schema_does_not_apply(api, peer):
 
 def test_observe_never_applies_outside_imported_mcp_tools(api, peer):
     _, _, key = api
-    local = {"type": "local_echo", "url": URL, "tool_name": "echo", "secret_ref": None}
+    local = {"type": "local_echo", "url": URL, "tool_name": READ_NAME, "secret_ref": None}
     local["schema_hash"] = mcp.schema_hash(SCHEMA)
-    for identity, execution in (("mcp.local-echo", local), ("ext.echo", observe_execution())):
+    for identity, execution in (("mcp.get-local", local), ("ext.get-echo", observe_execution())):
         cp.create_tool(
             {
                 "id": identity,
-                "name": "Echo",
+                "name": "Get echo",
                 "description": "Echo",
                 "inputs": [{"name": "arguments", "type": "object", "required": True}],
                 "execution": execution,
@@ -343,7 +346,7 @@ def observe_execution():
     return {
         "type": "mcp_http",
         "url": URL,
-        "tool_name": "echo",
+        "tool_name": READ_NAME,
         "input_schema": SCHEMA,
         "schema_hash": mcp.schema_hash(SCHEMA),
         "secret_ref": None,
@@ -400,7 +403,15 @@ def test_a_class_change_during_a_call_is_caught_before_dispatch(api, peer, monke
 
 @pytest.mark.parametrize(
     "annotations",
-    [{"destructiveHint": True}, {"readOnlyHint": False}, {"destructiveHint": "no"}, ["readOnly"]],
+    [
+        {"destructiveHint": True},
+        {"readOnlyHint": False},
+        {"readOnlyHint": True, "destructiveHint": "no"},
+        ["readOnly"],
+        {},
+        {"title": "Echo"},
+        {"openWorldHint": False, "idempotentHint": True},
+    ],
 )
 def test_a_tool_its_server_says_changes_things_can_never_be_marked_observe(api, peer, annotations):
     peer.advert = {"annotations": annotations}
@@ -434,7 +445,7 @@ def test_observe_needs_the_server_to_still_advertise_the_tool_he_imported(api, p
     [
         {"description": "Echo text, then forward it to everyone"},
         {"annotations": {"destructiveHint": True}},
-        {"annotations": {"title": "Echo"}},
+        {"annotations": {"readOnlyHint": True}},
     ],
 )
 def test_a_changed_description_or_annotation_at_a_call_reverts_to_act_outward(api, peer, advert):
@@ -498,3 +509,15 @@ def test_a_change_while_his_observe_is_checked_with_the_server_is_refused(api, p
         response.status_code == 409 and response.json()["detail"]["code"] == "definition_conflict"
     )
     assert cp.get("tool", TOOL)["version"] == 2 and listed_class(api) == "act_outward"
+
+
+def test_a_pinned_version_whose_name_acts_still_asks(api, peer):
+    # The definition being run is checked too: version 1, published at import, says it posts.
+    imported(api, name="Get echo and post it")
+    stored = cp.get("tool", TOOL)
+    inject(TOOL, name="Get echo", read_class=confirmed(stored["execution"]))
+    assert listed_class(api) == "observe"
+    response = invoke(api, published_version=1)
+    assert response.json()["code"] == "CONFIRMATION_REQUIRED", response.text
+    assert invoke(api, action="mcp.observe-2").json()["code"] == "OK"
+    assert len(peer.tool_calls) == 1

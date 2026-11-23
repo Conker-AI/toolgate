@@ -284,6 +284,9 @@ def invoke_tool(
                 "Retry without an approval to queue a request",
             )
         if observed:
+            # The last read of his class. A switch back to Act outward that commits after this
+            # transaction does not stop this call: it was admitted under Observe and is sent
+            # (only a changed advert stops it, below). His next call asks.
             confirmed["advert"] = mcp_observe.advert(conn, tool["id"])
         if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
             approved, reason = approvals.consume_verification_in_transaction(

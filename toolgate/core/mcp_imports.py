@@ -203,9 +203,9 @@ def _stored_tool(conn, identity):
 
 
 def _confirmable(identity, payload: ReadClass, not_found):
-    """Before his Observe is saved, and outside the write transaction: the name does not say it
-    acts, and the server still advertises this exact tool and schema with no annotation that says
-    it changes anything. Returns what Observe binds: the execution and the advert hash."""
+    """Before his Observe is saved, and outside the write transaction: the names read, and the
+    server still advertises this exact tool and schema, with annotations (if it gives any) that
+    say read-only. Returns what Observe binds: the execution and the advert hash."""
     with cp._conn() as conn:
         tool = _stored_tool(conn, identity)
     execution = mcp_observe.bound(tool.get("execution")) if tool else None
@@ -217,7 +217,8 @@ def _confirmable(identity, payload: ReadClass, not_found):
     if any(mcp_observe.says_act_outward(name) for name in names):
         raise OwnerError(
             "act_outward_name",
-            "A tool whose name says it sends, posts, changes, deletes or pays always asks.",
+            "Only a tool whose names start with a read verb (get, list, search, ...) and say "
+            "nothing that acts can run without asking.",
             422,
         )
     discovered = mcp_http.discover(execution["url"], execution["secret_ref"])
@@ -227,16 +228,16 @@ def _confirmable(identity, payload: ReadClass, not_found):
     if mcp_observe.hints_act(advertised.get("annotations")):
         raise OwnerError(
             "act_outward_hint",
-            "The server says this tool changes or deletes things, so it always asks.",
+            "The server's annotations do not say this tool is read-only, so it always asks.",
             422,
         )
     return execution, advertised["advertHash"]
 
 
 def set_class(identity, payload: ReadClass):
-    """Mark one imported tool Observe or Act outward. Observe is refused for a name that says it
-    acts, for a tool its server annotates as changing things, and for one the server no longer
-    advertises as imported; a stale version is refused; the change is its own audited version."""
+    """Mark one imported tool Observe or Act outward. Observe is refused unless the names read,
+    the server's annotations (if any) say read-only and it still advertises the tool as imported;
+    a stale version is refused; the change is its own audited version."""
     not_found = OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
     if not mcp_observe.MCP_ID.fullmatch(identity):
         raise not_found

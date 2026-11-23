@@ -44,9 +44,10 @@ def owner_mcp_state(tool_id: str, payload: mcp_imports.State):
 def owner_mcp_class(tool_id: str, payload: mcp_imports.ReadClass):
     """Observe (runs without asking; scope, limits, spending and the audit log still apply) or
     Act outward (asks for every exact call, the default). Observe rediscovers the endpoint and is
-    refused for a name that says it acts (422 `act_outward_name`), a tool its server annotates as
-    destructive or not read-only (422 `act_outward_hint`) or one it no longer advertises as
-    imported (409 `schema_changed`); it binds the description and annotations seen. A stale
+    refused unless the names read (led by a read verb, nothing that acts; 422 `act_outward_name`),
+    the server's annotations, if any, say read-only (422 `act_outward_hint`) and it still
+    advertises the tool as imported (409 `schema_changed`); it binds the description and
+    annotations seen. A stale
     `expected_version` is refused (409). Pi's gateway asks the owner's password for Observe, as
     for every access grant."""
     return JSONResponse(
