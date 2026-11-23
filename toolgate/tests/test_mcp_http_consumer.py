@@ -30,6 +30,7 @@ def test_discovery_and_call_keep_protocol_identity_and_credentials_private(peer,
                 "description": "Echo text",
                 "inputSchema": SCHEMA,
                 "schemaHash": mcp.schema_hash(SCHEMA),
+                "advertHash": mcp.advert_hash("Echo text", None),
             }
         ],
     }

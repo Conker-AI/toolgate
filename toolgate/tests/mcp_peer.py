@@ -37,6 +37,8 @@ class Peer:
         self.unknown = False
         self.error = False
         self.extra_tools = []
+        self.advert = {}  # changes to what the echo tool's listing says besides its schema
+        self.tool = "echo"  # the echo tool's name
         self.pages = None
         self.result = None
         self.session = "external-session-id"
@@ -98,7 +100,12 @@ class Peer:
         elif method == "tools/list":
             result = {
                 "tools": [
-                    {"name": "echo", "description": "Echo text", "inputSchema": self.schema},
+                    {
+                        "name": self.tool,
+                        "description": "Echo text",
+                        "inputSchema": self.schema,
+                        **self.advert,
+                    },
                     *self.extra_tools,
                 ]
             }
@@ -108,11 +115,11 @@ class Peer:
             if self.unknown:
                 raise httpx.ReadError("remote operation may already have completed")
             assert {key: item for key, item in value["params"].items() if key != "_meta"} == {
-                "name": "echo",
+                "name": self.tool,
                 "arguments": {"text": "hello"},
             }
             if self.modern:
-                assert request.headers["mcp-name"] == "echo"
+                assert request.headers["mcp-name"] == self.tool
             result = self.result or {
                 "content": [{"type": "text", "text": "hello"}],
                 "isError": self.error,

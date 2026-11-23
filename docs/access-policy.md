@@ -30,8 +30,76 @@ external MCP server (`mcp_http`). No decision skips the owner for these. Agent t
 (`GET /v2/agent/tools`) include `"sensitive": true|false` and `"card"` (see Inbox buttons).
 
 External MCP tools are on the floor because what they do is decided by a server outside the
-owner's control: an imported tool is always `owner_confirmation`, and no per-tool switch lets a
-delegate's `run` skip the owner. Unmarking it sensitive does not take it off the floor.
+owner's control: an imported tool is always `owner_confirmation`, and no delegate's `run` skips
+the owner. Unmarking it sensitive does not take it off the floor.
+
+## Observe or Act outward (imported MCP tools)
+
+Each imported tool has a read class (`core/mcp_observe.py`, ADR-0006). **Act outward**, the
+default for every import and for every tool imported before the class existed, asks the owner for
+every call, bound to its exact arguments (approval level 2, or 3 for a name that deletes or pays).
+**Observe** runs without his card; scope, lockdown, usage limits, spending, the action journal
+and the audit log apply exactly as before (`tool_executed` carries `"read_class": "observe"`).
+
+- He sets it per tool on the owner channel: `POST /v2/owner/mcp/tools/{id}/class` with
+  `{"read_class": "observe" | "act_outward", "expected_version": N}`. A stale version is 409,
+  and every change is a new tool version with an `mcp_class_changed` event. Import never sets
+  it, and an admin catalogue save of the tool drops it (back to Act outward).
+- Observe is an access grant: Pi's gateway asks his password for it (ADR-0010); Act outward only
+  takes power away and needs the session. The `conker` CLI sets only `act_outward`, because it
+  cannot ask his password.
+- Only a tool whose ToolGate id, name and MCP tool name all have the shape of a read can be
+  Observe; any other is refused (422 `act_outward_name`) and never treated as Observe.
+  `says_act_outward` is a shape rule, not a word list, and fails closed. A name is split at
+  anything that is not a letter (digits too) and at camelCase; words before a dot are its
+  namespace (`mcp.` in the id, `social.` in `social.list_chats`) and must not act or lead.
+  - **Without annotations** from the server the name is exactly a read verb, or a read verb and
+    one part: `get_weather`, `list_emails`, `read_chat`, `search_docs`. Three parts or more ask.
+  - **With annotations** that say `readOnlyHint: true` and `destructiveHint` absent or false
+    (see below) it may be longer (`get_calendar_events`, `list_unread_messages`), and may start
+    with `query`.
+  - Read verbs (`READ_VERBS`): get, list, search, read, fetch, view, lookup, find, describe,
+    show, count, inspect, browse, preview, summarize/summarise, stat, status. Verbs that commonly
+    execute what they are given (check, run, exec, eval, query, sql) are not; `query` leads a
+    name only with the read-only hint.
+  - Either way no part after the verb is a connector (and, then, or, plus, to, also, after,
+    with, via) or holds a word that acts (`ACTS`: send, post, reply, delete, pay, kill, exec,
+    refresh, rotate, invoke, trade and similar; one of four letters or more anywhere in the part
+    with its `-ing`/`-ied` forms, a shorter one, or one of `ACTS_AT_EDGES` such as ring, play,
+    lock, sync, change, when the part is, starts with or ends with it: `get_setvalue`,
+    `get_rerun`, `get_doorlock`).
+  - A `LEADS` word (message, email, chat, call, order, start, patch, report, ...) is only the
+    last part, exactly: `get_messages` reads, `get_message_user`, `get_messageuser` and
+    `get_start_instance` ask.
+  - After NFKC normalisation it holds only printable ASCII (a Cyrillic look-alike, an invisible
+    or control character asks).
+  The server's hint is what he confirmed: it is part of the advert Observe is bound to and is
+  stored with the class (`read_only_hint`); a stored Observe without it gets the short shape.
+  Reads that therefore always ask: names not led by a read verb (`echo`, `research`,
+  `gmail_search`, `retrieve_page`, `download_file_content`, `look_up_contact`), glued names
+  (`searchemails`, `list_notebooks`), and a word that acts inside or at the edge of another
+  (`get_settings`, `get_address`, `get_market_data`, `list_posts`, `get_updates`,
+  `list_skills`, `list_pages`, `list_models`, `get_string`, `get_display`, `get_context`,
+  `get_current_user`, `list_connections`, `list_builds`, `list_backups`, `get_flags`,
+  `get_rates`, `get_strategy`, `get_release`, `list_releases`). Without the hint, every
+  longer read asks too.
+- He can only mark Observe what the server still advertises as imported: the class route
+  checks the names first (with the hint's longer shape), then rediscovers the endpoint (409
+  `schema_changed` otherwise). When the server gives annotations, Observe needs
+  `readOnlyHint: true` and `destructiveHint` absent or false; empty annotations, a title only,
+  or only `openWorldHint`/`idempotentHint` ask (422 `act_outward_hint`). Without annotations the
+  names must have the short shape.
+- Observe is bound to the endpoint, credential reference, MCP tool name and schema hash he saw,
+  and to the hash of the tool's description and annotations (`advert_hash`). When the server
+  advertises anything else, at a call (`schema_changed`, `advert_changed`; nothing is sent) or
+  at any discovery of that endpoint, the tool goes back to Act outward (`mcp_class_reverted`)
+  until he confirms again.
+- Anyone's `ask` and his sensitive mark still ask. Built-in tools never have a read class.
+- The class is read from the stored tool for every call, again inside the dispatch transaction,
+  and never from a pinned publication. A switch back to Act outward that commits after that
+  last read does not stop a call already admitted under Observe; it is sent unless its advert
+  changed, and his next call asks. `GET /v2/agent/tools` lists an Observe tool as
+  `"authorization": "auto"`, `"sensitive": false`; `GET /v2/owner/mcp/tools` shows `read_class`.
 
 ## Inbox buttons
 

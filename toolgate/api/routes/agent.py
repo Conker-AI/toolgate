@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 
 from toolgate.api.deps import require_agent
-from toolgate.core import access_policy, ask_cards, control_plane, editor_catalogue
+from toolgate.core import access_policy, ask_cards, control_plane, editor_catalogue, mcp_observe
 from toolgate.core import execution_journal as journal
 
 router = APIRouter()
@@ -17,14 +17,22 @@ def agent_tools(agent: dict = Depends(require_agent)):
     # `sensitive`: on the owner's floor, so it always asks him whatever a delegate decides.
     # `card`: the Inbox buttons he picked for it (send, publish, ship, delete, pay say it reaches a
     # person or can't be undone), so a caller's reviewer reads that from him, not from a model.
+    # An imported tool the owner marked Observe runs without asking, so it is listed as `auto`
+    # and off the floor; its stored authorization stays `owner_confirmation` (core/mcp_observe.py).
     marked = access_policy.sensitive_ids()
     cards = ask_cards.chosen()
-    return [
-        {
+
+    def listed(tool: dict) -> dict:
+        observe = tool["id"] not in marked and mcp_observe.stated(tool) == mcp_observe.OBSERVE
+        return {
             **tool,
-            "sensitive": access_policy.on_floor(tool, marked),
+            **({"authorization": "auto"} if observe else {}),
+            "sensitive": not observe and access_policy.on_floor(tool, marked),
             "card": cards.get(tool["id"], ask_cards.DEFAULT),
         }
+
+    return [
+        listed(tool)
         for tool in control_plane.list_objects("tool")
         if tool.get("status") == "active" and control_plane.is_scoped(agent, tool["id"])
     ]

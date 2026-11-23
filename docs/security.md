@@ -12,7 +12,7 @@ How ToolGate keeps an agent's reach bounded: identity and scopes, the vault, exa
 - Rate, cooldown, runtime, workflow-step, destination, response-size, loop, retry, and delay ceilings are enforced in code.
 - Sensitive actions bind approval to the exact object type, object ID, version, argument digest, nonce, and expiry.
 - An approval is atomically consumed once. Replays and changed arguments fail closed.
-- Tools on external MCP servers always ask the owner: imports are `owner_confirmation`, and they sit on the access floor (`mcp_http` in `FLOOR_EXECUTIONS`), so a policy delegate's `run` decision never turns one into an automatic action. See [access policy](access-policy.md#the-floor).
+- Tools on external MCP servers ask the owner: imports are `owner_confirmation`, and they sit on the access floor (`mcp_http` in `FLOOR_EXECUTIONS`), so a policy delegate's `run` decision never turns one into an automatic action. The one exception is a tool he marked Observe himself, per tool and bound to its exact schema; a name that acts can never be Observe. See [access policy](access-policy.md#observe-or-act-outward-imported-mcp-tools).
 - The agent that asked may withdraw its own approval request while the owner has not answered (`POST /v2/agent/requests/{id}/withdraw`), so a forgotten chat leaves nothing in the owner's Inbox. A withdrawn request is terminal: it can never be approved or run. See [approval integrity](APPROVAL_INTEGRITY.md#withdrawing-a-request).
 - Verification requests originate only from invocation. Generic agent and admin requests are informational and cannot mint execution approvals.
 - Decisions and consumption serialize against the same SQLite writer lock; each request transition commits its audit event atomically.
