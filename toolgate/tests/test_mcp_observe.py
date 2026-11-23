@@ -105,6 +105,7 @@ def confirmed(execution, description="Echo text"):
         "class": "observe",
         **observe.bound(execution),
         "advert_hash": mcp.advert_hash(description, None),
+        "read_only_hint": False,
     }
 
 
@@ -211,9 +212,14 @@ def test_observe_keeps_scope_lockdown_limits_audit_and_spending(api, peer, monke
         {"name": "Post a reply"},
     ],
 )
-def test_a_name_that_acts_can_never_be_marked_observe(api, peer, changes):
+def test_a_name_that_acts_can_never_be_marked_observe(api, peer, changes, monkeypatch):
     peer.extra_tools = [{"name": "send_message", "description": "Send", "inputSchema": SCHEMA}]
     tool = imported(api, **changes)
+
+    def never_asked(*_):
+        raise AssertionError("a name that acts with any hint is refused before the server")
+
+    monkeypatch.setattr(mcp_imports.mcp_http, "discover", never_asked)
     response = set_class(api, "observe", tool_id=tool["id"])
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["code"] == "act_outward_name"
@@ -429,7 +435,54 @@ def test_observe_binds_what_the_server_says_about_the_tool_as_he_confirmed_it(ap
     assert set_class(api, "observe").status_code == 200
     stored = cp.get("tool", TOOL)["read_class"]
     assert stored["advert_hash"] == mcp.advert_hash("Echo text", annotations)
+    assert stored["read_only_hint"] is True
     assert invoke(api).json()["code"] == "OK" and len(peer.tool_calls) == 1
+
+
+def test_a_longer_name_is_observe_only_when_its_server_says_read_only(api, peer):
+    # get_echo_text is more than a read verb and one part: without the server's read-only hint
+    # it asks (the name alone would decide), with it the owner may confirm Observe.
+    peer.tool = "get_echo_text"
+    names = {"id": "mcp.get-echo-text", "name": "Get echo text", "tool_name": "get_echo_text"}
+    tool = imported(api, **names)
+    response = set_class(api, "observe", tool_id=tool["id"])
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "act_outward_name"
+    assert cp.get("tool", tool["id"])["version"] == 1
+    peer.advert = {"annotations": {"readOnlyHint": True}}
+    assert set_class(api, "observe", tool_id=tool["id"]).status_code == 200
+    stored = cp.get("tool", tool["id"])["read_class"]
+    assert stored["read_only_hint"] is True
+    assert invoke(api, tool_id=tool["id"]).json()["code"] == "OK"
+    # A stored Observe that does not record the hint he confirmed falls back to the short shape.
+    for read_class in (
+        {**stored, "read_only_hint": False},
+        {**stored, "read_only_hint": "true"},
+        {key: value for key, value in stored.items() if key != "read_only_hint"},
+    ):
+        inject(tool["id"], read_class=read_class)
+        assert listed_class(api, tool["id"]) == "act_outward"
+        response = invoke(api, action="mcp.observe-2", tool_id=tool["id"])
+        assert response.json()["code"] == "CONFIRMATION_REQUIRED", response.text
+    # A server that drops the hint: the advert he confirmed is gone, so it is never sent unasked.
+    inject(tool["id"], read_class=stored)
+    peer.advert = {}
+    response = invoke(api, action="mcp.observe-3", tool_id=tool["id"])
+    assert response.json()["result"]["error_code"] == "advert_changed", response.text
+    assert len(peer.tool_calls) == 1 and listed_class(api, tool["id"]) == "act_outward"
+
+
+def test_a_pinned_long_name_needs_the_hint_its_tool_records(api, peer):
+    # The definition being run (version 1, published at import) has a longer display name than
+    # the stored tool he confirmed without the server's hint: it asks.
+    imported(api, name="Get echo text")
+    inject(TOOL, name="Get echo")
+    assert set_class(api, "observe").status_code == 200
+    assert cp.get("tool", TOOL)["read_class"]["read_only_hint"] is False
+    assert listed_class(api) == "observe"
+    response = invoke(api, published_version=1)
+    assert response.json()["code"] == "CONFIRMATION_REQUIRED", response.text
+    assert not peer.tool_calls
 
 
 def test_observe_needs_the_server_to_still_advertise_the_tool_he_imported(api, peer):

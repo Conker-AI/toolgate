@@ -205,7 +205,9 @@ def _stored_tool(conn, identity):
 def _confirmable(identity, payload: ReadClass, not_found):
     """Before his Observe is saved, and outside the write transaction: the names read, and the
     server still advertises this exact tool and schema, with annotations (if it gives any) that
-    say read-only. Returns what Observe binds: the execution and the advert hash."""
+    say read-only. Without annotations the names must have the short shape (get_weather); the
+    server's read-only hint allows longer ones. Returns what Observe binds: the execution, the
+    advert hash and whether the read-only hint was given."""
     with cp._conn() as conn:
         tool = _stored_tool(conn, identity)
     execution = mcp_observe.bound(tool.get("execution")) if tool else None
@@ -214,13 +216,15 @@ def _confirmable(identity, payload: ReadClass, not_found):
     if tool["version"] != payload.expected_version:
         raise OwnerError("definition_conflict", "The MCP tool changed; reload it first.", 409)
     names = (identity, tool.get("name"), execution["tool_name"])
-    if any(mcp_observe.says_act_outward(name) for name in names):
-        raise OwnerError(
-            "act_outward_name",
-            "Only a tool whose names start with a read verb (get, list, search, ...) and say "
-            "nothing that acts can run without asking.",
-            422,
-        )
+    refused = OwnerError(
+        "act_outward_name",
+        "Only a tool named like get_weather or list_emails (or longer, when its server says it "
+        "is read-only) and saying nothing that acts can run without asking.",
+        422,
+    )
+    # Names that act even with the server's read-only hint are refused before it is asked.
+    if any(mcp_observe.says_act_outward(name, True) for name in names):
+        raise refused
     discovered = mcp_http.discover(execution["url"], execution["secret_ref"])
     mcp_observe.notice(execution["url"], execution["secret_ref"], discovered)
     mcp_http.require_match(discovered["tools"], execution, discovered.get("unsupportedTools", []))
@@ -231,7 +235,10 @@ def _confirmable(identity, payload: ReadClass, not_found):
             "The server's annotations do not say this tool is read-only, so it always asks.",
             422,
         )
-    return execution, advertised["advertHash"]
+    read_only_hint = advertised.get("annotations") is not None
+    if mcp_observe.names_act(names, read_only_hint):
+        raise refused
+    return execution, advertised["advertHash"], read_only_hint
 
 
 def set_class(identity, payload: ReadClass):
@@ -256,12 +263,17 @@ def set_class(identity, payload: ReadClass):
                 409,
             )
         if confirmable is not None:
-            confirmed, advert_hash = confirmable
+            confirmed, advert_hash, read_only_hint = confirmable
             if confirmed != execution:
                 raise OwnerError(
                     "definition_conflict", "The MCP tool changed; reload it first.", 409
                 )
-            read_class = {"class": mcp_observe.OBSERVE, **execution, "advert_hash": advert_hash}
+            read_class = {
+                "class": mcp_observe.OBSERVE,
+                **execution,
+                "advert_hash": advert_hash,
+                "read_only_hint": read_only_hint,
+            }
         else:
             read_class = {"class": mcp_observe.ACT_OUTWARD}
         if tool.get("read_class", {"class": mcp_observe.ACT_OUTWARD}) == read_class:

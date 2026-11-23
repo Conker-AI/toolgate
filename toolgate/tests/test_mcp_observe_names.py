@@ -1,13 +1,17 @@
 """Which imported MCP tool names can never be Observe (core/mcp_observe.py says_act_outward).
 
-Only a name that reads can be Observe: its own part starts with a read verb and nothing after it
-connects or acts. Every other name asks the owner for every call, whatever he chose. A false
+Only a name with the shape of a read can be Observe. Without the server's read-only hint it is a
+read verb alone or with one part (get_weather, list_emails); with the hint it may be longer, or
+start with query. Either way nothing after the verb connects or acts, and a LEADS word is only
+the last part, exactly. Every other name asks the owner for every call, whatever he chose. A false
 positive only asks; a false negative would let a tool act unasked, so every doubt asks."""
 
 import pytest
 
 from toolgate.core import approval_levels
 from toolgate.core import mcp_observe as observe
+
+BOTH = pytest.mark.parametrize("read_only_hint", [False, True], ids=["no-hint", "read-only-hint"])
 
 
 def test_the_act_outward_words_hold_the_owner_list_and_every_word_that_raises_a_level():
@@ -18,11 +22,21 @@ def test_the_act_outward_words_hold_the_owner_list_and_every_word_that_raises_a_
     tails = {"kill", "terminate", "halt", "poweroff", "eval", "exec", "sql", "upsert", "register"}
     tails |= {"authorize", "sign", "deposit", "spend", "transact", "mint", "burn", "dispatch"}
     tails |= {"broadcast", "announce", "alert", "dial", "apply", "cleanup"}
+    # The third review's words, as defence in depth behind the short shape.
+    tails |= {"refresh", "generate", "ack", "acknowledge", "rotate", "invoke", "spawn"}
+    tails |= {"provision", "scale", "resize", "clone", "fork", "copy", "backup", "star"}
+    tails |= {"confirm", "verify", "claim", "complete", "escalate", "page", "emit", "fire"}
+    tails |= {"init", "seed", "store", "persist", "remember", "train", "build", "compile"}
+    tails |= {"bid", "trade", "swap", "stake", "reserve", "rent", "pause", "resume"}
+    tails |= {"connect", "login", "logout"}
     assert tails <= observe.ACTS
     assert approval_levels.OUTWARD_WORDS <= observe.ACT_OUTWARD_WORDS
     assert approval_levels.SERIOUS_WORDS <= observe.ACT_OUTWARD_WORDS
-    assert not observe.READ_VERBS & (observe.ACT_OUTWARD_WORDS | observe.CONNECTORS)
-    assert "check" not in observe.READ_VERBS
+    readers = observe.READ_VERBS | observe.HINTED_READ_VERBS
+    assert not readers & (observe.ACT_OUTWARD_WORDS | observe.CONNECTORS)
+    # Verbs that commonly execute what they are given never lead a name without the hint.
+    assert not observe.READ_VERBS & {"check", "run", "exec", "eval", "query", "sql"}
+    assert {"query"} == observe.HINTED_READ_VERBS
 
 
 # Names an independent review found allowed as Observe before this rule set; all must act.
@@ -109,8 +123,27 @@ TAILS = [
     "get_vm_poweroff",
     "list_jobs_dispatch",
 ]
+# The third review: a LEADS word followed by more, short words that act glued to a noun, and
+# words no list named. They ask with the server's read-only hint too.
+THIRD = [
+    "get_message_user",
+    "get_start_instance",
+    "get_order_pizza",
+    "get_change_password",
+    "get_lock_door",
+    "get_sync_repo",
+    "get_setvalue",
+    "get_runscript",
+    "get_banuser",
+    "get_putobject",
+    "get_refresh_token",
+    "get_invoke",
+    "get_rotate_key",
+    "get_trade",
+]
 
 
+@BOTH
 @pytest.mark.parametrize(
     "name",
     [
@@ -118,13 +151,27 @@ TAILS = [
         *JOINED,
         *UNNAMED,
         *TAILS,
+        *THIRD,
+        # Two parts: each way a word acts inside the one part after the read verb.
         "get_quicksend",
-        "get_profile_updating",
-        "get_thread_replied",
+        "get_profileupdating",
+        "get_threadreplied",
+        "get_rerun",
+        "get_pinned",
+        "get_unpinned",
+        "get_messageuser",
+        "get_ring",
+        "get_and",
+        # Longer: a word that acts anywhere after the verb, and a LEADS word before the last.
         "get_tag_add",
         "get_message_unpin",
         "get_status_retweet",
+        "get_profile_updating",
+        "get_thread_replied",
+        "list_messages_user",
+        "get_weather_and_post",
         "send.list_messages",
+        "email.list_files",
         "mcp.get-echo-delete",
         "echo",
         "send_message",
@@ -177,16 +224,20 @@ TAILS = [
         pytest.param(7, id="number"),
     ],
 )
-def test_names_that_act(name):
-    assert observe.says_act_outward(name)
+def test_names_that_act(name, read_only_hint):
+    assert observe.says_act_outward(name, read_only_hint)
 
 
+@BOTH
 @pytest.mark.parametrize(
     "name",
     [
         "search",
         "fetch",
         "get_echo",
+        "get_messages",
+        "get_weather",
+        "search_docs",
         "list_people",
         "read_chat",
         "list_messages",
@@ -198,15 +249,14 @@ def test_names_that_act(name):
         "list_events",
         "listEvents",
         "get_event",
-        "get_calendar_events",
         "get_freebusy",
+        "get_calendar",
         "list_calendars",
         "list_chats",
         "list_emails",
         "read_email",
         "list_labels",
         "list_drafts",
-        "get_unread_count",
         "list_comments",
         "list_tweets",
         "list_replies",
@@ -217,16 +267,10 @@ def test_names_that_act(name):
         "get_contacts",
         "find_contact",
         "lookup_user",
-        "get_settings",
-        "get_address",
         "get_profile",
-        "list_notebooks",
         "list_files",
         "read_file",
         "search_files",
-        "get_file_metadata",
-        "list_recent_files",
-        "query_database",
         "describe_table",
         "Search messages",
         "Get echo",
@@ -238,12 +282,37 @@ def test_names_that_act(name):
         pytest.param("\uff4c\uff49\uff53\uff54_messages", id="full-width-list"),
     ],
 )
-def test_names_that_read(name):
-    assert not observe.says_act_outward(name)
+def test_names_that_read(name, read_only_hint):
+    assert not observe.says_act_outward(name, read_only_hint)
 
 
-# Reads that always ask (accepted false positives, listed in toolgate#126): not led by a read
-# verb, glued, a word that acts inside another word, or a LEADS word past the read's object.
+# Reads longer than a verb and one part, or led by query: Observe only when the server's own
+# annotations say read-only (rule B); without them they ask (rule A).
+HINTED_READS = [
+    "get_weather_today",
+    "get_calendar_events",
+    "get_unread_count",
+    "get_file_metadata",
+    "list_recent_files",
+    "list_unread_messages",
+    "get_latest_release",
+    "get_job_status",
+    "list_pull_requests",
+    "Get echo text",
+    "query",
+    "query_database",
+]
+
+
+@pytest.mark.parametrize("name", HINTED_READS)
+def test_longer_reads_need_the_servers_read_only_hint(name):
+    assert observe.says_act_outward(name)
+    assert not observe.says_act_outward(name, read_only_hint=True)
+
+
+# Reads that always ask, even with the hint (accepted false positives, listed in toolgate#126):
+# not led by a read verb, glued, a word that acts inside or at the edge of another word, or a
+# LEADS word with more glued to it.
 KNOWN_READS_THAT_ASK = [
     "echo",
     "research",
@@ -263,14 +332,31 @@ KNOWN_READS_THAT_ASK = [
     "list_skills",
     "list_alerts",
     "list_transactions",
-    "get_latest_release",
-    "list_unread_messages",
+    "get_settings",
+    "get_address",
+    "get_string",
+    "get_display",
+    "get_context",
+    "get_clock",
+    "get_feedback",
+    "get_holdings",
+    "get_starred",
+    "get_current_user",
+    "list_models",
+    "list_pages",
+    "list_connections",
+    "list_playlists",
+    "list_builds",
+    "list_backups",
+    "list_forks",
+    "list_notebooks",
 ]
 
 
+@BOTH
 @pytest.mark.parametrize("name", KNOWN_READS_THAT_ASK)
-def test_known_reads_that_always_ask(name):
-    assert observe.says_act_outward(name)
+def test_known_reads_that_always_ask(name, read_only_hint):
+    assert observe.says_act_outward(name, read_only_hint)
 
 
 @pytest.mark.parametrize(
@@ -295,3 +381,10 @@ def test_known_reads_that_always_ask(name):
 )
 def test_server_hints_that_say_a_tool_changes_things(annotations, acts):
     assert observe.hints_act(annotations) is acts
+
+
+def test_a_tools_names_act_when_any_one_of_them_does():
+    assert not observe.names_act(("mcp.get-echo", "Get echo", "get_echo"))
+    assert observe.names_act(("mcp.get-echo", "Get echo and post it", "get_echo"))
+    assert observe.names_act(("mcp.get-echo-text", "Get echo text", "get_echo_text"))
+    assert not observe.names_act(("mcp.get-echo-text", "Get echo text", "get_echo_text"), True)

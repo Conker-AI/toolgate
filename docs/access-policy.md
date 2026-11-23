@@ -48,35 +48,46 @@ and the audit log apply exactly as before (`tool_executed` carries `"read_class"
 - Observe is an access grant: Pi's gateway asks his password for it (ADR-0010); Act outward only
   takes power away and needs the session. The `conker` CLI sets only `act_outward`, because it
   cannot ask his password.
-- Only a tool whose ToolGate id, name and MCP tool name all read can be Observe; any other is
-  refused (422 `act_outward_name`) and never treated as Observe. `says_act_outward` is an
-  allow-list and fails closed. A name is split at punctuation and camelCase; words before a dot
-  are its namespace (`mcp.` in the id, `social.` in `social.list_chats`) and must not act. The
-  name itself reads only when:
-  - its first word is a read verb (`READ_VERBS`: get, list, search, read, fetch, view, lookup,
-    find, query, describe, show, count, inspect, browse, preview, summarize/summarise, stat,
-    status; not check);
-  - no later word is a connector (and, then, or, plus, to, also, after, with, via);
-  - no later word acts (`ACTS`: send, post, reply, delete, pay, kill, terminate, exec, sql,
-    apply, dispatch and similar; one of four letters or more counts inside any word, with its
-    `-ing`/`-ied` forms; a shorter one as a whole word with its endings; a leading `re`/`un`
-    keeps the word);
-  - no word after the read's object is a `LEADS` word (message, email, mail, sms, dm, text, call,
-    chat, comment, draft, report, schedule, order, start, stop, lock, ...): `list_messages` and
-    `read_chat` read, `read_mail_schedule_meeting` asks;
-  - after NFKC normalisation it holds only printable ASCII (a Cyrillic look-alike, an invisible
+- Only a tool whose ToolGate id, name and MCP tool name all have the shape of a read can be
+  Observe; any other is refused (422 `act_outward_name`) and never treated as Observe.
+  `says_act_outward` is a shape rule, not a word list, and fails closed. A name is split at
+  anything that is not a letter (digits too) and at camelCase; words before a dot are its
+  namespace (`mcp.` in the id, `social.` in `social.list_chats`) and must not act or lead.
+  - **Without annotations** from the server the name is exactly a read verb, or a read verb and
+    one part: `get_weather`, `list_emails`, `read_chat`, `search_docs`. Three parts or more ask.
+  - **With annotations** that say `readOnlyHint: true` and `destructiveHint` absent or false
+    (see below) it may be longer (`get_calendar_events`, `list_unread_messages`), and may start
+    with `query`.
+  - Read verbs (`READ_VERBS`): get, list, search, read, fetch, view, lookup, find, describe,
+    show, count, inspect, browse, preview, summarize/summarise, stat, status. Verbs that commonly
+    execute what they are given (check, run, exec, eval, query, sql) are not; `query` leads a
+    name only with the read-only hint.
+  - Either way no part after the verb is a connector (and, then, or, plus, to, also, after,
+    with, via) or holds a word that acts (`ACTS`: send, post, reply, delete, pay, kill, exec,
+    refresh, rotate, invoke, trade and similar; one of four letters or more anywhere in the part
+    with its `-ing`/`-ied` forms, a shorter one, or one of `ACTS_AT_EDGES` such as ring, play,
+    lock, sync, change, when the part is, starts with or ends with it: `get_setvalue`,
+    `get_rerun`, `get_doorlock`).
+  - A `LEADS` word (message, email, chat, call, order, start, patch, report, ...) is only the
+    last part, exactly: `get_messages` reads, `get_message_user`, `get_messageuser` and
+    `get_start_instance` ask.
+  - After NFKC normalisation it holds only printable ASCII (a Cyrillic look-alike, an invisible
     or control character asks).
+  The server's hint is what he confirmed: it is part of the advert Observe is bound to and is
+  stored with the class (`read_only_hint`); a stored Observe without it gets the short shape.
   Reads that therefore always ask: names not led by a read verb (`echo`, `research`,
-  `gmail_search`, `retrieve_page`, `download_file_content`, `look_up_contact`, `what_needs_me`),
-  glued names (`searchemails`), a word that acts inside another (`get_market_data`,
-  `list_reactions`, `get_followers`, `list_posts`, `get_updates`, `list_skills`, `list_alerts`,
-  `list_transactions`) and a `LEADS` word past the object (`get_latest_release`,
-  `list_unread_messages`).
+  `gmail_search`, `retrieve_page`, `download_file_content`, `look_up_contact`), glued names
+  (`searchemails`, `list_notebooks`), and a word that acts inside or at the edge of another
+  (`get_settings`, `get_address`, `get_market_data`, `list_posts`, `get_updates`,
+  `list_skills`, `list_pages`, `list_models`, `get_string`, `get_display`, `get_context`,
+  `get_current_user`, `list_connections`, `list_builds`, `list_backups`). Without the hint, every
+  longer read asks too.
 - He can only mark Observe what the server still advertises as imported: the class route
-  rediscovers the endpoint first (409 `schema_changed` otherwise). When the server gives
-  annotations, Observe needs `readOnlyHint: true` and `destructiveHint` absent or false; empty
-  annotations, a title only, or only `openWorldHint`/`idempotentHint` ask (422
-  `act_outward_hint`). Without annotations the names alone decide.
+  checks the names first (with the hint's longer shape), then rediscovers the endpoint (409
+  `schema_changed` otherwise). When the server gives annotations, Observe needs
+  `readOnlyHint: true` and `destructiveHint` absent or false; empty annotations, a title only,
+  or only `openWorldHint`/`idempotentHint` ask (422 `act_outward_hint`). Without annotations the
+  names must have the short shape.
 - Observe is bound to the endpoint, credential reference, MCP tool name and schema hash he saw,
   and to the hash of the tool's description and annotations (`advert_hash`). When the server
   advertises anything else, at a call (`schema_changed`, `advert_changed`; nothing is sent) or
