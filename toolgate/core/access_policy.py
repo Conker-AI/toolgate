@@ -16,7 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from toolgate.core import control_plane
 
 # Never decided by a delegate: the fixed executors with their own exact owner review, and tools
-# on external MCP servers (imported tools always ask the owner; there is no per-tool opt-out).
+# on external MCP servers. An imported tool asks the owner unless he marked that one tool Observe
+# (core/mcp_observe.py, its own guard); no delegate's "run" ever lifts it.
 FLOOR_EXECUTIONS = frozenset({"port_control", "container_control", "process_control", "mcp_http"})
 DECIDERS = ("tool_default", "agent", "chat", "ai_reviewer", "owner_request")
 

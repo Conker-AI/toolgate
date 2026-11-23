@@ -739,6 +739,31 @@
         "title": "PublishDraft",
         "type": "object"
       },
+      "ReadClass": {
+        "additionalProperties": false,
+        "description": "Observe (runs without asking) or Act outward (asks for every exact call), for the exact\ntool version the owner saw. Pi's gateway asks his password for Observe (ADR-0010).",
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "read_class": {
+            "enum": [
+              "observe",
+              "act_outward"
+            ],
+            "title": "Read Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "read_class",
+          "expected_version"
+        ],
+        "title": "ReadClass",
+        "type": "object"
+      },
       "ReservationRelease": {
         "properties": {
           "confirmed_not_executed": {
@@ -6196,6 +6221,70 @@
           }
         },
         "summary": "Owner Mcp Set Access"
+      }
+    },
+    "/v2/owner/mcp/tools/{tool_id}/class": {
+      "post": {
+        "description": "Observe (runs without asking; scope, limits, spending and the audit log still apply) or\nAct outward (asks for every exact call, the default). A name that says it acts is refused\nObserve (422); a stale `expected_version` is refused (409). Pi's gateway asks the owner's\npassword for Observe, as for every access grant.",
+        "operationId": "owner_mcp_class_v2_owner_mcp_tools__tool_id__class_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tool_id",
+            "required": true,
+            "schema": {
+              "title": "Tool Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-ToolGate-Owner-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Owner-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadClass"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Owner Mcp Class"
       }
     },
     "/v2/owner/mcp/tools/{tool_id}/state": {

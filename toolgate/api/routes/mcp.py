@@ -1,11 +1,11 @@
-"""Owner routes for external MCP servers: discover, import, enable and scope their tools."""
+"""Owner routes for external MCP servers: discover, import, enable, classify and scope their tools."""
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from toolgate.api.definitions import require_valid_tool_definition
 from toolgate.api.deps import require_agent, require_owner
-from toolgate.core import mcp_imports
+from toolgate.core import mcp_imports, mcp_observe
 from toolgate.executors import mcp_http
 
 router = APIRouter()
@@ -13,9 +13,10 @@ router = APIRouter()
 
 @router.post("/v2/owner/mcp/discover", dependencies=[Depends(require_owner)])
 def owner_mcp_discover(payload: mcp_imports.Discover):
-    return JSONResponse(
-        mcp_http.discover(payload.url, payload.secret_ref), headers={"Cache-Control": "no-store"}
-    )
+    discovered = mcp_http.discover(payload.url, payload.secret_ref)
+    # A tool he marked Observe that this server now advertises differently asks him again.
+    mcp_observe.notice(payload.url, payload.secret_ref, discovered)
+    return JSONResponse(discovered, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/v2/owner/mcp/import", dependencies=[Depends(require_owner)])
@@ -36,6 +37,17 @@ def owner_mcp_state(tool_id: str, payload: mcp_imports.State):
     return JSONResponse(
         mcp_imports.set_state(tool_id, payload, require_valid_tool_definition),
         headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/v2/owner/mcp/tools/{tool_id}/class", dependencies=[Depends(require_owner)])
+def owner_mcp_class(tool_id: str, payload: mcp_imports.ReadClass):
+    """Observe (runs without asking; scope, limits, spending and the audit log still apply) or
+    Act outward (asks for every exact call, the default). A name that says it acts is refused
+    Observe (422); a stale `expected_version` is refused (409). Pi's gateway asks the owner's
+    password for Observe, as for every access grant."""
+    return JSONResponse(
+        mcp_imports.set_class(tool_id, payload), headers={"Cache-Control": "no-store"}
     )
 
 

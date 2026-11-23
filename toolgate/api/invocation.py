@@ -20,6 +20,7 @@ from toolgate.core import (
     container_admission,
     control_plane,
     identities,
+    mcp_observe,
     port_reviews,
     publications,
     spending,
@@ -177,6 +178,15 @@ def invoke_tool(
                 "action_id": action_id,
             },
         )
+    is_mcp = tool.get("execution", {}).get("type") == "mcp_http"
+    # An imported tool the owner marked Observe runs without his card (core/mcp_observe.py);
+    # everything else on this path, and the recheck inside the dispatch transaction, still applies.
+    observed = False
+    if is_mcp:
+        with control_plane._conn() as conn:
+            observed = mcp_observe.runs_unasked(conn, tool, authorization, decision)
+        if observed:
+            authorization = "auto"
     is_port = (
         tool.get("id") == "system.port-control"
         or tool.get("execution", {}).get("type") == "port_control"
@@ -263,6 +273,14 @@ def invoke_tool(
                 conn, publication["kind"], publication["id"], publication["version"]
             )
         enforce_dispatch_usage_limits(conn, "tool", tool, "tool_executed")
+        if observed and not mcp_observe.runs_unasked(conn, tool, "owner_confirmation", decision):
+            # He changed it back to Act outward (or it reverted) since the check above.
+            deny(
+                "POLICY_DENIED",
+                "This tool asks the owner again; request his confirmation",
+                409,
+                "Retry without an approval to queue a request",
+            )
         if authorization in {"owner_confirmation", "ai_review"} and not approval_granted:
             approved, reason = approvals.consume_verification_in_transaction(
                 conn,
@@ -391,8 +409,16 @@ def invoke_tool(
         "tool",
         tool["id"],
         actor,
-        {"ok": result["ok"], "action_id": action_id},
+        {
+            "ok": result["ok"],
+            "action_id": action_id,
+            **({"read_class": mcp_observe.OBSERVE} if observed else {}),
+        },
     )
+    if is_mcp and result.get("error_code") in mcp_observe.CHANGED_ADVERT:
+        # The server advertises another tool or schema than he confirmed (nothing was sent): it
+        # asks him again from now on. After the journal, so a failure here never hides the record.
+        mcp_observe.revert(tool["id"], result["error_code"])
     return journal.response(record)
 
 

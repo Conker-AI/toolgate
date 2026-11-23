@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 import re
-from typing import cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from toolgate.executors import mcp_http
 
 from . import control_plane as cp
-from . import publications, tool_access
+from . import mcp_observe, publications, tool_access
 from .owner_channel import OwnerError
 
 
@@ -38,6 +38,14 @@ class State(StrictRequest):
     expected_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
+class ReadClass(StrictRequest):
+    """Observe (runs without asking) or Act outward (asks for every exact call), for the exact
+    tool version the owner saw. Pi's gateway asks his password for Observe (ADR-0010)."""
+
+    read_class: Literal["observe", "act_outward"]
+    expected_version: int = Field(ge=1)
+
+
 def projection(tool):
     execution = tool["execution"]
     return {
@@ -50,6 +58,7 @@ def projection(tool):
         "tool_name": execution["tool_name"],
         "schema_hash": execution["schema_hash"],
         "secret_ref": execution.get("secret_ref"),
+        "read_class": mcp_observe.stated(tool),
         "version": tool["version"],
         "digest": publications.digest(tool),
     }
@@ -86,6 +95,7 @@ def import_tool(payload: Import, validate):
     }
     mcp_http.validate_execution(execution)
     discovered = mcp_http.discover(payload.url, payload.secret_ref)
+    mcp_observe.notice(payload.url, payload.secret_ref, discovered)
     mcp_http.require_match(discovered["tools"], execution, discovered.get("unsupportedTools", []))
     body = {
         "id": payload.id,
@@ -182,6 +192,54 @@ def set_state(identity, payload: State, validate):
         identity,
         "owner",
     )
+    return {"schemaVersion": 1, "tool": projection(saved)}
+
+
+def set_class(identity, payload: ReadClass):
+    """Mark one imported tool Observe or Act outward. A tool whose name says it acts is refused
+    Observe; a stale version is refused; the change is its own audited tool version."""
+    not_found = OwnerError("mcp_tool_not_found", "Imported MCP tool not found.", 404)
+    if not mcp_observe.MCP_ID.fullmatch(identity):
+        raise not_found
+    with cp._conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM v2_objects WHERE kind='tool' AND id=?", (identity,)
+        ).fetchone()
+        tool = cp._row(row) if row else None
+        execution = mcp_observe.bound(tool.get("execution")) if tool else None
+        if not tool or execution is None:
+            raise not_found
+        if tool.get("version") != payload.expected_version:
+            raise OwnerError(
+                "definition_conflict",
+                "The MCP tool changed; reload before changing its class.",
+                409,
+            )
+        if payload.read_class == mcp_observe.OBSERVE:
+            names = (identity, tool.get("name"), execution["tool_name"])
+            if any(mcp_observe.says_act_outward(name) for name in names):
+                raise OwnerError(
+                    "act_outward_name",
+                    "A tool whose name says it sends, posts, changes, deletes or pays always asks.",
+                    422,
+                )
+            read_class = {"class": mcp_observe.OBSERVE, **execution}
+        else:
+            read_class = {"class": mcp_observe.ACT_OUTWARD}
+        if tool.get("read_class", {"class": mcp_observe.ACT_OUTWARD}) == read_class:
+            return {"schemaVersion": 1, "tool": projection(tool)}
+        saved = mcp_observe.save(conn, tool, read_class)
+        # In the same transaction: the class never changes without its audit event.
+        cp.event(
+            "mcp_class_changed",
+            "warning",
+            "tool",
+            identity,
+            "owner",
+            {"read_class": payload.read_class, "version": saved["version"]},
+            connection=conn,
+        )
     return {"schemaVersion": 1, "tool": projection(saved)}
 
 

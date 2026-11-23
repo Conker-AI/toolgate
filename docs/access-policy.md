@@ -30,8 +30,33 @@ external MCP server (`mcp_http`). No decision skips the owner for these. Agent t
 (`GET /v2/agent/tools`) include `"sensitive": true|false` and `"card"` (see Inbox buttons).
 
 External MCP tools are on the floor because what they do is decided by a server outside the
-owner's control: an imported tool is always `owner_confirmation`, and no per-tool switch lets a
-delegate's `run` skip the owner. Unmarking it sensitive does not take it off the floor.
+owner's control: an imported tool is always `owner_confirmation`, and no delegate's `run` skips
+the owner. Unmarking it sensitive does not take it off the floor.
+
+## Observe or Act outward (imported MCP tools)
+
+Each imported tool has a read class (`core/mcp_observe.py`, ADR-0006). **Act outward**, the
+default for every import and for every tool imported before the class existed, asks the owner for
+every call, bound to its exact arguments (approval level 2, or 3 for a name that deletes or pays).
+**Observe** runs without his card; scope, lockdown, usage limits, spending, the action journal
+and the audit log apply exactly as before (`tool_executed` carries `"read_class": "observe"`).
+
+- He sets it per tool on the owner channel: `POST /v2/owner/mcp/tools/{id}/class` with
+  `{"read_class": "observe" | "act_outward", "expected_version": N}`. A stale version is 409,
+  and every change is a new tool version with an `mcp_class_changed` event. Import never sets
+  it, and an admin catalogue save of the tool drops it (back to Act outward).
+- Observe is an access grant: Pi's gateway asks his password for it (ADR-0010); Act outward only
+  takes power away and needs the session.
+- A tool whose ToolGate id, name or MCP tool name says it acts (`ACT_OUTWARD_WORDS`: send, post,
+  reply, react, delete, write, create, update, move, share, pay, buy and similar, with their
+  endings) is refused Observe (422 `act_outward_name`) and is never treated as Observe.
+- Observe is bound to the endpoint, credential reference, MCP tool name and schema hash he saw.
+  When the server advertises anything else, at a call (`schema_changed`) or at his discovery of
+  that endpoint, the tool goes back to Act outward (`mcp_class_reverted`) until he confirms again.
+- Anyone's `ask` and his sensitive mark still ask. Built-in tools never have a read class.
+- The class is read from the stored tool for every call, again inside the dispatch transaction,
+  and never from a pinned publication. `GET /v2/agent/tools` lists an Observe tool as
+  `"authorization": "auto"`, `"sensitive": false`; `GET /v2/owner/mcp/tools` shows `read_class`.
 
 ## Inbox buttons
 
