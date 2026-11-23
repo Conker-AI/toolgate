@@ -45,9 +45,3 @@ extend-immutable-calls = [
     "fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Path",
     "fastapi.Body", "fastapi.File", "fastapi.Form", "fastapi.Cookie",
 ]
-
-[format]
-# Formatting this grows it past the 600-line limit; it joins the format run once split.
-exclude = [
-    "toolgate/core/control_plane.py",  # formats to 749 lines; split first
-]

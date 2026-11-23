@@ -4,11 +4,11 @@ This module deliberately keeps ToolGate's owner data in SQLite and exposes a
 small declarative model.  Generated executors may consume these definitions,
 but agents never get write access to them directly.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
-import re
 import secrets
 import sqlite3
 import uuid
@@ -17,57 +17,20 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, overload
 
 from toolgate.core import schema_ledger
+
+# Stateless rules and the schema live beside this module; callers keep importing them from here.
+from toolgate.core.control_plane_rules import (  # noqa: F401
+    DEFAULT_USAGE_LIMITS,
+    is_scoped,
+    validate_inputs,
+    with_default_limits,
+)
+from toolgate.core.control_plane_schema import SCHEMA  # noqa: F401
 from toolgate.core.paths import DB_PATH
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-# The control plane's own tables and their immutability triggers (schema_ledger.BASELINE).
-SCHEMA = """
-    CREATE TABLE IF NOT EXISTS v2_objects (
-      kind TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-      PRIMARY KEY (kind, id)
-    );
-    CREATE TABLE IF NOT EXISTS v2_agent_keys (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE,
-      scopes TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
-      last_used_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS v2_verification_origins (
-      request_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS v2_events (
-      id TEXT PRIMARY KEY, event_type TEXT NOT NULL, severity TEXT NOT NULL,
-      subject_type TEXT, subject_id TEXT, actor TEXT, payload TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS v2_events_newest ON v2_events(created_at);
-    CREATE TABLE IF NOT EXISTS v2_definition_versions (
-      kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
-      body TEXT NOT NULL, PRIMARY KEY(kind,id,version)
-    );
-    CREATE TABLE IF NOT EXISTS v2_publications (
-      kind TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
-      body TEXT NOT NULL, PRIMARY KEY(kind,id,version)
-    );
-    CREATE TRIGGER IF NOT EXISTS v2_versions_no_update BEFORE UPDATE ON v2_definition_versions
-    BEGIN SELECT RAISE(ABORT, 'definition history is immutable'); END;
-    CREATE TRIGGER IF NOT EXISTS v2_versions_no_delete BEFORE DELETE ON v2_definition_versions
-    BEGIN SELECT RAISE(ABORT, 'definition history is permanent'); END;
-    CREATE TRIGGER IF NOT EXISTS v2_versions_no_replace BEFORE INSERT ON v2_definition_versions
-    WHEN EXISTS(SELECT 1 FROM v2_definition_versions WHERE kind=NEW.kind AND id=NEW.id AND version=NEW.version)
-    BEGIN SELECT RAISE(ABORT, 'definition revision already exists'); END;
-    CREATE TRIGGER IF NOT EXISTS v2_publications_no_update BEFORE UPDATE ON v2_publications
-    BEGIN SELECT RAISE(ABORT, 'publication is immutable'); END;
-    CREATE TRIGGER IF NOT EXISTS v2_publications_no_delete BEFORE DELETE ON v2_publications
-    BEGIN SELECT RAISE(ABORT, 'publication is permanent'); END;
-    CREATE TRIGGER IF NOT EXISTS v2_publications_no_replace BEFORE INSERT ON v2_publications
-    WHEN EXISTS(SELECT 1 FROM v2_publications WHERE kind=NEW.kind AND id=NEW.id AND version=NEW.version)
-    BEGIN SELECT RAISE(ABORT, 'publication already exists'); END;
-"""
 
 
 @contextmanager
@@ -115,31 +78,56 @@ class DefinitionConflict(ValueError):
 
 
 @overload
-def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
-         require_existing: Literal[False] = False, require_absent: bool = False,
-         connection=None) -> dict: ...
+def _put(
+    kind: str,
+    obj_id: str,
+    body: dict,
+    *,
+    expected_version: int | None = None,
+    require_existing: Literal[False] = False,
+    require_absent: bool = False,
+    connection=None,
+) -> dict: ...
 @overload
-def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
-         require_existing: bool, require_absent: bool = False,
-         connection=None) -> dict | None: ...
-def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = None,
-         require_existing: bool = False, require_absent: bool = False,
-         connection=None) -> dict | None:
+def _put(
+    kind: str,
+    obj_id: str,
+    body: dict,
+    *,
+    expected_version: int | None = None,
+    require_existing: bool,
+    require_absent: bool = False,
+    connection=None,
+) -> dict | None: ...
+def _put(
+    kind: str,
+    obj_id: str,
+    body: dict,
+    *,
+    expected_version: int | None = None,
+    require_existing: bool = False,
+    require_absent: bool = False,
+    connection=None,
+) -> dict | None:
     # None only when require_existing finds no row; the overloads say so to the type checker.
     now = _now()
     body = {**body, "id": obj_id}
-    with (nullcontext(connection) if connection is not None else _conn()) as conn:
+    with nullcontext(connection) if connection is not None else _conn() as conn:
         definition = kind in {"tool", "automation"}
         if connection is None and (kind == "request" or definition):
             conn.execute("BEGIN IMMEDIATE")
-        existing = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+        existing = conn.execute(
+            "SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)
+        ).fetchone()
         if require_existing and not existing:
             return None
         if require_absent and existing:
             # Replacing needs the version the caller saw; a blind upsert could undo an edit.
             raise DefinitionConflict(_row(existing).get("version", 1))
         if definition:
-            if expected_version is not None and (type(expected_version) is not int or expected_version < 1):
+            if expected_version is not None and (
+                type(expected_version) is not int or expected_version < 1
+            ):
                 raise ValueError("expected_version must be a positive integer")
             current = _row(existing).get("version", 1) if existing else None
             initial = body.get("version", 1)
@@ -151,13 +139,20 @@ def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = N
                 raise ValueError("Initial definition version must be a positive integer")
             # Legacy callers may omit the precondition, but can never allocate/reset a
             # stored version. Keep create/upsert compatibility under the same lock.
-            retained = conn.execute("SELECT MAX(version) FROM v2_definition_versions WHERE kind=? AND id=?",
-                                    (kind, obj_id)).fetchone()[0] or 0
+            retained = (
+                conn.execute(
+                    "SELECT MAX(version) FROM v2_definition_versions WHERE kind=? AND id=?",
+                    (kind, obj_id),
+                ).fetchone()[0]
+                or 0
+            )
             body["version"] = max(current or 0, retained) + 1 if existing or retained else initial
             if existing:
                 retain_definition(conn, kind, _row(existing))
         if kind == "request" and existing:
-            raise ValueError("Requests cannot be replaced; use the serialized decision or consumption transition")
+            raise ValueError(
+                "Requests cannot be replaced; use the serialized decision or consumption transition"
+            )
         created = existing["created_at"] if existing else now
         conn.execute(
             "INSERT INTO v2_objects(kind,id,body,created_at,updated_at) VALUES(?,?,?,?,?) "
@@ -172,8 +167,12 @@ def _put(kind: str, obj_id: str, body: dict, *, expected_version: int | None = N
 def retain_definition(conn, kind: str, definition: dict) -> None:
     """Retain only a previously unseen revision; old databases are adopted lazily."""
     key = (kind, definition["id"], definition.get("version", 1))
-    if not conn.execute("SELECT 1 FROM v2_definition_versions WHERE kind=? AND id=? AND version=?", key).fetchone():
-        conn.execute("INSERT INTO v2_definition_versions VALUES(?,?,?,?)", (*key, json.dumps(definition)))
+    if not conn.execute(
+        "SELECT 1 FROM v2_definition_versions WHERE kind=? AND id=? AND version=?", key
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO v2_definition_versions VALUES(?,?,?,?)", (*key, json.dumps(definition))
+        )
 
 
 @overload
@@ -184,7 +183,9 @@ def _change(kind: str, obj_id: str, change, default: dict | None = None) -> dict
     """Read, change and write one object under one write lock, so two writers never undo each other."""
     with _conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)
+        ).fetchone()
         current = _row(row) if row else (dict(default) if default is not None else None)
         if current is None:
             return None
@@ -193,13 +194,17 @@ def _change(kind: str, obj_id: str, change, default: dict | None = None) -> dict
 
 def get(kind: str, obj_id: str) -> dict | None:
     with _conn() as conn:
-        row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)
+        ).fetchone()
     return _row(row) if row else None
 
 
 def list_objects(kind: str) -> list[dict]:
     with _conn() as conn:
-        rows = conn.execute("SELECT * FROM v2_objects WHERE kind=? ORDER BY updated_at DESC", (kind,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM v2_objects WHERE kind=? ORDER BY updated_at DESC", (kind,)
+        ).fetchall()
     return [_row(row) for row in rows]
 
 
@@ -207,24 +212,52 @@ def remove(kind: str, obj_id: str) -> bool:
     with _conn() as conn:
         if kind in {"tool", "automation"}:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)
+            ).fetchone()
             if row:
                 retain_definition(conn, kind, _row(row))
-        return conn.execute("DELETE FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).rowcount > 0
+        return (
+            conn.execute("DELETE FROM v2_objects WHERE kind=? AND id=?", (kind, obj_id)).rowcount
+            > 0
+        )
 
 
-def event(event_type: str, severity: str = "info", subject_type: str | None = None,
-          subject_id: str | None = None, actor: str | None = None, payload: dict | None = None,
-          *, connection=None) -> dict:
+def event(
+    event_type: str,
+    severity: str = "info",
+    subject_type: str | None = None,
+    subject_id: str | None = None,
+    actor: str | None = None,
+    payload: dict | None = None,
+    *,
+    connection=None,
+) -> dict:
     """Record an event; pass the caller's `connection` to write it in the caller's transaction."""
-    record = {"id": str(uuid.uuid4()), "event_type": event_type, "severity": severity,
-              "subject_type": subject_type, "subject_id": subject_id, "actor": actor,
-              "payload": payload or {}, "created_at": _now()}
-    with (nullcontext(connection) if connection is not None else _conn()) as conn:
-        conn.execute("INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)", (
-            record["id"], record["event_type"], record["severity"], record["subject_type"],
-            record["subject_id"], record["actor"], json.dumps(record["payload"]), record["created_at"],
-        ))
+    record = {
+        "id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "severity": severity,
+        "subject_type": subject_type,
+        "subject_id": subject_id,
+        "actor": actor,
+        "payload": payload or {},
+        "created_at": _now(),
+    }
+    with nullcontext(connection) if connection is not None else _conn() as conn:
+        conn.execute(
+            "INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)",
+            (
+                record["id"],
+                record["event_type"],
+                record["severity"],
+                record["subject_type"],
+                record["subject_id"],
+                record["actor"],
+                json.dumps(record["payload"]),
+                record["created_at"],
+            ),
+        )
     return record
 
 
@@ -269,10 +302,20 @@ def settings() -> dict:
 
 
 def set_lockdown(enabled: bool, actor: str, reason: str = "") -> dict:
-    state = _change("settings", "control-plane", lambda state: {
-        **state, "lockdown": enabled, "reason": reason, "changed_by": actor}, _SETTINGS)
-    event("lockdown_enabled" if enabled else "lockdown_disabled", "critical" if enabled else "info",
-          "settings", "control-plane", actor, {"reason": reason})
+    state = _change(
+        "settings",
+        "control-plane",
+        lambda state: {**state, "lockdown": enabled, "reason": reason, "changed_by": actor},
+        _SETTINGS,
+    )
+    event(
+        "lockdown_enabled" if enabled else "lockdown_disabled",
+        "critical" if enabled else "info",
+        "settings",
+        "control-plane",
+        actor,
+        {"reason": reason},
+    )
     return state
 
 
@@ -286,41 +329,84 @@ def update_settings(changes: dict, actor: str) -> dict:
 
 def issue_agent_key(name: str, scopes: list[str]) -> tuple[dict, str]:
     raw = "tgx_" + secrets.token_urlsafe(32)
-    record = {"id": str(uuid.uuid4()), "name": name, "key_hash": hashlib.sha256(raw.encode()).hexdigest(),
-              "scopes": scopes or [], "status": "active", "created_at": _now()}
+    record = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "key_hash": hashlib.sha256(raw.encode()).hexdigest(),
+        "scopes": scopes or [],
+        "status": "active",
+        "created_at": _now(),
+    }
     with _conn() as conn:
-        conn.execute("INSERT INTO v2_agent_keys(id,name,key_hash,scopes,status,created_at) VALUES(?,?,?,?,?,?)",
-                     (record["id"], record["name"], record["key_hash"], json.dumps(record["scopes"]),
-                      record["status"], record["created_at"]))
-    event("agent_key_created", "info", "agent_key", record["id"], "admin", {"name": name, "scopes": scopes})
+        conn.execute(
+            "INSERT INTO v2_agent_keys(id,name,key_hash,scopes,status,created_at) VALUES(?,?,?,?,?,?)",
+            (
+                record["id"],
+                record["name"],
+                record["key_hash"],
+                json.dumps(record["scopes"]),
+                record["status"],
+                record["created_at"],
+            ),
+        )
+    event(
+        "agent_key_created",
+        "info",
+        "agent_key",
+        record["id"],
+        "admin",
+        {"name": name, "scopes": scopes},
+    )
     return public_agent_key(record), raw
 
 
 def ensure_bootstrap_agent_key(raw: str, scopes: list[str], name: str = "AgentGate Pi") -> dict:
     """Seed a missing deployment key; never reconcile an existing key to configuration."""
     if not raw.startswith("tgx_") or len(raw) < 20:
-        raise ValueError("TOOLGATE_BOOTSTRAP_EXECUTION_KEY must start with tgx_ and be at least 20 characters")
+        raise ValueError(
+            "TOOLGATE_BOOTSTRAP_EXECUTION_KEY must start with tgx_ and be at least 20 characters"
+        )
     hashed = hashlib.sha256(raw.encode()).hexdigest()
     normalized_scopes = scopes or []
     created_record: dict | None = None
     with _conn() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        existing = conn.execute("SELECT * FROM v2_agent_keys WHERE key_hash=?", (hashed,)).fetchone()
+        existing = conn.execute(
+            "SELECT * FROM v2_agent_keys WHERE key_hash=?", (hashed,)
+        ).fetchone()
         if existing:
             # Deployment configuration seeds authority; the owner's persisted decisions govern it thereafter.
             return public_agent_key(existing)
         record = {
-            "id": str(uuid.uuid4()), "name": name, "key_hash": hashed,
-            "scopes": normalized_scopes, "status": "active", "created_at": _now(),
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "key_hash": hashed,
+            "scopes": normalized_scopes,
+            "status": "active",
+            "created_at": _now(),
         }
         conn.execute(
             "INSERT INTO v2_agent_keys(id,name,key_hash,scopes,status,created_at) VALUES(?,?,?,?,?,?)",
-            (record["id"], record["name"], record["key_hash"], json.dumps(record["scopes"]), record["status"], record["created_at"]),
+            (
+                record["id"],
+                record["name"],
+                record["key_hash"],
+                json.dumps(record["scopes"]),
+                record["status"],
+                record["created_at"],
+            ),
         )
         created_record = record
         result = public_agent_key(record)
     if created_record:
-        event("agent_key_bootstrapped", "info", "agent_key", created_record["id"], "deployment", {"name": name, "scopes": normalized_scopes})
+        event(
+            "agent_key_bootstrapped",
+            "info",
+            "agent_key",
+            created_record["id"],
+            "deployment",
+            {"name": name, "scopes": normalized_scopes},
+        )
     return result
 
 
@@ -358,7 +444,9 @@ def authenticate_agent(raw: str | None) -> dict | None:
         return None
     hashed = hashlib.sha256(raw.encode()).hexdigest()
     with _conn() as conn:
-        row = conn.execute("SELECT * FROM v2_agent_keys WHERE key_hash=? AND status='active'", (hashed,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM v2_agent_keys WHERE key_hash=? AND status='active'", (hashed,)
+        ).fetchone()
         if row:
             conn.execute("UPDATE v2_agent_keys SET last_used_at=? WHERE id=?", (_now(), row["id"]))
     return public_agent_key(row) if row else None
@@ -366,91 +454,12 @@ def authenticate_agent(raw: str | None) -> dict | None:
 
 def revoke_agent_key(key_id: str, actor: str = "admin") -> bool:
     with _conn() as conn:
-        changed = conn.execute("UPDATE v2_agent_keys SET status='revoked' WHERE id=?", (key_id,)).rowcount
+        changed = conn.execute(
+            "UPDATE v2_agent_keys SET status='revoked' WHERE id=?", (key_id,)
+        ).rowcount
     if changed:
         event("agent_key_revoked", "warning", "agent_key", key_id, actor)
     return bool(changed)
-
-
-def is_scoped(agent: dict, capability: str) -> bool:
-    # An agent identity is always capped by the key that presents it.
-    if "ceiling" in agent and not _scoped(agent["ceiling"], capability):
-        return False
-    return _scoped(agent.get("scopes", []), capability)
-
-
-def _scoped(scopes: list, capability: str) -> bool:
-    if "*" in scopes or capability in scopes:
-        return True
-    if any(isinstance(scope, str) and scope.endswith("*") and capability.startswith(scope[:-1]) for scope in scopes):
-        return True
-    if capability.startswith("automation:"):
-        return "automation:*" in scopes
-    tool_id = capability.removeprefix("tool:")
-    return (
-        "tool:*" in scopes
-        or f"tool:{tool_id}" in scopes
-        or tool_id in scopes
-        or any(isinstance(scope, str) and scope.endswith("*") and tool_id.startswith(scope[:-1]) for scope in scopes)
-        or any(isinstance(scope, str) and scope.startswith("tool:") and scope.endswith("*") and tool_id.startswith(scope[5:-1]) for scope in scopes)
-    )
-
-
-def validate_inputs(schema: list[dict], args: dict) -> list[str]:
-    errors: list[str] = []
-    known = {field.get("name") for field in schema}
-    for key in args:
-        if key not in known:
-            errors.append(f"'{key}' is not an allowed argument")
-    for field in schema:
-        name, value = field.get("name"), args.get(field.get("name"))
-        # A required field sent as null is as missing as one left out.
-        if field.get("required") and value is None:
-            errors.append(f"'{name}' is required")
-            continue
-        if value is None:
-            continue
-        kind = field.get("type", "string")
-        if kind == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
-            errors.append(f"'{name}' must be an integer")
-        elif kind == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
-            errors.append(f"'{name}' must be a number")
-        elif kind == "boolean" and not isinstance(value, bool):
-            errors.append(f"'{name}' must be true or false")
-        elif kind == "string" and not isinstance(value, str):
-            errors.append(f"'{name}' must be text")
-        elif kind == "array" and not isinstance(value, list):
-            errors.append(f"'{name}' must be an array")
-        elif kind == "object" and not isinstance(value, dict):
-            errors.append(f"'{name}' must be an object")
-        if isinstance(value, (int, float)):
-            if field.get("minimum") is not None and value < field["minimum"]:
-                errors.append(f"'{name}' must be at least {field['minimum']}")
-            if field.get("maximum") is not None and value > field["maximum"]:
-                errors.append(f"'{name}' must be at most {field['maximum']}")
-        if isinstance(value, str):
-            if field.get("min_length") is not None and len(value) < field["min_length"]:
-                errors.append(f"'{name}' is too short")
-            if field.get("max_length") is not None and len(value) > field["max_length"]:
-                errors.append(f"'{name}' is too long")
-            if field.get("pattern") and not re.search(field["pattern"], value):
-                errors.append(f"'{name}' does not match the required format")
-        if isinstance(value, list):
-            if field.get("min_items") is not None and len(value) < field["min_items"]:
-                errors.append(f"'{name}' must contain at least {field['min_items']} items")
-            if field.get("max_items") is not None and len(value) > field["max_items"]:
-                errors.append(f"'{name}' must contain at most {field['max_items']} items")
-            if field.get("unique_items") and len({json.dumps(item, sort_keys=True) for item in value}) != len(value):
-                errors.append(f"'{name}' must not contain duplicate items")
-            if field.get("item_type") == "string" and any(not isinstance(item, str) for item in value):
-                errors.append(f"'{name}' items must be text")
-            pattern = field.get("item_pattern")
-            if pattern and any(not isinstance(item, str) or not re.fullmatch(pattern, item) for item in value):
-                errors.append(f"'{name}' contains an invalid item")
-        allowed = field.get("allowed_values") or []
-        if allowed and value not in allowed:
-            errors.append(f"'{name}' must be one of: {', '.join(map(str, allowed))}")
-    return errors
 
 
 _FIXED = {"id", "created_at", "updated_at"}
@@ -458,9 +467,18 @@ _FIXED = {"id", "created_at", "updated_at"}
 
 def create_service(body: dict) -> dict:
     service_id = body.get("id") or body["name"].lower().replace(" ", "-")
-    return _put("service", service_id, {"name": body["name"], "description": body.get("description", ""),
-        "secret_refs": body.get("secret_refs", []), "health": body.get("health", "unknown"),
-        "destination_policy": body.get("destination_policy", {}), "status": body.get("status", "active")})
+    return _put(
+        "service",
+        service_id,
+        {
+            "name": body["name"],
+            "description": body.get("description", ""),
+            "secret_refs": body.get("secret_refs", []),
+            "health": body.get("health", "unknown"),
+            "destination_policy": body.get("destination_policy", {}),
+            "status": body.get("status", "active"),
+        },
+    )
 
 
 def update_service(service_id: str, changes: dict) -> dict | None:
@@ -470,13 +488,17 @@ def update_service(service_id: str, changes: dict) -> dict | None:
 
 def create_verification_method(body: dict) -> dict:
     method_id = body.get("id") or str(uuid.uuid4())
-    return _put("verification_method", method_id, {
-        "name": body.get("name", "Verification adapter"),
-        "method_type": body.get("method_type", "signed_callback"),
-        "secret_ref": body.get("secret_ref"),
-        "status": body.get("status", "active"),
-        "last_seen_at": body.get("last_seen_at"),
-    })
+    return _put(
+        "verification_method",
+        method_id,
+        {
+            "name": body.get("name", "Verification adapter"),
+            "method_type": body.get("method_type", "signed_callback"),
+            "secret_ref": body.get("secret_ref"),
+            "status": body.get("status", "active"),
+            "last_seen_at": body.get("last_seen_at"),
+        },
+    )
 
 
 def update_verification_method(method_id: str, changes: dict) -> dict | None:
@@ -484,54 +506,38 @@ def update_verification_method(method_id: str, changes: dict) -> dict | None:
     return _change("verification_method", method_id, lambda method: {**method, **allowed})
 
 
-# A tool with no ceiling is a tool that can run until something else breaks -
-# the disk, the rate limit of an upstream provider, or the owner's credit. The
-# enforcement has always been here; what was missing was that an absent limit
-# read as "unlimited" rather than as "nobody said, so be careful".
-#
-# Deliberately conservative. A tool that genuinely needs more says so
-# explicitly, which makes it a decision someone made rather than an oversight.
-DEFAULT_USAGE_LIMITS = {
-    "max_per_minute": 6,
-    "max_per_hour": 60,
-    "max_runtime_seconds": 30,
-    "cooldown_seconds": 0,
-}
-
-
-def with_default_limits(policy: dict | None) -> dict:
-    """Fill in any ceiling the caller did not set.
-
-    An explicit value always wins, including a deliberately high one - the
-    point is not to cap what the owner chose, it is that nothing arrives
-    uncapped by accident. `cooldown_seconds` is the exception that may legally
-    be zero, so only genuinely missing keys are filled.
-    """
-    policy = dict(policy or {})
-    limits = dict(policy.get("usage_limits") or {})
-    for name, fallback in DEFAULT_USAGE_LIMITS.items():
-        if limits.get(name) is None:
-            limits[name] = fallback
-    policy["usage_limits"] = limits
-    return policy
-
-
 @overload
-def create_tool(body: dict, *, require_existing: Literal[False] = False,
-                require_absent: bool = False) -> dict: ...
+def create_tool(
+    body: dict, *, require_existing: Literal[False] = False, require_absent: bool = False
+) -> dict: ...
 @overload
-def create_tool(body: dict, *, require_existing: bool,
-                require_absent: bool = False) -> dict | None: ...
-def create_tool(body: dict, *, require_existing: bool = False,
-                require_absent: bool = False) -> dict | None:
+def create_tool(
+    body: dict, *, require_existing: bool, require_absent: bool = False
+) -> dict | None: ...
+def create_tool(
+    body: dict, *, require_existing: bool = False, require_absent: bool = False
+) -> dict | None:
     tool_id = body["id"]
-    return _put("tool", tool_id, {"name": body.get("name", tool_id), "description": body.get("description", ""),
-        "service_id": body.get("service_id"), "category": body.get("category", "controlled"),
-        "inputs": body.get("inputs", []), "outputs": body.get("outputs", []),
-        "execution": body.get("execution", {}), "policy": with_default_limits(body.get("policy")),
-        "authorization": body.get("authorization", "auto"), "version": body.get("version", 1), "status": body.get("status", "active")},
-        expected_version=body.get("expected_version"), require_existing=require_existing,
-        require_absent=require_absent)
+    return _put(
+        "tool",
+        tool_id,
+        {
+            "name": body.get("name", tool_id),
+            "description": body.get("description", ""),
+            "service_id": body.get("service_id"),
+            "category": body.get("category", "controlled"),
+            "inputs": body.get("inputs", []),
+            "outputs": body.get("outputs", []),
+            "execution": body.get("execution", {}),
+            "policy": with_default_limits(body.get("policy")),
+            "authorization": body.get("authorization", "auto"),
+            "version": body.get("version", 1),
+            "status": body.get("status", "active"),
+        },
+        expected_version=body.get("expected_version"),
+        require_existing=require_existing,
+        require_absent=require_absent,
+    )
 
 
 def update_tool(tool_id: str, body: dict) -> dict | None:
@@ -539,24 +545,36 @@ def update_tool(tool_id: str, body: dict) -> dict | None:
 
 
 @overload
-def create_automation(body: dict, *, require_existing: Literal[False] = False,
-                      require_absent: bool = False) -> dict: ...
+def create_automation(
+    body: dict, *, require_existing: Literal[False] = False, require_absent: bool = False
+) -> dict: ...
 @overload
-def create_automation(body: dict, *, require_existing: bool,
-                      require_absent: bool = False) -> dict | None: ...
-def create_automation(body: dict, *, require_existing: bool = False,
-                      require_absent: bool = False) -> dict | None:
+def create_automation(
+    body: dict, *, require_existing: bool, require_absent: bool = False
+) -> dict | None: ...
+def create_automation(
+    body: dict, *, require_existing: bool = False, require_absent: bool = False
+) -> dict | None:
     automation_id = body["id"]
-    return _put("automation", automation_id, {"name": body.get("name", automation_id),
-        "description": body.get("description", ""), "inputs": body.get("inputs", []),
-        "workflow": body.get("workflow", []), "policy": with_default_limits(body.get("policy")),
-        "authorization": body.get("authorization", "auto"), "schedule": body.get("schedule"),
-        "version": body.get("version", 1), "status": body.get("status", "draft")},
-        expected_version=body.get("expected_version"), require_existing=require_existing,
-        require_absent=require_absent)
+    return _put(
+        "automation",
+        automation_id,
+        {
+            "name": body.get("name", automation_id),
+            "description": body.get("description", ""),
+            "inputs": body.get("inputs", []),
+            "workflow": body.get("workflow", []),
+            "policy": with_default_limits(body.get("policy")),
+            "authorization": body.get("authorization", "auto"),
+            "schedule": body.get("schedule"),
+            "version": body.get("version", 1),
+            "status": body.get("status", "draft"),
+        },
+        expected_version=body.get("expected_version"),
+        require_existing=require_existing,
+        require_absent=require_absent,
+    )
 
 
 def update_automation(automation_id: str, body: dict) -> dict | None:
     return create_automation({**body, "id": automation_id}, require_existing=True)
-
-
