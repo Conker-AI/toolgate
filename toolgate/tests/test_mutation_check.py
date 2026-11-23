@@ -15,11 +15,13 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "mutation_check.py"
 
 # A real anchor, present exactly once, so the drill's in-loop count check passes.
-ANCHOR = ('MCP = "toolgate/tests/test_mcp_adapter.py::"', "toolgate/scripts/mutation_check.py")
+ANCHOR = ('MCP = "toolgate/tests/test_mcp_adapter.py::"', "toolgate/scripts/mutations_core.py")
 
 
 @pytest.fixture()
 def drill(monkeypatch):
+    # The drill imports its mutation tables from beside it, as it does when run as a script.
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
     spec = importlib.util.spec_from_file_location("mutation_check_under_test", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -87,9 +89,10 @@ def test_a_mutant_that_crashes_is_reported_broken_not_caught(drill, monkeypatch,
     assert "Caught: crashing mutant" not in out
 
 
-def test_the_stale_decision_mutant_reads_the_row_itself():
+def test_the_stale_decision_mutant_reads_the_row_itself(monkeypatch):
     # The stale-decision mutant once called control_plane.get from approvals.py, which does not
     # import it: the test failed on NameError and the drill printed "Caught".
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
     spec = importlib.util.spec_from_file_location("mutation_check_names", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
