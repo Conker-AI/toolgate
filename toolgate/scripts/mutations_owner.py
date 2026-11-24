@@ -258,3 +258,55 @@ MUTANTS.extend(
         ),
     ]
 )
+
+
+CALENDAR_FETCH = "toolgate/tests/test_calendar_fetch.py::"
+CALENDAR = "toolgate/tests/test_calendar_boundary.py::"
+CALENDAR_PARSE = "toolgate/tests/test_calendar_parse.py::"
+MUTANTS.extend(
+    [
+        (
+            "calendar address not checked for public https",
+            "toolgate/executors/calendar_ics.py",
+            "    if not public_url(str(parsed)):",
+            "    if False:",
+            CALENDAR_FETCH
+            + "test_a_host_that_resolves_inside_the_network_is_refused_before_any_request[private]",
+        ),
+        (
+            "calendar redirect followed unchecked",
+            "toolgate/executors/calendar_ics.py",
+            'target = _https(urljoin(target, response.headers.get("location", "")))',
+            'target = urljoin(target, response.headers.get("location", ""))',
+            CALENDAR_FETCH + "test_a_redirect_is_checked_like_the_address_itself[private-host]",
+        ),
+        (
+            "calendar body read past its cap",
+            "toolgate/executors/calendar_ics.py",
+            "        if len(body) > LIMIT_BYTES:",
+            "        if False:",
+            CALENDAR_FETCH + "test_a_body_over_2_mb_without_a_length_stops_reading_at_the_cap",
+        ),
+        (
+            "calendar fetched through a client that logs the address",
+            "toolgate/executors/calendar_ics.py",
+            "response = sender.handle_request(request)",
+            "response = httpx.Client(transport=sender).send(request, stream=True)",
+            CALENDAR + "test_events_are_read_without_an_approval_card",
+        ),
+        (
+            "calendar address open to other tools",
+            "toolgate/core/vault.py",
+            'raise KeyError(f"{placeholder} is read only by its built-in tool")',
+            "pass",
+            CALENDAR + "test_no_other_tool_can_name_the_address",
+        ),
+        (
+            "calendar parser output taken unchecked",
+            "toolgate/executors/calendar_ics.py",
+            "return [_checked(event) for event in events]",
+            "return events",
+            CALENDAR_PARSE + "test_the_parent_refuses_an_answer_of_the_wrong_shape[extra-field]",
+        ),
+    ]
+)
