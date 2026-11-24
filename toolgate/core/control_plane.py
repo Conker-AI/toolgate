@@ -13,10 +13,29 @@ import secrets
 import sqlite3
 import uuid
 from contextlib import contextmanager, nullcontext
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Literal, overload
 
 from toolgate.core import schema_ledger
+
+# Definitions and the event log live beside this module, and call back into it by module (cp.X),
+# so a patch on control_plane still reaches them. Callers keep importing every name from here.
+from toolgate.core.control_plane_definitions import (  # noqa: F401
+    create_automation,
+    create_service,
+    create_tool,
+    create_verification_method,
+    update_automation,
+    update_service,
+    update_tool,
+    update_verification_method,
+)
+from toolgate.core.control_plane_events import (  # noqa: F401
+    event,
+    event_count_since,
+    events,
+    latest_event_at,
+)
 
 # Stateless rules and the schema live beside this module; callers keep importing them from here.
 from toolgate.core.control_plane_rules import (  # noqa: F401
@@ -223,77 +242,6 @@ def remove(kind: str, obj_id: str) -> bool:
         )
 
 
-def event(
-    event_type: str,
-    severity: str = "info",
-    subject_type: str | None = None,
-    subject_id: str | None = None,
-    actor: str | None = None,
-    payload: dict | None = None,
-    *,
-    connection=None,
-) -> dict:
-    """Record an event; pass the caller's `connection` to write it in the caller's transaction."""
-    record = {
-        "id": str(uuid.uuid4()),
-        "event_type": event_type,
-        "severity": severity,
-        "subject_type": subject_type,
-        "subject_id": subject_id,
-        "actor": actor,
-        "payload": payload or {},
-        "created_at": _now(),
-    }
-    with nullcontext(connection) if connection is not None else _conn() as conn:
-        conn.execute(
-            "INSERT INTO v2_events VALUES(?,?,?,?,?,?,?,?)",
-            (
-                record["id"],
-                record["event_type"],
-                record["severity"],
-                record["subject_type"],
-                record["subject_id"],
-                record["actor"],
-                json.dumps(record["payload"]),
-                record["created_at"],
-            ),
-        )
-    return record
-
-
-def events(limit: int = 100, event_type: str | None = None) -> list[dict]:
-    query, params = "SELECT * FROM v2_events", []
-    if event_type:
-        query += " WHERE event_type=?"
-        params.append(event_type)
-    query += " ORDER BY created_at DESC LIMIT ?"
-    params.append(min(max(limit, 1), 500))
-    with _conn() as conn:
-        rows = conn.execute(query, params).fetchall()
-    return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
-
-
-def event_count_since(event_type: str, subject_type: str, subject_id: str, seconds: int) -> int:
-    cutoff = (datetime.now(UTC) - timedelta(seconds=max(seconds, 0))).isoformat()
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS count FROM v2_events "
-            "WHERE event_type=? AND subject_type=? AND subject_id=? AND created_at>=?",
-            (event_type, subject_type, subject_id, cutoff),
-        ).fetchone()
-    return int(row["count"])
-
-
-def latest_event_at(event_type: str, subject_type: str, subject_id: str) -> datetime | None:
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT created_at FROM v2_events WHERE event_type=? AND subject_type=? AND subject_id=? "
-            "ORDER BY created_at DESC LIMIT 1",
-            (event_type, subject_type, subject_id),
-        ).fetchone()
-    return datetime.fromisoformat(row["created_at"]) if row else None
-
-
 _SETTINGS = {"id": "control-plane", "lockdown": False}
 
 
@@ -460,121 +408,3 @@ def revoke_agent_key(key_id: str, actor: str = "admin") -> bool:
     if changed:
         event("agent_key_revoked", "warning", "agent_key", key_id, actor)
     return bool(changed)
-
-
-_FIXED = {"id", "created_at", "updated_at"}
-
-
-def create_service(body: dict) -> dict:
-    service_id = body.get("id") or body["name"].lower().replace(" ", "-")
-    return _put(
-        "service",
-        service_id,
-        {
-            "name": body["name"],
-            "description": body.get("description", ""),
-            "secret_refs": body.get("secret_refs", []),
-            "health": body.get("health", "unknown"),
-            "destination_policy": body.get("destination_policy", {}),
-            "status": body.get("status", "active"),
-        },
-    )
-
-
-def update_service(service_id: str, changes: dict) -> dict | None:
-    allowed = {key: value for key, value in changes.items() if key not in _FIXED}
-    return _change("service", service_id, lambda service: {**service, **allowed})
-
-
-def create_verification_method(body: dict) -> dict:
-    method_id = body.get("id") or str(uuid.uuid4())
-    return _put(
-        "verification_method",
-        method_id,
-        {
-            "name": body.get("name", "Verification adapter"),
-            "method_type": body.get("method_type", "signed_callback"),
-            "secret_ref": body.get("secret_ref"),
-            "status": body.get("status", "active"),
-            "last_seen_at": body.get("last_seen_at"),
-        },
-    )
-
-
-def update_verification_method(method_id: str, changes: dict) -> dict | None:
-    allowed = {key: value for key, value in changes.items() if key not in _FIXED}
-    return _change("verification_method", method_id, lambda method: {**method, **allowed})
-
-
-@overload
-def create_tool(
-    body: dict, *, require_existing: Literal[False] = False, require_absent: bool = False
-) -> dict: ...
-@overload
-def create_tool(
-    body: dict, *, require_existing: bool, require_absent: bool = False
-) -> dict | None: ...
-def create_tool(
-    body: dict, *, require_existing: bool = False, require_absent: bool = False
-) -> dict | None:
-    tool_id = body["id"]
-    return _put(
-        "tool",
-        tool_id,
-        {
-            "name": body.get("name", tool_id),
-            "description": body.get("description", ""),
-            "service_id": body.get("service_id"),
-            "category": body.get("category", "controlled"),
-            "inputs": body.get("inputs", []),
-            "outputs": body.get("outputs", []),
-            "execution": body.get("execution", {}),
-            "policy": with_default_limits(body.get("policy")),
-            "authorization": body.get("authorization", "auto"),
-            "version": body.get("version", 1),
-            "status": body.get("status", "active"),
-        },
-        expected_version=body.get("expected_version"),
-        require_existing=require_existing,
-        require_absent=require_absent,
-    )
-
-
-def update_tool(tool_id: str, body: dict) -> dict | None:
-    return create_tool({**body, "id": tool_id}, require_existing=True)
-
-
-@overload
-def create_automation(
-    body: dict, *, require_existing: Literal[False] = False, require_absent: bool = False
-) -> dict: ...
-@overload
-def create_automation(
-    body: dict, *, require_existing: bool, require_absent: bool = False
-) -> dict | None: ...
-def create_automation(
-    body: dict, *, require_existing: bool = False, require_absent: bool = False
-) -> dict | None:
-    automation_id = body["id"]
-    return _put(
-        "automation",
-        automation_id,
-        {
-            "name": body.get("name", automation_id),
-            "description": body.get("description", ""),
-            "inputs": body.get("inputs", []),
-            "workflow": body.get("workflow", []),
-            "policy": with_default_limits(body.get("policy")),
-            "authorization": body.get("authorization", "auto"),
-            "schedule": body.get("schedule"),
-            "version": body.get("version", 1),
-            "status": body.get("status", "draft"),
-        },
-        expected_version=body.get("expected_version"),
-        require_existing=require_existing,
-        require_absent=require_absent,
-    )
-
-
-def update_automation(automation_id: str, body: dict) -> dict | None:
-    return create_automation({**body, "id": automation_id}, require_existing=True)
