@@ -154,6 +154,49 @@ def ensure_builtin_system_capabilities() -> None:
                 },
             }
         )
+    if not control_plane.get("tool", "calendar.events"):
+        # Made once and then the owner's: like the system tools above, never re-synced.
+        control_plane.create_tool(
+            {
+                "id": "calendar.events",
+                "name": "Calendar events",
+                "description": "Read the owner's next events (title, times, place) from the private calendar address stored in ToolGate's vault as CALENDAR_ICS_URL. Read only; the address is never shown.",
+                "category": "safe",
+                "authorization": "auto",
+                "status": "active",
+                "inputs": [
+                    {
+                        "name": "days",
+                        "type": "integer",
+                        "required": False,
+                        "default": 1,
+                        "minimum": 1,
+                        "maximum": 14,
+                    },
+                    {
+                        "name": "time_zone",
+                        "type": "string",
+                        "required": False,
+                        "default": "UTC",
+                        "max_length": 64,
+                        "pattern": r"^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+){0,2}$",
+                    },
+                ],
+                "outputs": [
+                    {"name": "events", "type": "array"},
+                    {"name": "source", "type": "string"},
+                ],
+                "execution": {"type": "calendar_ics"},
+                "policy": {
+                    "usage_limits": {
+                        "max_per_minute": 6,
+                        "cooldown_seconds": 0,
+                        "max_per_hour": 60,
+                        "max_runtime_seconds": 30,
+                    }
+                },
+            }
+        )
 
 
 def ensure_builtin_research_capabilities() -> None:

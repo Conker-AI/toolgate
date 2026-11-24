@@ -28,6 +28,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "mcp_http",
     "sandbox_run",
     "sandbox_install",
+    "calendar_ics",
 }
 
 
@@ -151,6 +152,11 @@ def tool_definition_errors(tool: dict) -> list[str]:
             tool.get("id") != reserved_id or execution != {"type": kind}
         ):
             errors.append(f"{reserved_id} is reserved for the agent sandbox executor {kind}")
+    reads_calendar = isinstance(execution, dict) and execution.get("type") == "calendar_ics"
+    if (tool.get("id") == "calendar.events" or reads_calendar) and (
+        tool.get("id") != "calendar.events" or execution != {"type": "calendar_ics"}
+    ):
+        errors.append("calendar.events is reserved for the read-only calendar executor")
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(
             f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}"

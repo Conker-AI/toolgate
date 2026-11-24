@@ -142,6 +142,7 @@ dashboard/           React owner dashboard
 | | |
 |---|---|
 | [System inventory](docs/system-inventory.md) · [Filesystem](docs/filesystem-inventory.md) | Read-only views of the host |
+| [Calendar](docs/calendar.md) | The owner's next events from a private calendar address, read only |
 | [Containers](docs/container-control.md) · [Services](docs/process-control.md) · [Ports](docs/port-reconfiguration.md) | Managed lifecycle actions, each behind approval |
 
 **Running it**

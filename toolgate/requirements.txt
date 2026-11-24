@@ -2,6 +2,11 @@ cryptography==50.0.1
 fastapi==0.138.2
 httpx==0.28.1
 httpcore==1.0.9
+icalendar==7.3.0
 pydantic==2.13.4
+python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
+recurring-ical-events==3.8.2
+tzdata==2026.6
 uvicorn==0.49.0
+x-wr-timezone==2.0.1
