@@ -139,6 +139,8 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
     # instance sees ToolGate as it is, so its own rate limits still apply.
     if urlsplit(base_url).hostname == "toolgate-searxng":
         headers |= {"X-Forwarded-For": "127.0.0.1", "X-Real-IP": "127.0.0.1"}
+    # The owner's engines replace the general category: SearXNG would ask both if given both.
+    engines = tool_settings.engines()
     response = httpx.get(
         f"{base_url}/search",
         params={
@@ -146,7 +148,7 @@ def _searx(query: str, source: str, limit: int, recency_days: int, timeout: floa
             "format": "json",
             "language": tool_settings.search_language(),
             "safesearch": tool_settings.safe_search(),
-            "categories": "general",
+            **({"engines": engines} if engines else {"categories": "general"}),
             **_searx_time_range(recency_days),
         },
         headers=headers,
