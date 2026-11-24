@@ -21,6 +21,9 @@ What each one changes:
 - `web_safe_search`, `web_region`: the safe search level and region of web searches (SearXNG).
 - `web_skip_sites`: sites never used as sources, added to the built-in ones; their pages are not
   fetched either.
+- `web_engines`: the SearXNG engines web search asks (names such as `duckduckgo` or `wikipedia`);
+  empty asks the general category's engines, as today. A name the instance does not know is
+  ignored by SearXNG, and with none it knows it falls back to the general category.
 - `web_page_characters`: the most text one fetched page gives the model.
 - `install_trusted_packages`: packages the owner trusts, as `pip:name` or `npm:name`. The install
   guard (sandbox/guard.py) then skips its lookalike, age and download checks for them; it still
@@ -54,6 +57,8 @@ TOOL_SECONDS = 180  # the longest ToolGate waits on any tool today: AI text thro
 TERMINAL_SECONDS = 100  # the most one Terminal command may run
 PAGE_CHARACTERS = 20000  # the most text one fetched page gives the model
 SKIP_SITES = 50
+ENGINES = 50
+ENGINE = re.compile(r"[a-z0-9][a-z0-9 ._-]{0,39}")
 RUN_WINDOW_MINUTES = approvals.MAX_RUN_WINDOW_MINUTES  # an approved action has 15 minutes today
 SAFE_SEARCH = {"off": 0, "moderate": 1, "strict": 2}  # SearXNG's levels
 TRUSTED_PACKAGES = 100
@@ -75,6 +80,7 @@ class Settings(StrictDocument):
     # A two-letter country code such as us or il; empty searches with no region, as today.
     web_region: Annotated[str, Field(pattern=r"^(?:[a-z]{2})?$")] = ""
     web_skip_sites: Annotated[list[str], Field(max_length=SKIP_SITES)] = []
+    web_engines: Annotated[list[str], Field(max_length=ENGINES)] = []
     web_page_characters: Annotated[int, Field(ge=1000, le=PAGE_CHARACTERS)] | None = None
     run_window_minutes: Annotated[int, Field(ge=1, le=RUN_WINDOW_MINUTES)] | None = None
     install_trusted_packages: Annotated[list[str], Field(max_length=TRUSTED_PACKAGES)] = []
@@ -92,6 +98,18 @@ class Settings(StrictDocument):
             name = site.strip().lower().removeprefix("www.")
             if not re.fullmatch(SITE, name):
                 raise ValueError(f"{site[:80]!r} is not a site name such as example.com")
+            if name not in named:
+                named.append(name)
+        return named
+
+    @field_validator("web_engines")
+    @classmethod
+    def engine_names(cls, entries: list[str]) -> list[str]:
+        named = []
+        for entry in entries:
+            name = " ".join(entry.split()).lower()
+            if not ENGINE.fullmatch(name):
+                raise ValueError(f"{entry[:80]!r} is not a search engine name such as duckduckgo")
             if name not in named:
                 named.append(name)
         return named
@@ -246,6 +264,11 @@ def search_language() -> str:
     """SearXNG's language: English as today, with the owner's region when one is set."""
     region = current().web_region
     return f"en-{region.upper()}" if region else "en"
+
+
+def engines() -> str:
+    """The owner's engines as SearXNG's comma list, or "" for the general category's engines."""
+    return ",".join(current().web_engines)
 
 
 def skip_sites() -> list[str]:

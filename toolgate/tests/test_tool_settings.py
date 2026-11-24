@@ -29,6 +29,7 @@ TODAY = {
     "web_safe_search": "moderate",
     "web_region": "",
     "web_skip_sites": [],
+    "web_engines": [],
     "web_page_characters": None,
     "run_window_minutes": None,  # covered in test_run_window.py
     "install_trusted_packages": [],
@@ -151,6 +152,9 @@ def test_the_ceilings_are_todays_limits_and_are_accepted(gate):
         {"web_skip_sites": ["not a site"]},
         {"web_skip_sites": ["https://example.com/page"]},
         {"web_skip_sites": [f"site{index}.com" for index in range(51)]},
+        {"web_engines": ["google,bing"]},
+        {"web_engines": ["-start"]},
+        {"web_engines": [f"engine{index}" for index in range(51)]},
         {"tool_seconds": "30"},
         {"tool_seconds": True},
         {"tool_seconds": 30.0},
@@ -428,6 +432,18 @@ def test_safe_search_and_region_reach_the_search_engine(store, monkeypatch):
         (1, "en"),
         (2, "en-IL"),
         (0, "en"),
+    ]
+
+
+def test_the_owners_engines_replace_the_general_category(store, monkeypatch):
+    sent = searx_params(monkeypatch)
+    research_web._searx("invoices", "general", 5, 90, 5)
+    choose(web_engines=[" DuckDuckGo ", "wikipedia", "duckduckgo", "google  news"])
+    assert tool_settings.current().web_engines == ["duckduckgo", "wikipedia", "google news"]
+    research_web._searx("invoices", "general", 5, 90, 5)
+    assert [(params.get("categories"), params.get("engines")) for params in sent] == [
+        ("general", None),
+        (None, "duckduckgo,wikipedia,google news"),
     ]
 
 

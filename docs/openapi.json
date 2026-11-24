@@ -982,6 +982,15 @@
             ],
             "title": "Tool Seconds"
           },
+          "web_engines": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Web Engines",
+            "type": "array"
+          },
           "web_page_characters": {
             "anyOf": [
               {
