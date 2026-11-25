@@ -14,6 +14,7 @@ from toolgate.api.deps import deny
 from toolgate.core import control_plane, spending, tool_settings, vault
 from toolgate.core.public_https import DestinationDenied, public_client, public_url, resolve_public
 from toolgate.executors import (
+    calendar_ics,
     container_control,
     filesystem_inventory,
     mcp_http,
@@ -326,6 +327,31 @@ def _execute_research_fetch_batch(args: dict) -> dict:
     return {"ok": True, "result": result}
 
 
+def _execute_calendar(tool: dict, args: dict) -> dict:
+    """calendar.events: the owner's next events from the address in the vault (read only)."""
+    if tool.get("id") != "calendar.events" or tool.get("execution") != {"type": "calendar_ics"}:
+        return {
+            "ok": False,
+            "error": "The calendar reads only through its reserved definition.",
+            "error_code": "invalid_calendar_definition",
+        }
+    zone = args.get("time_zone", "UTC")
+    if not isinstance(zone, str) or not calendar_ics.known_zone(zone):
+        _refuse("VALIDATION_ERROR", "'time_zone' is not a known time zone", 422)
+    try:
+        return {"ok": True, "result": calendar_ics.read(int(args.get("days", 1)), zone)}
+    except KeyError:
+        # No address, or a vault that cannot open it: nothing was sent.
+        _refuse(
+            "CALENDAR_NOT_CONFIGURED",
+            calendar_ics.WORDS["calendar_not_configured"],
+            503,
+            f"Store the calendar's secret address as the vault secret {calendar_ics.SECRET}",
+        )
+    except calendar_ics.CalendarError as exc:
+        return {"ok": False, "error": exc.message, "error_code": exc.code}
+
+
 def _execute_local_echo(args: dict) -> dict:
     value = str(args.get("value", ""))
     return {
@@ -404,7 +430,9 @@ def _dispatch_tool(tool: dict, args: dict, advert: str | None = None) -> dict:
             "error": "Sandbox tools run only through an invocation that carries the agent.",
             "error_code": "invalid_sandbox_dispatch",
         }
-    if executor_type == "echo":
+    if executor_type == "calendar_ics" or tool.get("id") == "calendar.events":
+        result = _execute_calendar(tool, args)
+    elif executor_type == "echo":
         result = {"ok": True, "result": args}
     elif executor_type == "local_echo":
         result = _execute_local_echo(args)

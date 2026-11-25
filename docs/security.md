@@ -76,6 +76,7 @@ Tool definitions can use these first-class executors:
 - `research_bundle`: a reusable multi-source research profile that preserves per-source reports and failures.
 - `research_fetch`: resolves exactly one server-issued research handle. It does not accept URLs.
 - `research_fetch_batch`: resolves up to eight handles as one bounded, scanned batch.
+- `calendar_ics`: reserved for `calendar.events`; reads the owner's calendar from the vault-held address `CALENDAR_ICS_URL`, which no other tool can name, over public HTTPS only. See [Calendar](calendar.md).
 
 Arbitrary agent-supplied Python and legacy script execution are intentionally unsupported.
 

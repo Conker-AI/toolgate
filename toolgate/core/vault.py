@@ -76,6 +76,10 @@ _CONFIG_KEYS = _CONTROL_KEYS | {
 # integrity callback's secret is a vault secret, so no tool can name the rest.
 _OWN_PREFIX = "TOOLGATE_"
 _OWN_SECRETS = {"TOOLGATE_CALLBACK_SECRET"}
+# Vault secrets only one built-in executor reads (`builtin_secret`): the calendar address alone
+# grants read access to the owner's calendar, so no tool header, MCP server or verification
+# method may name it and send it anywhere else. Set, listed and deleted like any vault secret.
+BUILTIN_SECRETS = {"CALENDAR_ICS_URL"}
 _NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 _SCRYPT_N = 2**14
@@ -235,10 +239,23 @@ def get_key(placeholder: str) -> str:
         raise KeyError(f"{placeholder} is ToolGate's own configuration, not a tool secret")
     if placeholder.startswith(_OWN_PREFIX) and placeholder not in _OWN_SECRETS:
         raise KeyError(f"{placeholder} is ToolGate's own configuration, not a tool secret")
-    value = _load().get(placeholder) or os.environ.get(placeholder)
+    if placeholder in BUILTIN_SECRETS:
+        raise KeyError(f"{placeholder} is read only by its built-in tool")
+    return _stored(placeholder)
+
+
+def builtin_secret(name: str) -> str:
+    """The value of a secret in BUILTIN_SECRETS, for its own executor only."""
+    if name not in BUILTIN_SECRETS:
+        raise KeyError(f"{name} is not a built-in tool's secret")
+    return _stored(name)
+
+
+def _stored(name: str) -> str:
+    value = _load().get(name) or os.environ.get(name)
     if not value:
-        raise KeyError(f"{placeholder} is not set in .env")
-    return _decrypt(placeholder, value)
+        raise KeyError(f"{name} is not set in .env")
+    return _decrypt(name, value)
 
 
 def list_placeholders() -> list[str]:
