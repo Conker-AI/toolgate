@@ -10,8 +10,13 @@ FROM node:22-trixie-slim@sha256:68c76cfad89921b927eae28ba21407475e29d0ce450afcdb
 
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
 
+# Debian security fixes newer than the base image. The base still ships libzstd1 without the
+# CVE-2026-124851 fix (1.5.7+dfsg-1+deb13u1, trixie-security), so the build fails if the upgrade
+# did not bring it in. Naming it also changes this layer, so a build cache from before the fix
+# cannot be reused. Drop the check once the pinned base image ships the fixed version.
 RUN apt-get update \
     && apt-get upgrade -y \
+    && dpkg --compare-versions "$(dpkg-query -W -f='${Version}' libzstd1)" ge 1.5.7+dfsg-1+deb13u1 \
     && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv python-is-python3 \
         git ca-certificates jq ripgrep sqlite3 tree file less procps make \
