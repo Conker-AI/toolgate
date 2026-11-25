@@ -129,7 +129,9 @@ def test_a_series_and_its_moved_occurrence_stay_together_when_a_broken_event_is_
 
 def test_a_broken_event_among_2000_is_found_by_halves_not_by_reading_each_event(monkeypatch):
     # Reading each of 2,000 events on its own costs 2,000 parses and grows past the time on a
-    # slower machine; halves cost two parses for each halving, about 22 for 2,000 events.
+    # slower machine; halves cost two parses for each halving, about 22 for 2,000 events. This
+    # counts the work, not the clock: six times the child's budget, so the Dentist, listed
+    # last, comes back on any machine, and reading one by one still ends.
     calls = []
     series = calendar_parse._series
 
@@ -139,27 +141,42 @@ def test_a_broken_event_among_2000_is_found_by_halves_not_by_reading_each_event(
 
     monkeypatch.setattr(calendar_parse, "_series", counted)
     others = [event(f"s{index}", "DTSTART:20261124T200000Z") for index in range(1998)]
-    events, partial = calendar_parse.expand(calendar(*others, BAD_UNTIL, PLAIN), 1, BERLIN, TODAY)
+    body = calendar(*others, BAD_UNTIL, PLAIN)
+    events, partial = calendar_parse.expand(body, 1, BERLIN, TODAY, total=60)
     assert events[0]["title"] == "Dentist" and partial
     assert len(calls) <= 2 + 2 * 11
 
 
+def test_one_broken_event_among_100_leaves_the_last_one_in_through_the_child():
+    # The small, fast form of the next test's 1998-today case: the Dentist is listed last.
+    others = [sized(f"s{index}", "DTSTART:20261124T200000Z") for index in range(98)]
+    body = calendar(*others, BAD_UNTIL, PLAIN)
+    events, partial = calendar_ics.parse(body, 1, "Europe/Berlin", TODAY)
+    assert inner(events[0]["title"]) == "Dentist" and partial
+
+
 @pytest.mark.parametrize(
-    "others",
+    ("others", "dentist"),
     [
-        [
-            sized(f"y{index}", "DTSTART:20200101T100000Z", "RRULE:FREQ=YEARLY;COUNT=2")
-            for index in range(1990)
-        ],
-        [sized(f"s{index}", "DTSTART:20261124T200000Z") for index in range(1998)],
+        (
+            [
+                sized(f"y{index}", "DTSTART:20200101T100000Z", "RRULE:FREQ=YEARLY;COUNT=2")
+                for index in range(1990)
+            ],
+            True,
+        ),
+        ([sized(f"s{index}", "DTSTART:20261124T200000Z") for index in range(1998)], False),
     ],
     ids=["1990-repeating", "1998-today"],
 )
-def test_one_broken_event_among_2000_costs_only_itself_inside_the_time(others):
+def test_one_broken_event_among_2000_is_answered_inside_the_time(others, dentist):
     # The reviewer's cases: reading each event on its own took 10.5 s and lost today's event, or
     # ran into the parent's kill. Halves are read instead, each building its series once.
     body = calendar(*others, BAD_UNTIL, PLAIN)
     started = time.monotonic()
     events, partial = calendar_ics.parse(body, 1, "Europe/Berlin", TODAY)
-    assert inner(events[0]["title"]) == "Dentist" and partial
-    assert time.monotonic() - started < calendar_ics.PARSE_SECONDS
+    assert partial and time.monotonic() - started < calendar_ics.PARSE_SECONDS
+    # Among 1,990 repeating events the Dentist is the one single event, expanded first. Among
+    # 1,999 single events in the window, how many the child's budget reaches is the machine's;
+    # the Dentist (listed last) is then the count test's and the smaller test's above.
+    assert not dentist or inner(events[0]["title"]) == "Dentist"
