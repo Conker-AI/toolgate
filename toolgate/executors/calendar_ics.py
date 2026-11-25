@@ -9,11 +9,15 @@ Fetching: https only (a `webcal://` address, as Apple gives it, is read as `http
 no user name or password in it; the host must resolve to public addresses only, checked before
 the request and again for the address the socket uses (`core.public_https`, which refuses
 private, loopback, link-local, carrier-grade NAT and tailnet ranges). At most `REDIRECTS`
-redirects, each target checked the same way. `SECONDS` for the whole fetch, at most `LIMIT_BYTES`,
-never compressed. Requests go straight to the transport, so no client logs the address.
+redirects, each target checked the same way. `SECONDS` for the whole fetch, however slowly the
+server sends (every connect, read and write of the socket gets only the time left), at most
+`LIMIT_BYTES`, never compressed. Requests go straight to the transport, so no client logs the
+address.
 
 Parsing runs `calendar_parse.py` in a child process with nothing but the file's bytes, killed
-after `PARSE_SECONDS` (see that module for why).
+after `PARSE_SECONDS` (see that module for why). `partial` says some events could not be read.
+Each title and place is outside text, fenced like web and MCP text (`UNTRUSTED_CALENDAR_CONTENT`)
+for a model that reads the result.
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ import httpx
 
 from toolgate.core import vault
 from toolgate.core.public_https import DestinationDenied, PublicTransport, public_url
-from toolgate.core.untrusted_text import strip_invisible
+from toolgate.core.untrusted_text import fenced, strip_invisible
 
 SECRET = "CALENDAR_ICS_URL"
 LIMIT_BYTES = 2 * 1024 * 1024
@@ -107,9 +111,9 @@ def _body(response: httpx.Response, deadline: float) -> bytes:
 def fetch(url: str, transport: httpx.BaseTransport | None = None) -> bytes:
     """The file at `url`, under every rule above."""
     target = _https(url)
-    deadline = time.monotonic() + SECONDS
     own = transport is None
-    sender = PublicTransport() if transport is None else transport
+    sender = PublicTransport(seconds=SECONDS) if transport is None else transport
+    deadline = time.monotonic() + SECONDS
     try:
         for _hop in range(REDIRECTS + 1):
             remaining = deadline - time.monotonic()
@@ -151,8 +155,9 @@ def _environment() -> dict[str, str]:
     return {"SYSTEMROOT": root} if root else {}
 
 
-def parse(body: bytes, days: int, zone: str, today: date) -> list[dict]:
-    """Run the parser on `body`; the events it found, checked and cleaned."""
+def parse(body: bytes, days: int, zone: str, today: date) -> tuple[list[dict], bool]:
+    """Run the parser on `body`; the events it found, checked and cleaned, and whether some
+    could not be read."""
     try:
         done = subprocess.run(
             [sys.executable, "-I", "-B", str(PARSER), str(days), zone, today.isoformat()],
@@ -169,10 +174,11 @@ def parse(body: bytes, days: int, zone: str, today: date) -> list[dict]:
     if done.returncode != 0:
         raise CalendarError("calendar_unreadable")
     try:
-        events = json.loads(done.stdout)["events"]
-        if not isinstance(events, list) or len(events) > MAX_EVENTS:
+        answer = json.loads(done.stdout)
+        events, partial = answer["events"], answer["partial"]
+        if not isinstance(events, list) or len(events) > MAX_EVENTS or type(partial) is not bool:
             raise ValueError("events")
-        return [_checked(event) for event in events]
+        return [_checked(event) for event in events], partial
     except (ValueError, KeyError, TypeError):
         raise CalendarError("calendar_unreadable") from None
 
@@ -204,20 +210,22 @@ def _checked(event) -> dict:
             date.fromisoformat(value)  # a plain date: it has no time and no offset
         elif datetime.fromisoformat(value).tzinfo is None:
             raise ValueError(key)
-    location = event["location"]
+    location = None if event["location"] is None else (_clean(event["location"]) or None)
     return {
         "start": event["start"],
         "end": event["end"],
         "all_day": all_day,
-        "title": _clean(event["title"]),
-        "location": None if location is None else (_clean(location) or None),
+        "title": fenced("CALENDAR", "field=title", _clean(event["title"])),
+        "location": None if location is None else fenced("CALENDAR", "field=location", location),
     }
 
 
 def known_zone(name: str) -> bool:
+    """A zone `ZoneInfo` can load. Anything else is no zone: an unknown name, a path, or a folder
+    of the zone database ("America"), which the file system refuses to open as a file."""
     try:
         ZoneInfo(name)
-    except (KeyError, ValueError):
+    except Exception:  # OSError for a folder; KeyError or ValueError for the rest
         return False
     return True
 
@@ -230,5 +238,5 @@ def read(
     url = address()
     tz = ZoneInfo(zone)
     today = (now or datetime.now(tz)).astimezone(tz).date()
-    events = parse(fetch(url, transport), days, zone, today)
-    return {"events": events, "source": "ics"}
+    events, partial = parse(fetch(url, transport), days, zone, today)
+    return {"events": events, "source": "ics", "partial": partial}

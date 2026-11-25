@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import socket
 import sqlite3
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -16,11 +17,20 @@ from toolgate.api import builtin_capabilities, definitions, dispatch, server
 from toolgate.core import control_plane as cp
 from toolgate.core import vault
 from toolgate.executors import calendar_ics
-from toolgate.tests.calendar_fixtures import ADDRESS, PRIVATE_PART, WEEK
+from toolgate.tests.calendar_fixtures import ADDRESS, PRIVATE_PART, TODAY, WEEK, inner
 
 OWNER = {"X-ToolGate-Key": "calendar-owner"}
 ROUTE = "/v2/tools/calendar.events/invoke"
 HOST = "calendar.example.com"
+
+
+class Today(datetime):
+    """The fixtures' "today" (TODAY, 09:00 UTC), whatever day the tests run on."""
+
+    @classmethod
+    def now(cls, tz=None):
+        moment = cls(TODAY.year, TODAY.month, TODAY.day, 9, tzinfo=UTC)
+        return moment if tz is None else moment.astimezone(tz)
 
 
 @pytest.fixture
@@ -31,6 +41,7 @@ def gate(tmp_path, monkeypatch, caplog):
     monkeypatch.setenv("TOOLGATE_ADMIN_KEY", "calendar-owner")
     monkeypatch.setenv("TOOLGATE_VAULT_KEY_FILE", str(tmp_path / "vault.key"))
     monkeypatch.delenv("CALENDAR_ICS_URL", raising=False)
+    monkeypatch.setattr(calendar_ics, "datetime", Today)
     monkeypatch.setattr(
         socket,
         "getaddrinfo",
@@ -44,7 +55,7 @@ def gate(tmp_path, monkeypatch, caplog):
         made = answers.get(str(request.url))
         return made() if made else httpx.Response(404)
 
-    monkeypatch.setattr(calendar_ics, "PublicTransport", lambda: httpx.MockTransport(serve))
+    monkeypatch.setattr(calendar_ics, "PublicTransport", lambda **_: httpx.MockTransport(serve))
     builtin_capabilities.ensure_builtin_system_capabilities()
     _, key = cp.issue_agent_key("calendar reader", ["tool:calendar.events"])
     with TestClient(server.app) as client:
@@ -83,8 +94,8 @@ def test_events_are_read_without_an_approval_card(gate, caplog, tmp_path):
     body = answer.json()
     assert body["code"] == "OK" and "request_id" not in body
     result = body["result"]["result"]
-    assert result["source"] == "ics"
-    assert [event["title"] for event in result["events"]] == [
+    assert result["source"] == "ics" and result["partial"] is False
+    assert [inner(event["title"]) for event in result["events"]] == [
         "Day off",
         "Lunch with the team",
         "Standup",
@@ -140,7 +151,7 @@ def test_a_transport_error_that_names_the_address_is_not_repeated(gate, caplog, 
     def broken(request):
         raise httpx.ConnectError(f"cannot connect to {request.url}")
 
-    monkeypatch.setattr(calendar_ics, "PublicTransport", lambda: httpx.MockTransport(broken))
+    monkeypatch.setattr(calendar_ics, "PublicTransport", lambda **_: httpx.MockTransport(broken))
     reply = ask(client, agent, "calendar-broken-01")
     assert reply.json()["result"]["error_code"] == "calendar_unavailable"
     assert_unseen(reply.text, stored_text(), caplog.text)
@@ -159,10 +170,13 @@ def test_without_an_address_nothing_is_fetched_and_the_reason_is_named(gate, cap
     assert sent == []
 
 
-def test_an_unknown_time_zone_is_refused_before_anything_is_fetched(gate):
+@pytest.mark.parametrize("zone", ["Mars/Olympus_Mons", "America", "Etc", "America/Argentina"])
+def test_an_unknown_time_zone_is_refused_before_anything_is_fetched(gate, zone):
+    # A folder of the zone database is no zone: opening it fails with an OSError, which must not
+    # become an answer of unknown outcome ("do not repeat it").
     client, agent, sent, _ = gate
     store(client)
-    reply = ask(client, agent, "calendar-zone-01", time_zone="Mars/Olympus_Mons")
+    reply = ask(client, agent, f"calendar-zone-{zone.replace('/', '-')}", time_zone=zone)
     assert reply.json()["code"] == "VALIDATION_ERROR"
     assert sent == []
 

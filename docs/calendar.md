@@ -30,11 +30,16 @@ names it is refused as not configured, so the address cannot be sent anywhere el
 ## Who may read it
 
 Startup registers `calendar.events` once if it is missing (category `safe`, authorization
-`auto`) and never changes it afterwards, so the owner's edits stay. A caller needs the scope
-`tool:calendar.events`. The owner can grant it to the chat's own key with
+`auto`) and never changes it afterwards, so the owner's edits stay. A caller needs a scope that
+covers `tool:calendar.events`. The owner can grant it to the chat's own key with
 `POST /v2/owner/tools/calendar.events/access` (`{"enabled": true, "expected_digest": ...}`), or
 make the tool ask every time by marking it sensitive (`POST /v2/owner/tools/calendar.events/sensitive`)
 or setting its authorization to `owner_confirmation`.
+
+Limit: ToolGate's scope rules have no exact-grant-only kind yet, so a key that already holds `*`,
+`tool:*` or a prefix such as `tool:cal*` covers `calendar.events` too, including after an upgrade
+that adds the tool. Until that rule exists, give such wide scopes only to keys that may read the
+owner's calendar, or mark the tool sensitive so that every read asks the owner.
 
 ## Asking
 
@@ -46,13 +51,25 @@ POST /v2/tools/calendar.events/invoke
 - `days`: 1 to 14, default 1. The window starts at midnight today in `time_zone`.
 - `time_zone`: an IANA zone name, default `UTC`. Times come back in this zone with their offset.
 
-The answer is `{"events": [...], "source": "ics"}`, sorted by start, at most 200 events. Each
-event is `{"start", "end", "all_day", "title", "location"}`: ISO 8601 times (an all-day event is
-a date, and its end is the day after its last day), the title and the place (or `null`), each
-cleaned of invisible characters and cut to 200 characters. Repeating events are expanded inside
-the window, with their exceptions and moved occurrences; cancelled events and tasks are left out.
-Titles and places are the calendar's text, not the owner's words: a caller must treat them as
-outside content.
+The answer is `{"events": [...], "source": "ics", "partial": false}`, sorted by start, at most
+200 events. Each event is `{"start", "end", "all_day", "title", "location"}`: ISO 8601 times (an
+all-day event is a date, and its end is the day after its last day), the title and the place (or
+`null`), each cleaned of invisible characters and cut to 200 characters. Repeating events are
+expanded inside the window, with their exceptions and moved occurrences; cancelled events and
+tasks are left out. `partial` is `true` when some events could not be read (see below); the rest
+are still there.
+
+Titles and places are the calendar's text, not the owner's words (an invitation can come from
+anyone), so each one comes fenced like web and MCP text:
+
+```text
+[UNTRUSTED_CALENDAR_CONTENT field=title]
+Dentist
+[/UNTRUSTED_CALENDAR_CONTENT]
+```
+
+A fence token inside the text is defused (`[/UNTRUSTED_` becomes `(/UNTRUSTED_`), so the text
+cannot close its fence. A caller must treat what is inside as outside content.
 
 Replaying an `action_id` returns its receipt; a fresh read needs a new one. At most 6 reads a
 minute and 60 an hour.
@@ -65,13 +82,16 @@ minute and 60 an hour.
   address the socket connects to (`core/public_https.py`): private, loopback, link-local,
   carrier-grade NAT and tailnet ranges are refused.
 - At most 3 redirects, each target checked by the same rules.
-- 5 seconds in all, 2 MB at most, never compressed.
+- 5 seconds in all, however slowly the server sends (each connect, read and write of the socket
+  gets only the time left), 2 MB at most, never compressed.
 - Requests go straight to the transport, so no HTTP client logs the address.
 
 The file is then read by `executors/calendar_parse.py` in a child process that gets only the
 file's bytes (no environment, no keys) and is stopped after 15 seconds. A repeating series that
 would take long to expand (a rule that never matches, one that repeats every second) is left out
-after half a second or 1000 occurrences, so one bad series costs only itself.
+after half a second or 1000 occurrences, so one bad series costs only itself. All series together
+get 10 seconds, and single events are read before repeating ones, so a calendar full of bad
+series still answers with its single events and the good series it reached, marked `partial`.
 
 ## Failures
 
@@ -80,7 +100,7 @@ Every failure is one fixed sentence that names no address:
 | `code` | `error_code` | Meaning |
 |---|---|---|
 | `CALENDAR_NOT_CONFIGURED` (503) | | No address is stored, or the vault cannot open it. Nothing was sent. |
-| `VALIDATION_ERROR` (422) | | `days` or `time_zone` is not valid. Nothing was sent. |
+| `VALIDATION_ERROR` (422) | | `days` or `time_zone` is not valid (a folder of the zone database such as `America` is no zone). Nothing was sent. |
 | `TOOL_UNAVAILABLE` | `calendar_address_refused` | The address, or a redirect, is not public `https://`. |
 | `TOOL_UNAVAILABLE` | `calendar_unavailable` | The server could not be reached, did not answer 200, or was too slow. |
 | `TOOL_UNAVAILABLE` | `calendar_too_large` | The file is over 2 MB. |

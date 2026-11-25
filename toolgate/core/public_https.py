@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import time
 from typing import cast
 
 import httpcore
@@ -84,19 +85,59 @@ def public_url(url: str) -> bool:
         return False
 
 
+class DeadlineStream(httpcore.NetworkStream):
+    """A connection that stops at `deadline` (a `time.monotonic()` value): each read, write and
+    TLS handshake gets at most the time left, so a server that sends slowly, even one byte at a
+    time, cannot keep a request alive past it. httpx's own timeouts apply to each step only."""
+
+    def __init__(self, stream: httpcore.NetworkStream, deadline: float) -> None:
+        self.stream, self.deadline = stream, deadline
+
+    def _left(self, timeout: float | None) -> float:
+        left = self.deadline - time.monotonic()
+        if left <= 0:
+            raise httpcore.ReadTimeout("Public HTTPS deadline passed")
+        return left if timeout is None else min(timeout, left)
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        return self.stream.read(max_bytes, self._left(timeout))
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self.stream.write(buffer, self._left(timeout))
+
+    def close(self) -> None:
+        self.stream.close()
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        tls = self.stream.start_tls(ssl_context, server_hostname, self._left(timeout))
+        return DeadlineStream(tls, self.deadline)
+
+    def get_extra_info(self, info: str):
+        return self.stream.get_extra_info(info)
+
+
 class PublicBackend(httpcore.NetworkBackend):
+    def __init__(self, deadline: float | None = None) -> None:
+        self.deadline = deadline
+
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         addresses = resolve_public(host, port)
         backend = httpcore.SyncBackend()
         for index, address in enumerate(addresses):
             try:
-                return backend.connect_tcp(
+                if self.deadline is not None:
+                    left = self.deadline - time.monotonic()
+                    if left <= 0:
+                        raise httpcore.ConnectTimeout("Public HTTPS deadline passed")
+                    timeout = left if timeout is None else min(timeout, left)
+                stream = backend.connect_tcp(
                     address,
                     port,
                     timeout=timeout,
                     local_address=local_address,
                     socket_options=socket_options,
                 )
+                return stream if self.deadline is None else DeadlineStream(stream, self.deadline)
             except (httpcore.ConnectError, httpcore.ConnectTimeout):
                 if index == len(addresses) - 1:
                     raise
@@ -126,10 +167,15 @@ class ResponseStream(httpx.SyncByteStream):
 
 
 class PublicTransport(httpx.BaseTransport):
-    def __init__(self) -> None:
+    """With `seconds`, nothing sent through it outlasts that many seconds from when it is made
+    (`DeadlineStream`); the clock starts once the TLS context is loaded, so it is the network's."""
+
+    def __init__(self, seconds: float | None = None) -> None:
+        context = httpx.create_ssl_context(trust_env=False)
+        deadline = None if seconds is None else time.monotonic() + seconds
         self.pool = httpcore.ConnectionPool(
-            ssl_context=httpx.create_ssl_context(trust_env=False),
-            network_backend=PublicBackend(),
+            ssl_context=context,
+            network_backend=PublicBackend(deadline),
             max_keepalive_connections=0,
         )
 

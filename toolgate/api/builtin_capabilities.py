@@ -185,6 +185,7 @@ def ensure_builtin_system_capabilities() -> None:
                 "outputs": [
                     {"name": "events", "type": "array"},
                     {"name": "source", "type": "string"},
+                    {"name": "partial", "type": "boolean"},
                 ],
                 "execution": {"type": "calendar_ics"},
                 "policy": {

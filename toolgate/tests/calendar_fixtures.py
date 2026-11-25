@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import date
 
+NL = chr(10)
+
 TODAY = date(2026, 11, 24)
 # A made-up secret address; PRIVATE_PART is the part a real provider keeps secret.
 PRIVATE_PART = "made-up-private-part"
@@ -89,3 +91,16 @@ EVERY_SECOND = event(
     "SUMMARY:Every second",
 )
 PLAIN = event("plain", "DTSTART:20261124T150000Z", "DTEND:20261124T160000Z", "SUMMARY:Dentist")
+
+
+def nevers(count: int) -> list[str]:
+    """`count` copies of NEVER, each a series of its own."""
+    return [NEVER.replace("UID:never", f"UID:never-{index}") for index in range(count)]
+
+
+def inner(text: str) -> str:
+    """The text inside one UNTRUSTED_CALENDAR_CONTENT fence (title or place)."""
+    opening, body, closing = text.split(NL)
+    assert opening.startswith("[UNTRUSTED_CALENDAR_CONTENT field=")
+    assert closing == "[/UNTRUSTED_CALENDAR_CONTENT]"
+    return body

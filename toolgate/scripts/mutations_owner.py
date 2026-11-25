@@ -308,5 +308,48 @@ MUTANTS.extend(
             "return events",
             CALENDAR_PARSE + "test_the_parent_refuses_an_answer_of_the_wrong_shape[extra-field]",
         ),
+        (
+            "calendar series share no overall budget",
+            "toolgate/executors/calendar_parse.py",
+            "found = _expand(series, start, end, min(seconds, left)) if left > 0 else None",
+            "found = _expand(series, start, end, seconds)",
+            CALENDAR_PARSE + "test_many_hostile_series_together_cost_only_themselves",
+        ),
+        (
+            "calendar single events not read first",
+            "toolgate/executors/calendar_parse.py",
+            "for series in sorted(query.series, key=_repeats):",
+            "for series in query.series:",
+            CALENDAR_PARSE + "test_many_hostile_series_together_cost_only_themselves",
+        ),
+        (
+            "calendar partial flag taken unchecked",
+            "toolgate/executors/calendar_ics.py",
+            " or type(partial) is not bool:",
+            ":",
+            CALENDAR_PARSE
+            + "test_the_parent_refuses_an_answer_of_the_wrong_shape[partial-not-bool]",
+        ),
+        (
+            "calendar titles not fenced",
+            "toolgate/executors/calendar_ics.py",
+            '"title": fenced("CALENDAR", "field=title", _clean(event["title"])),',
+            '"title": _clean(event["title"]),',
+            CALENDAR_PARSE + "test_titles_and_places_are_fenced_as_outside_text_they_cannot_close",
+        ),
+        (
+            "calendar zone folder escapes the zone check",
+            "toolgate/executors/calendar_ics.py",
+            "    except Exception:  # OSError for a folder; KeyError or ValueError for the rest",
+            "    except (KeyError, ValueError):",
+            CALENDAR + "test_an_unknown_time_zone_is_refused_before_anything_is_fetched[America]",
+        ),
+        (
+            "public https reads past the request deadline",
+            "toolgate/core/public_https.py",
+            "return self.stream.read(max_bytes, self._left(timeout))",
+            "return self.stream.read(max_bytes, timeout)",
+            CALENDAR_FETCH + "test_a_server_that_sends_its_headers_slowly_stops_at_the_deadline",
+        ),
     ]
 )

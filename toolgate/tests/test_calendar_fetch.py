@@ -1,11 +1,14 @@
 """Fetching the calendar (executors/calendar_ics.py): public https only, every redirect checked
-again, 2 MB and 5 seconds at most, never compressed. No network: DNS answers and the server are
-fakes; one test drives the real public-only transport."""
+again, 2 MB and 5 seconds at most however slowly the server sends, never compressed. No network:
+DNS answers and the server are fakes; two tests drive the real public-only transport."""
 
 from __future__ import annotations
 
 import socket
+import time
+from collections.abc import Callable
 
+import httpcore
 import httpx
 import pytest
 
@@ -35,24 +38,26 @@ def dns(monkeypatch):
 class Server:
     """A fake calendar server: `routes` maps a URL to a response; `seen` lists what was asked."""
 
-    def __init__(self, routes):
+    def __init__(self, routes: dict[str, httpx.Response | Callable[[], httpx.Response]]):
         self.routes = routes
         self.seen: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.seen.append(str(request.url))
         made = self.routes.get(str(request.url))
-        return made() if callable(made) else made or httpx.Response(404)
+        if made is None:
+            return httpx.Response(404)
+        return made if isinstance(made, httpx.Response) else made()
 
     @property
     def transport(self):
         return httpx.MockTransport(self)
 
 
-def ok(body=WEEK, **headers):
+def ok(body: bytes = WEEK, headers: dict[str, str] | None = None):
     """A 200 whose body is streamed, as from a real server (not read before ToolGate reads it)."""
     return lambda: httpx.Response(
-        200, content=iter([body]), headers={"content-type": "text/calendar", **headers}
+        200, content=iter([body]), headers={"content-type": "text/calendar", **(headers or {})}
     )
 
 
@@ -164,7 +169,7 @@ def test_an_answer_other_than_200_is_unavailable(dns, status):
 
 
 def test_a_compressed_answer_is_refused(dns):
-    server = Server({ADDRESS: ok(**{"content-encoding": "gzip"})})
+    server = Server({ADDRESS: ok(headers={"content-encoding": "gzip"})})
     refused(ADDRESS, server, "calendar_unavailable")
 
 
@@ -218,6 +223,47 @@ def test_a_transport_error_is_unavailable_and_names_no_address(dns):
     assert caught.value.code == "calendar_unavailable"
     assert caught.value.__cause__ is None and caught.value.__suppress_context__
     assert "calendar.example.com" not in repr(caught.value)
+
+
+class Trickle(httpcore.NetworkStream):
+    """A server that answers one byte per read, each read well inside any per-read timeout."""
+
+    def __init__(self, answer: bytes, pause: float) -> None:
+        self.answer, self.pause = answer, pause
+        self.reads: list[float] = []
+
+    def read(self, max_bytes, timeout=None):
+        self.reads.append(time.monotonic())
+        time.sleep(self.pause)
+        data, self.answer = self.answer[:1], self.answer[1:]
+        return data
+
+    def write(self, buffer, timeout=None):
+        pass
+
+    def close(self):
+        pass
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        return self
+
+    def get_extra_info(self, info):
+        return False if info == "is_readable" else None
+
+
+def test_a_server_that_sends_its_headers_slowly_stops_at_the_deadline(monkeypatch):
+    # httpx's timeouts are per read, and the body's deadline check comes only after the headers:
+    # without the transport's own deadline the server is read for the whole 2.5 s of headers.
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_a, **_k: answers(PUBLIC))
+    monkeypatch.setattr(calendar_ics, "SECONDS", 0.4)
+    head = b"HTTP/1.1 200 OK" + bytes([13, 10]) + b"X-Slow: " + b"x" * 90 + bytes([13, 10]) * 2
+    wire = Trickle(head + b"BEGIN:VCALENDAR", 0.02)
+    monkeypatch.setattr(httpcore.SyncBackend, "connect_tcp", lambda *_a, **_k: wire)
+    with pytest.raises(calendar_ics.CalendarError) as caught:
+        calendar_ics.fetch(ADDRESS)
+    assert caught.value.code == "calendar_unavailable"
+    assert wire.reads and wire.reads[-1] - wire.reads[0] < 1.0
+    assert len(wire.answer) > len(b"BEGIN:VCALENDAR")  # stopped inside the headers
 
 
 def test_the_real_transport_refuses_a_socket_address_inside_the_network(monkeypatch):
