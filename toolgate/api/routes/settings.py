@@ -60,10 +60,22 @@ def owner_lockdown():
 
 
 @router.post("/v2/owner/lockdown", dependencies=[Depends(require_owner)])
-def owner_set_lockdown(payload: OwnerLockdown):
+def owner_set_lockdown(
+    payload: OwnerLockdown,
+    proof: str | None = Header(None, alias="X-ToolGate-Owner-Proof"),
+):
     """Turn lockdown on or off with the owner key. On only takes power away, so Pi's gateway asks no
-    password for it; off gives the power back, so the gateway sends it only with the owner's
-    password proof."""
+    password for it. Off gives the power back, and ToolGate cannot check the owner's password: it
+    needs `X-ToolGate-Owner-Proof: password`, which the gateway sends only after checking it
+    (Settings, or `python -m gateway lockdown` at the host). The owner key without it, as the
+    settings relay of `conker config set` sends it, is refused 403 `password_required`."""
+    if not payload.enabled and proof != "password":
+        deny(
+            "password_required",
+            "Turning lockdown off needs the owner's password.",
+            403,
+            "Turn it off in Settings, which asks for the password.",
+        )
     control_plane.set_lockdown(payload.enabled, "owner")
     return _lockdown_view()
 

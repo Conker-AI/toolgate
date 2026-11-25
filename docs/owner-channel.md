@@ -44,8 +44,16 @@ All routes require the dedicated header:
   and returns the same. This is ToolGate's one lockdown (the operator's
   `POST /v2/settings/lockdown` sets the same switch; ToolGate sets it itself after repeated bad
   verification callbacks). In lockdown no tool or workflow runs, read-only ones included, and no
-  agent can file a request. Both directions need this header; the gateway in front adds the
+  agent can file a request. Both directions need this header; the gateway in front asks the
   owner's password for turning it off only, since turning it on only takes power away.
+  ToolGate cannot check that password, so `{enabled: false}` also needs
+  `X-ToolGate-Owner-Proof: password`, which the gateway sends only after checking it (the
+  Settings switch, or `python -m gateway lockdown` at the host). Without it, the owner key alone
+  (as the settings relay of `conker config set` sends it) is refused with 403
+  `{code: "password_required"}` and nothing changes. The proof is the gateway's word, not a
+  secret: it keeps a command that never asked the password from lifting lockdown, not someone
+  who holds the gateway's keys. The operator's `POST /v2/settings/lockdown` (admin key) is
+  unchanged.
 
 The agent that asked may withdraw a request while it is still pending (`POST
 /v2/agent/requests/{id}/withdraw`, see docs/APPROVAL_INTEGRITY.md). It then leaves this channel:
