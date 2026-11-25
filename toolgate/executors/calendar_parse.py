@@ -93,30 +93,62 @@ class Busy(Exception):
     """The time ran out."""
 
 
+class _Watch:
+    """The child's one watchdog thread, for every budget (one is in force at a time). A thread
+    for each budget stopped starting after a few dozen on Linux, under the address-space limit
+    (an 8 MB stack each, kept a while after the thread ends), and the work it guarded then
+    looked broken. When this one cannot start, nothing is read (fail closed)."""
+
+    def __init__(self) -> None:
+        self.ready = threading.Condition()
+        self.budget: _Budget | None = None
+        self.thread: threading.Thread | None = None
+
+    def watch(self, budget: _Budget) -> None:
+        with self.ready:
+            if self.thread is None or not self.thread.is_alive():
+                thread = threading.Thread(target=self._run, daemon=True)
+                thread.start()
+                self.thread = thread
+            self.budget = budget
+            self.ready.notify()
+
+    def _run(self) -> None:
+        with self.ready:
+            while True:
+                budget = self.budget
+                if budget is None:
+                    self.ready.wait()
+                elif clock.monotonic() < budget.ends:
+                    self.ready.wait(budget.ends - clock.monotonic())
+                else:
+                    self.budget = None
+                    if budget.armed:
+                        budget.armed, budget.fired = False, True
+                        _thread.interrupt_main()
+
+
+WATCH = _Watch()
+
+
 class _Budget:
     """Interrupts the main thread (KeyboardInterrupt) when the work runs past its seconds."""
 
     def __init__(self, seconds: float) -> None:
-        self.lock = threading.Lock()
+        self.ends = clock.monotonic() + seconds
         self.armed = True
         self.fired = False
-        self.timer = threading.Timer(seconds, self._fire)
-        self.timer.daemon = True
-
-    def _fire(self) -> None:
-        with self.lock:
-            if self.armed:
-                self.armed, self.fired = False, True
-                _thread.interrupt_main()
 
     def __enter__(self) -> _Budget:
-        self.timer.start()
+        WATCH.watch(self)
         return self
 
     def __exit__(self, *_exc) -> None:
-        with self.lock:
+        with WATCH.ready:
             self.armed = False
-        self.timer.cancel()
+            if WATCH.budget is self:
+                WATCH.budget = None
+            WATCH.ready.notify()
 
 
 def _within(seconds: float, work):

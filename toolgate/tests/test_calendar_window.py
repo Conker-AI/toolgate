@@ -5,6 +5,7 @@ and inside the time."""
 
 from __future__ import annotations
 
+import threading
 import time
 from zoneinfo import ZoneInfo
 
@@ -145,6 +146,42 @@ def test_a_broken_event_among_2000_is_found_by_halves_not_by_reading_each_event(
     events, partial = calendar_parse.expand(body, 1, BERLIN, TODAY, total=60)
     assert events[0]["title"] == "Dentist" and partial
     assert len(calls) <= 2 + 2 * 11
+
+
+def test_a_thread_that_cannot_start_costs_no_events(monkeypatch):
+    # On Linux, under the child's address-space limit, a thread for each budget stopped
+    # starting after a few dozen (an 8 MB stack each, kept a while after the thread ends): the
+    # work it guarded looked broken, and its events were left out. One thread serves them all.
+    started = []
+    start = threading.Thread.start
+
+    def refused_after_one(self):
+        if started:
+            raise RuntimeError("can't start new thread")
+        started.append(self)
+        return start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", refused_after_one)
+    others = [event(f"s{index}", "DTSTART:20261124T200000Z") for index in range(98)]
+    body = calendar(*others, BAD_UNTIL, PLAIN)
+    events, partial = calendar_parse.expand(body, 1, BERLIN, TODAY)
+    assert events[0]["title"] == "Dentist" and len(events) == 99 and partial
+
+
+def test_a_watchdog_that_ended_is_started_again():
+    # Otherwise no budget would fire again (a test's clock that raises could end it).
+    ended = threading.Thread(target=lambda: None)
+    ended.start()
+    ended.join()
+    calendar_parse.WATCH.thread = ended  # not restored: the new watchdog takes its place
+
+    def spin() -> None:
+        until = time.monotonic() + 2
+        while time.monotonic() < until:
+            pass
+
+    with pytest.raises(calendar_parse.Busy):
+        calendar_parse._within(0.05, spin)
 
 
 def test_one_broken_event_among_100_leaves_the_last_one_in_through_the_child():
