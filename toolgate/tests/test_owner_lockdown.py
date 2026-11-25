@@ -1,7 +1,8 @@
 """The owner's lockdown switch (`GET`/`POST /v2/owner/lockdown`): the same lockdown the operator's
 `/v2/settings/lockdown` sets, reached with the owner key. On, no tool or workflow runs and no agent
 can file a request; off, they work again. Only the owner key reaches it; Pi's gateway asks the
-owner's password for turning it off (turning it on only takes power away)."""
+owner's password for turning it off (turning it on only takes power away), and ToolGate turns it
+off only with the gateway's proof that it did."""
 
 import threading
 
@@ -12,6 +13,9 @@ from toolgate.tests.test_approval_boundary import TOOL, TOOL_ID
 from toolgate.tests.test_owner_channel import ADMIN, HEADERS, gate  # noqa: F401
 
 OFF = {"lockdown": False, "reason": "", "changed_by": None}
+# The gateway's word that it checked the owner's password (Settings, or `python -m gateway
+# lockdown` at the host). ToolGate cannot check the password itself.
+PROOF = {"X-ToolGate-Owner-Proof": "password"}
 
 
 @pytest.fixture
@@ -74,7 +78,7 @@ def test_on_stops_every_tool_and_off_lets_them_run_again(caller):
     assert locked.status_code == 423
     assert locked.json()["detail"]["code"] == "LOCKED_DOWN"
     assert client.get("/v2/owner/lockdown", headers=HEADERS).json()["lockdown"] is True
-    off = switch(client, False)
+    off = switch(client, False, {**HEADERS, **PROOF})
     assert off.status_code == 200
     assert off.json() == {"lockdown": False, "reason": "", "changed_by": "owner"}
     assert invoke(client, key).json()["code"] == "OK"
@@ -92,7 +96,7 @@ def test_the_owner_sees_why_toolgate_locked_itself_and_can_release_it(gate):
         "reason": "repeated invalid verification callbacks",
         "changed_by": "system",
     }
-    assert switch(client, False).json()["lockdown"] is False
+    assert switch(client, False, {**HEADERS, **PROOF}).json()["lockdown"] is False
 
 
 def test_turning_it_on_again_is_harmless(gate):
@@ -154,3 +158,52 @@ def test_a_settings_save_at_the_same_moment_never_turns_lockdown_back_off(gate, 
     state = cp.settings()
     assert state["lockdown"] is True
     assert state["default_confirmation_expiry_seconds"] == 60
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {},
+        {"X-ToolGate-Owner-Proof": ""},
+        {"X-ToolGate-Owner-Proof": "Password"},
+        {"X-ToolGate-Owner-Proof": "checked"},
+        {"X-ToolGate-Owner-Proof": "password,password"},
+    ],
+    ids=["none", "empty", "case", "other", "doubled"],
+)
+def test_the_owner_key_alone_cannot_turn_it_off(gate, extra):
+    """`conker config set` reaches this route with the gateway's owner key and never asked the
+    password: lifting lockdown needs the gateway's proof that it did, and nothing changes without."""
+    client = gate[0]
+    cp.set_lockdown(True, "system", "repeated invalid verification callbacks")
+    events = len(cp.events())
+    response = client.post(
+        "/v2/owner/lockdown", headers={**HEADERS, **extra}, json={"enabled": False}
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "password_required"
+    state = cp.settings()
+    assert (state["lockdown"], state["changed_by"]) == (True, "system")
+    assert len(cp.events()) == events
+
+
+def test_with_the_gateway_password_proof_it_turns_off(gate):
+    client = gate[0]
+    cp.set_lockdown(True, "system", "repeated invalid verification callbacks")
+    response = client.post(
+        "/v2/owner/lockdown", headers={**HEADERS, **PROOF}, json={"enabled": False}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"lockdown": False, "reason": "", "changed_by": "owner"}
+
+
+def test_the_proof_never_stands_in_for_the_owner_key(gate):
+    client, _, execution = gate
+    cp.set_lockdown(True, "owner")
+    for headers in ({}, {"X-ToolGate-Key": ADMIN}, {"X-ToolGate-Owner-Key": execution}):
+        assert switch(client, False, {**headers, **PROOF}).status_code == 401
+    assert cp.settings()["lockdown"] is True
+
+
+def test_turning_it_on_needs_no_proof(gate):
+    assert switch(gate[0], True).json()["lockdown"] is True

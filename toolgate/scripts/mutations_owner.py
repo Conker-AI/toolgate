@@ -129,6 +129,20 @@ MUTANTS.extend(
             '@router.post("/v2/owner/lockdown")',
             LOCKDOWN + "test_only_the_owner_key_reads_or_turns_it",
         ),
+        (
+            "lockdown off with the owner key alone",
+            "toolgate/api/routes/settings.py",
+            'if not payload.enabled and proof != "password":',
+            "if False:",
+            LOCKDOWN + "test_the_owner_key_alone_cannot_turn_it_off[none]",
+        ),
+        (
+            "lockdown off with any proof value",
+            "toolgate/api/routes/settings.py",
+            'and proof != "password":',
+            "and proof is None:",
+            LOCKDOWN + "test_the_owner_key_alone_cannot_turn_it_off[other]",
+        ),
     ]
 )
 

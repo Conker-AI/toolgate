@@ -5849,9 +5849,25 @@
         "summary": "Owner Lockdown"
       },
       "post": {
-        "description": "Turn lockdown on or off with the owner key. On only takes power away, so Pi's gateway asks no\npassword for it; off gives the power back, so the gateway sends it only with the owner's\npassword proof.",
+        "description": "Turn lockdown on or off with the owner key. On only takes power away, so Pi's gateway asks no\npassword for it. Off gives the power back, and ToolGate cannot check the owner's password: it\nneeds `X-ToolGate-Owner-Proof: password`, which the gateway sends only after checking it\n(Settings, or `python -m gateway lockdown` at the host). The owner key without it, as the\nsettings relay of `conker config set` sends it, is refused 403 `password_required`.",
         "operationId": "owner_set_lockdown_v2_owner_lockdown_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "X-ToolGate-Owner-Proof",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Toolgate-Owner-Proof"
+            }
+          },
           {
             "in": "header",
             "name": "X-ToolGate-Owner-Key",
