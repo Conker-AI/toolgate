@@ -11,11 +11,14 @@ the request and again for the address the socket uses (`core.public_https`, whic
 private, loopback, link-local, carrier-grade NAT and tailnet ranges). At most `REDIRECTS`
 redirects, each target checked the same way. `SECONDS` for the whole fetch, however slowly the
 server sends (every connect, read and write of the socket gets only the time left), at most
-`LIMIT_BYTES`, never compressed. Requests go straight to the transport, so no client logs the
-address.
+`LIMIT_BYTES`, never compressed; the name lookups (before each request and in the socket's
+connect) get only the time left too. Requests go straight to the transport, so no client logs
+the address.
 
 Parsing runs `calendar_parse.py` in a child process with nothing but the file's bytes, killed
-after `PARSE_SECONDS` (see that module for why). `partial` says some events could not be read.
+after `PARSE_SECONDS` (see that module for why; it stops itself sooner, with `BUSY`). One read
+so takes at most `RUNTIME_SECONDS`, the tool's `max_runtime_seconds`. `partial` says some
+events could not be read.
 Each title and place is outside text, fenced like web and MCP text (`UNTRUSTED_CALENDAR_CONTENT`)
 for a model that reads the result.
 """
@@ -43,6 +46,8 @@ LIMIT_BYTES = 2 * 1024 * 1024
 SECONDS = 5.0
 REDIRECTS = 3
 PARSE_SECONDS = 15.0
+RUNTIME_SECONDS = SECONDS + PARSE_SECONDS  # the fetch, then the parse
+BUSY = 3  # calendar_parse.BUSY: the child ran out of its own time
 MAX_EVENTS = 200
 TEXT_CHARS = 200
 PARSER = Path(__file__).with_name("calendar_parse.py")
@@ -79,7 +84,7 @@ def address() -> str:
     return value
 
 
-def _https(url: str) -> str:
+def _https(url: str, deadline: float) -> str:
     if url[:9].lower() == "webcal://":
         url = "https://" + url[9:]
     try:
@@ -87,7 +92,7 @@ def _https(url: str) -> str:
     except (httpx.InvalidURL, ValueError, TypeError):
         raise CalendarError("calendar_address_refused") from None
     # public_url: https on port 443, a host, no user name or password, every address public.
-    if not public_url(str(parsed)):
+    if not public_url(str(parsed), deadline):
         raise CalendarError("calendar_address_refused")
     return str(parsed)
 
@@ -110,11 +115,11 @@ def _body(response: httpx.Response, deadline: float) -> bytes:
 
 def fetch(url: str, transport: httpx.BaseTransport | None = None) -> bytes:
     """The file at `url`, under every rule above."""
-    target = _https(url)
     own = transport is None
     sender = PublicTransport(seconds=SECONDS) if transport is None else transport
     deadline = time.monotonic() + SECONDS
     try:
+        target = _https(url, deadline)
         for _hop in range(REDIRECTS + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -128,7 +133,7 @@ def fetch(url: str, transport: httpx.BaseTransport | None = None) -> bytes:
             response = sender.handle_request(request)
             try:
                 if response.status_code in REDIRECT_CODES:
-                    target = _https(urljoin(target, response.headers.get("location", "")))
+                    target = _https(urljoin(target, response.headers.get("location", "")), deadline)
                     continue
                 if response.status_code != 200:
                     raise CalendarError("calendar_unavailable")
@@ -171,6 +176,8 @@ def parse(body: bytes, days: int, zone: str, today: date) -> tuple[list[dict], b
         raise CalendarError("calendar_too_busy") from None
     except OSError:
         raise CalendarError("calendar_unreadable") from None
+    if done.returncode == BUSY:
+        raise CalendarError("calendar_too_busy")
     if done.returncode != 0:
         raise CalendarError("calendar_unreadable")
     try:

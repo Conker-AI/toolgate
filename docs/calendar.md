@@ -72,7 +72,8 @@ A fence token inside the text is defused (`[/UNTRUSTED_` becomes `(/UNTRUSTED_`)
 cannot close its fence. A caller must treat what is inside as outside content.
 
 Replaying an `action_id` returns its receipt; a fresh read needs a new one. At most 6 reads a
-minute and 60 an hour.
+minute and 60 an hour. One read takes at most 20 seconds (the fetch's 5, then the parser's 15):
+that is the tool's `max_runtime_seconds`.
 
 ## How the address is fetched
 
@@ -82,16 +83,34 @@ minute and 60 an hour.
   address the socket connects to (`core/public_https.py`): private, loopback, link-local,
   carrier-grade NAT and tailnet ranges are refused.
 - At most 3 redirects, each target checked by the same rules.
-- 5 seconds in all, however slowly the server sends (each connect, read and write of the socket
-  gets only the time left), 2 MB at most, never compressed.
+- 5 seconds in all, however slowly the server or the name server answers (each name lookup,
+  connect, read and write gets only the time left, and none starts once it is up), 2 MB at
+  most, never compressed.
 - Requests go straight to the transport, so no HTTP client logs the address.
 
 The file is then read by `executors/calendar_parse.py` in a child process that gets only the
-file's bytes (no environment, no keys) and is stopped after 15 seconds. A repeating series that
-would take long to expand (a rule that never matches, one that repeats every second) is left out
-after half a second or 1000 occurrences, so one bad series costs only itself. All series together
-get 10 seconds, and single events are read before repeating ones, so a calendar full of bad
-series still answers with its single events and the good series it reached, marked `partial`.
+file's bytes (no environment, no keys) and is stopped after 15 seconds. The child keeps its own
+clock from the moment it starts: reading the file, building its series and expanding them get
+10 seconds in all, and a child that runs out before its series are built says so itself
+(`calendar_too_busy`), well before the parent's limit. What it reads, so that a large or
+hostile file still answers in time:
+
+- The first 2,000 events of the file (and at most 40,000 lines, 20 time zones); the rest are
+  not read and the answer is `partial`. A calendar with years of history can hold more: its
+  newest events may then be among those not read.
+- A repeating series that would take long to expand (a rule that never matches, one that repeats
+  every second) is left out after half a second or 1000 occurrences, so one bad series costs only
+  itself. Single events are read before repeating ones, so a calendar full of bad series still
+  answers with its single events and the good series it reached.
+- An event or zone the engine cannot take would fail the whole file (an RRULE whose UNTIL is no
+  date, a VTIMEZONE without its offsets): then each event is read on its own and those that read
+  are kept, without the file's zones when a zone was the trouble (their times then float). An
+  event the engine skips as broken (FREQ=BOGUS, a DTSTART that is no time) is left out.
+- A zone name the zone database cannot load (`TZID=America`, a folder) is an unknown zone: that
+  event's times are read in `time_zone`, as for any zone ToolGate does not know. An
+  `X-WR-TIMEZONE` it cannot load is ignored.
+
+Whatever is left out, cut or skipped makes the answer `partial`.
 
 ## Failures
 
@@ -105,7 +124,8 @@ Every failure is one fixed sentence that names no address:
 | `TOOL_UNAVAILABLE` | `calendar_unavailable` | The server could not be reached, did not answer 200, or was too slow. |
 | `TOOL_UNAVAILABLE` | `calendar_too_large` | The file is over 2 MB. |
 | `TOOL_UNAVAILABLE` | `calendar_unreadable` | The answer is not an iCalendar file. |
-| `TOOL_UNAVAILABLE` | `calendar_too_busy` | Reading the file took more than 15 seconds. |
+| `TOOL_UNAVAILABLE` | `calendar_too_busy` | The file could not be read in its 10 seconds (or the child was stopped at 15). |
 
-Tests: `toolgate/tests/test_calendar_parse.py`, `test_calendar_fetch.py` and
-`test_calendar_boundary.py`, all on synthetic files with no network.
+Tests: `toolgate/tests/test_calendar_parse.py`, `test_calendar_limits.py`,
+`test_calendar_fetch.py` and `test_calendar_boundary.py`, all on synthetic files with no
+network.

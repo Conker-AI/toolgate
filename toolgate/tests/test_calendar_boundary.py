@@ -5,6 +5,7 @@ no other tool able to name the address and send it somewhere else."""
 from __future__ import annotations
 
 import logging
+import math
 import socket
 import sqlite3
 from datetime import UTC, datetime
@@ -251,3 +252,10 @@ def test_registration_is_once_and_keeps_the_owners_changes(gate):
     builtin_capabilities.ensure_builtin_system_capabilities()
     saved = cp.get("tool", "calendar.events")
     assert saved["status"] == "disabled" and saved["authorization"] == "owner_confirmation"
+
+
+def test_the_tools_runtime_limit_is_what_one_read_can_take(gate):
+    # The fetch's deadline, then the parser's kill: no read runs longer than the limit says.
+    limits = cp.get("tool", "calendar.events")["policy"]["usage_limits"]
+    bound = math.ceil(calendar_ics.SECONDS + calendar_ics.PARSE_SECONDS)
+    assert limits["max_runtime_seconds"] == bound == 20

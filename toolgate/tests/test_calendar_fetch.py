@@ -12,6 +12,7 @@ import httpcore
 import httpx
 import pytest
 
+from toolgate.core import public_https
 from toolgate.executors import calendar_ics
 from toolgate.tests.calendar_fixtures import ADDRESS, WEEK
 
@@ -279,3 +280,59 @@ def test_the_real_transport_refuses_a_socket_address_inside_the_network(monkeypa
         calendar_ics.fetch(ADDRESS)
     assert caught.value.code == "calendar_address_refused"
     assert connected == []
+
+
+def test_a_slow_name_lookup_cannot_stretch_the_fetch(monkeypatch):
+    # Without the deadline the check before the request waits out the resolver (5 s here).
+    monkeypatch.setattr(calendar_ics, "SECONDS", 0.5)
+    began = []
+
+    def slow(*_a, **_k):
+        began.append(time.monotonic())
+        time.sleep(5)
+        return answers(PUBLIC)
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow)
+    server = Server({ADDRESS: ok()})
+    refused(ADDRESS, server, "calendar_unavailable")
+    assert began and time.monotonic() - began[0] < 2 and server.seen == []
+
+
+def test_the_sockets_own_lookup_stops_at_the_deadline_too(monkeypatch):
+    # The check before the request answers at once; the socket's lookup would wait 5 s.
+    monkeypatch.setattr(calendar_ics, "SECONDS", 0.5)
+    began, first = [], [answers(PUBLIC)]
+
+    def resolve(*_a, **_k):
+        if first:
+            return first.pop()
+        began.append(time.monotonic())
+        time.sleep(5)
+        return answers(PUBLIC)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(socket, "create_connection", lambda *_a, **_k: pytest.fail("connected"))
+    with pytest.raises(calendar_ics.CalendarError) as caught:
+        calendar_ics.fetch(ADDRESS)
+    assert caught.value.code == "calendar_unavailable"
+    assert began and time.monotonic() - began[0] < 2
+
+
+def test_no_lookup_starts_once_the_deadline_has_passed_and_other_callers_are_unchanged(
+    monkeypatch,
+):
+    looked: list[tuple] = []
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **_k: looked.append(a) or answers(PUBLIC))
+    with pytest.raises(public_https.LookupTimeout):
+        public_https.resolve_public("calendar.example.com", 443, time.monotonic())
+    time.sleep(0.2)  # a lookup started anyway would have reached the resolver by now
+    assert looked == []
+
+    def unknown(*_a, **_k):
+        raise socket.gaierror("no such host")
+
+    monkeypatch.setattr(socket, "getaddrinfo", unknown)
+    with pytest.raises(public_https.DestinationDenied):
+        public_https.resolve_public("calendar.example.com", 443, time.monotonic() + 5)
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_a, **_k: answers(PUBLIC))
+    assert public_https.resolve_public("calendar.example.com") == [PUBLIC]

@@ -1,6 +1,9 @@
 """Built-in system and research capabilities that ToolGate registers on startup."""
 
+import math
+
 from toolgate.core import control_plane
+from toolgate.executors import calendar_ics
 
 
 def ensure_builtin_system_capabilities() -> None:
@@ -193,7 +196,8 @@ def ensure_builtin_system_capabilities() -> None:
                         "max_per_minute": 6,
                         "cooldown_seconds": 0,
                         "max_per_hour": 60,
-                        "max_runtime_seconds": 30,
+                        # True by construction: the fetch's deadline, then the parser's kill.
+                        "max_runtime_seconds": math.ceil(calendar_ics.RUNTIME_SECONDS),
                     }
                 },
             }

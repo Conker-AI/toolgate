@@ -263,12 +263,13 @@ MUTANTS.extend(
 CALENDAR_FETCH = "toolgate/tests/test_calendar_fetch.py::"
 CALENDAR = "toolgate/tests/test_calendar_boundary.py::"
 CALENDAR_PARSE = "toolgate/tests/test_calendar_parse.py::"
+LIMITS = "toolgate/tests/test_calendar_limits.py::"
 MUTANTS.extend(
     [
         (
             "calendar address not checked for public https",
             "toolgate/executors/calendar_ics.py",
-            "    if not public_url(str(parsed)):",
+            "    if not public_url(str(parsed), deadline):",
             "    if False:",
             CALENDAR_FETCH
             + "test_a_host_that_resolves_inside_the_network_is_refused_before_any_request[private]",
@@ -276,7 +277,7 @@ MUTANTS.extend(
         (
             "calendar redirect followed unchecked",
             "toolgate/executors/calendar_ics.py",
-            'target = _https(urljoin(target, response.headers.get("location", "")))',
+            'target = _https(urljoin(target, response.headers.get("location", "")), deadline)',
             'target = urljoin(target, response.headers.get("location", ""))',
             CALENDAR_FETCH + "test_a_redirect_is_checked_like_the_address_itself[private-host]",
         ),
@@ -318,8 +319,8 @@ MUTANTS.extend(
         (
             "calendar single events not read first",
             "toolgate/executors/calendar_parse.py",
-            "for series in sorted(query.series, key=_repeats):",
-            "for series in query.series:",
+            "    every = sorted(query.series, key=_repeats)",
+            "    every = list(query.series)",
             CALENDAR_PARSE + "test_many_hostile_series_together_cost_only_themselves",
         ),
         (
@@ -350,6 +351,99 @@ MUTANTS.extend(
             "return self.stream.read(max_bytes, self._left(timeout))",
             "return self.stream.read(max_bytes, timeout)",
             CALENDAR_FETCH + "test_a_server_that_sends_its_headers_slowly_stops_at_the_deadline",
+        ),
+        (
+            "calendar child counts from the call, not its start",
+            "toolgate/executors/calendar_parse.py",
+            "    deadline = (clock.monotonic() if started is None else started) + total",
+            "    deadline = clock.monotonic() + total",
+            LIMITS + "test_the_childs_time_counts_from_its_own_start",
+        ),
+        (
+            "calendar child clock started after the libraries load",
+            "toolgate/executors/calendar_parse.py",
+            "sys.stdin.buffer.read(LIMIT_BYTES + 1), days, zone, today, started=STARTED",
+            "sys.stdin.buffer.read(LIMIT_BYTES + 1), days, zone, today",
+            LIMITS + "test_the_child_starts_its_clock_before_loading_the_libraries",
+        ),
+        (
+            "calendar busy child read as unreadable",
+            "toolgate/executors/calendar_ics.py",
+            "    if done.returncode == BUSY:",
+            "    if False:",
+            LIMITS + "test_the_parent_reads_the_childs_busy_as_too_busy",
+        ),
+        (
+            "calendar events read past the cap",
+            "toolgate/executors/calendar_parse.py",
+            "if closed in kept and len(kept[closed]) < limits[closed] and len(current) <= room:",
+            "if closed in kept:",
+            LIMITS + "test_only_the_first_events_are_read_and_the_rest_make_the_answer_partial",
+        ),
+        (
+            "calendar zone folder in the file blanks it",
+            "toolgate/executors/calendar_parse.py",
+            "    tzp.use(_Zones())",
+            "    pass",
+            LIMITS + "test_a_zone_folder_named_in_the_file_is_an_unknown_zone[America]",
+        ),
+        (
+            "calendar unusable X-WR-TIMEZONE kept",
+            "toolgate/executors/calendar_parse.py",
+            '        del calendar["X-WR-TIMEZONE"]  # floating times are then read in ZONE',
+            "        pass",
+            LIMITS + "test_an_x_wr_timezone_the_database_cannot_load_is_ignored",
+        ),
+        (
+            "calendar one broken event blanks the file",
+            "toolgate/executors/calendar_parse.py",
+            "        pass  # one event or zone the engine cannot take: try the events one by one",
+            '        raise Unreadable("unparsable") from None',
+            LIMITS + "test_an_event_the_engine_cannot_take_costs_only_itself",
+        ),
+        (
+            "calendar broken zone blanks the file",
+            "toolgate/executors/calendar_parse.py",
+            "    for frame in (zones, []):",
+            "    for frame in (zones,):",
+            LIMITS + "test_a_zone_the_engine_cannot_take_costs_only_its_own_times",
+        ),
+        (
+            "calendar series the engine skips leave no partial",
+            "toolgate/executors/calendar_parse.py",
+            '    return every, partial or _returned(every) < len(calendar.walk("VEVENT"))',
+            "    return every, partial",
+            LIMITS
+            + "test_an_event_the_engine_skips_as_broken_makes_the_answer_partial[bogus-frequency]",
+        ),
+        (
+            "calendar address looked up outside the deadline",
+            "toolgate/executors/calendar_ics.py",
+            "    if not public_url(str(parsed), deadline):",
+            "    if not public_url(str(parsed)):",
+            CALENDAR_FETCH + "test_a_slow_name_lookup_cannot_stretch_the_fetch",
+        ),
+        (
+            "public https socket lookup outside the deadline",
+            "toolgate/core/public_https.py",
+            "        addresses = resolve_public(host, port, self.deadline)",
+            "        addresses = resolve_public(host, port)",
+            CALENDAR_FETCH + "test_the_sockets_own_lookup_stops_at_the_deadline_too",
+        ),
+        (
+            "public https lookup waits out the resolver",
+            "toolgate/core/public_https.py",
+            "    worker.join(left)",
+            "    worker.join()",
+            CALENDAR_FETCH + "test_a_slow_name_lookup_cannot_stretch_the_fetch",
+        ),
+        (
+            "public https lookup starts after the deadline",
+            "toolgate/core/public_https.py",
+            "    if left <= 0:\n        raise LookupTimeout(",
+            "    if False:\n        raise LookupTimeout(",
+            CALENDAR_FETCH
+            + "test_no_lookup_starts_once_the_deadline_has_passed_and_other_callers_are_unchanged",
         ),
     ]
 )

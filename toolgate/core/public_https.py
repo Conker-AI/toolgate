@@ -3,12 +3,17 @@
 Validating a hostname before an ordinary client resolves it again leaves a DNS
 rebinding window. The backend validates every answer and connects to a numeric
 address while HTTP Host and TLS certificate verification retain the hostname.
+
+With a deadline (a `time.monotonic()` value), the name lookup counts too: none starts once the
+deadline has passed, and one still waiting for the resolver when it passes stops the request
+(`LookupTimeout`) instead of stretching it. Without one, lookups are as before.
 """
 
 from __future__ import annotations
 
 import ipaddress
 import socket
+import threading
 import time
 from typing import cast
 
@@ -18,6 +23,10 @@ import httpx
 
 class DestinationDenied(httpx.ConnectError):
     pass
+
+
+class LookupTimeout(httpcore.ConnectTimeout):
+    """The name lookup did not answer before the deadline: a timeout, not a refused address."""
 
 
 def public_address(address: str) -> bool:
@@ -57,15 +66,38 @@ def public_address(address: str) -> bool:
     )  # Azure's host infrastructure endpoint.
 
 
-def resolve_public(host: str, port: int = 443) -> list[str]:
+def _lookup(host: str, port: int, deadline: float | None) -> list:
+    """getaddrinfo, bounded by the time left before `deadline` when there is one. The resolver
+    cannot be cancelled: one that does not answer in time is left to finish in its own thread."""
+    if deadline is None:
+        return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    left = deadline - time.monotonic()
+    if left <= 0:
+        raise LookupTimeout("Public HTTPS deadline passed")
+    done: dict[str, object] = {}
+
+    def look() -> None:
+        try:
+            done["answers"] = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except Exception as exc:
+            done["error"] = exc
+
+    worker = threading.Thread(target=look, name="public-https-lookup", daemon=True)
+    worker.start()
+    worker.join(left)
+    if worker.is_alive():
+        raise LookupTimeout("Public HTTPS deadline passed")
+    if "error" in done:
+        raise cast(Exception, done["error"])
+    return cast(list, done["answers"])
+
+
+def resolve_public(host: str, port: int = 443, deadline: float | None = None) -> list[str]:
     if port != 443 or not host or "%" in host:
         raise DestinationDenied("Destination must be public HTTPS on port 443")
     try:
         addresses = list(
-            dict.fromkeys(
-                cast(str, answer[4][0])
-                for answer in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-            )
+            dict.fromkeys(cast(str, answer[4][0]) for answer in _lookup(host, port, deadline))
         )
     except OSError as exc:
         raise DestinationDenied("Public destination could not be resolved") from exc
@@ -74,12 +106,14 @@ def resolve_public(host: str, port: int = 443) -> list[str]:
     return addresses
 
 
-def public_url(url: str) -> bool:
+def public_url(url: str, deadline: float | None = None) -> bool:
+    """Whether `url` is https on port 443 with every address public. With a deadline, a lookup
+    that runs out of time raises LookupTimeout (the caller reports it) instead of answering."""
     try:
         parsed = httpx.URL(url)
         if parsed.scheme != "https" or not parsed.host or parsed.userinfo:
             return False
-        resolve_public(parsed.host, parsed.port or 443)
+        resolve_public(parsed.host, parsed.port or 443, deadline)
         return True
     except (ValueError, httpx.InvalidURL, DestinationDenied):
         return False
@@ -121,7 +155,7 @@ class PublicBackend(httpcore.NetworkBackend):
         self.deadline = deadline
 
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-        addresses = resolve_public(host, port)
+        addresses = resolve_public(host, port, self.deadline)
         backend = httpcore.SyncBackend()
         for index, address in enumerate(addresses):
             try:

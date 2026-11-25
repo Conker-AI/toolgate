@@ -149,12 +149,6 @@ def test_partial_says_whether_something_could_not_be_read():
     assert calendar_parse.expand(calendar(EVERY_SECOND, PLAIN), 1, BERLIN, TODAY, 0.2)[1] is True
 
 
-def test_a_calendar_full_of_hostile_series_still_reads_inside_the_parents_limit():
-    # The reviewer's case: 40 series of 0.5 s each are 20 s, past the parent's 15 s kill.
-    events, partial = calendar_ics.parse(calendar(*nevers(40), PLAIN), 1, "Europe/Berlin", TODAY)
-    assert [inner(item["title"]) for item in events] == ["Dentist"] and partial
-
-
 @pytest.mark.parametrize(
     "body",
     [
