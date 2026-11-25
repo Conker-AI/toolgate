@@ -224,14 +224,13 @@ def test_a_plaintext_server_is_refused(serve):
     assert not any("LOGIN" in command or APP_WORDS in command for command in server.commands)
 
 
-def test_tls_older_than_1_2_is_refused(serve):
+def test_tls_older_than_1_2_is_refused(serve, monkeypatch):
     context = mail_imap.tls_context()
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
-    try:
-        server = serve(maximum_version=ssl.TLSVersion.TLSv1_1)
-    except ssl.SSLError:
-        pytest.skip("this OpenSSL cannot even offer TLS 1.1")
+    # Should a connection come up older anyway, its own version is checked before a word is sent.
+    server = serve()
+    monkeypatch.setattr(ssl.SSLSocket, "version", lambda _self: "TLSv1.1")
     failed("mail_unavailable")
     assert server.commands == []
 

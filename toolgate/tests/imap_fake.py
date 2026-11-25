@@ -217,9 +217,6 @@ class Server:
         if tls:
             self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             self.context.load_cert_chain(cert, key)
-            if "maximum_version" in options:
-                self.context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
-                self.context.maximum_version = options.pop("maximum_version")
             self.context.sni_callback = self._sni
         self.listener = socket.create_server(("127.0.0.1", 0))
         self.port = self.listener.getsockname()[1]
