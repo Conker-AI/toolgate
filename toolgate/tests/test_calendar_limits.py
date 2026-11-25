@@ -83,18 +83,27 @@ def test_the_parent_reads_the_childs_busy_as_too_busy(monkeypatch):
     assert busy.value.code == "calendar_too_busy"
 
 
+def old_events(count: int) -> list[str]:
+    return [event(f"o{index}", "DTSTART:20200101T150000Z", "SUMMARY:Old") for index in range(count)]
+
+
 @pytest.mark.parametrize(
-    "body",
-    [calendar(*short_events(27000)), calendar(PLAIN, *never_events(20000))],
-    ids=["27000-events", "20000-series-that-never-match"],
+    ("body", "cut"),
+    [
+        (calendar(*short_events(27000)), True),
+        (calendar(*never_events(20000), PLAIN), True),
+        (calendar(*old_events(27000), PLAIN), False),
+    ],
+    ids=["27000-events-today", "20000-series-that-never-match", "27000-events-in-2020"],
 )
-def test_a_calendar_near_2_mb_reads_inside_the_parents_limit(body):
-    # The reviewer's cases: both ran into the parent's 15 s kill, parsing 24,000 events alone
-    # taking 8.6 s. Only the first MAX_READ events are read, and the answer says so.
+def test_a_calendar_near_2_mb_reads_inside_the_parents_limit(body, cut):
+    # The reviewer's cases: they ran into the parent's 15 s kill, parsing 24,000 events alone
+    # taking 8.6 s. Only MAX_READ events are read (single events that can touch the window
+    # first), and the answer says when some were not; the plain event comes last in the file.
     assert 1_400_000 < len(body) <= calendar_parse.LIMIT_BYTES
     started = time.monotonic()
     events, partial = calendar_ics.parse(body, 1, "Europe/Berlin", TODAY)
-    assert partial and inner(events[0]["title"]) == "Dentist"
+    assert partial is cut and inner(events[0]["title"]) == "Dentist"
     assert time.monotonic() - started < calendar_ics.PARSE_SECONDS
 
 

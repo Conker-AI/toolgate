@@ -17,8 +17,7 @@ the address.
 
 Parsing runs `calendar_parse.py` in a child process with nothing but the file's bytes, killed
 after `PARSE_SECONDS` (see that module for why; it stops itself sooner, with `BUSY`). One read
-so takes at most `RUNTIME_SECONDS`, the tool's `max_runtime_seconds`. `partial` says some
-events could not be read.
+so takes at most `SECONDS` + `PARSE_SECONDS`. `partial` says some events could not be read.
 Each title and place is outside text, fenced like web and MCP text (`UNTRUSTED_CALENDAR_CONTENT`)
 for a model that reads the result.
 """
@@ -46,7 +45,6 @@ LIMIT_BYTES = 2 * 1024 * 1024
 SECONDS = 5.0
 REDIRECTS = 3
 PARSE_SECONDS = 15.0
-RUNTIME_SECONDS = SECONDS + PARSE_SECONDS  # the fetch, then the parse
 BUSY = 3  # calendar_parse.BUSY: the child ran out of its own time
 MAX_EVENTS = 200
 TEXT_CHARS = 200

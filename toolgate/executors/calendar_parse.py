@@ -10,20 +10,27 @@ least 3 s inside the parent's limit (a test holds this), and running out of time
 series are built is its own exit, `BUSY`, not the parent's kill.
 
 What is read, so that the time holds whatever the file holds:
-- At most `MAX_READ` events (VEVENT components) and `MAX_LINES` lines in all, the first ones in
-  the file, with the calendar's own properties and up to `MAX_ZONES` time zones (VTIMEZONE).
-  Tasks, journal entries and other components are not read.
+- Single events that cannot touch the window (read cheaply from their DTSTART, DTEND or
+  DURATION lines, with `MARGIN` for any zone; any doubt keeps the event) are not read at all,
+  unless another version of them (the same UID, a moved occurrence among them) is read.
+  Of the rest, at most `MAX_READ` events (VEVENT components) and `MAX_LINES` lines in all,
+  single events before repeating ones and each kind in file order, with the calendar's own
+  properties and up to `MAX_ZONES` time zones (VTIMEZONE). Tasks, journal entries and other
+  components are not read.
 - Each series gets `SERIES_SECONDS` and `MAX_PER_SERIES` occurrences and is left out past them;
-  single events are expanded before repeating ones (the only kind that can spin), so they are
-  never the ones the time runs out on.
+  single events are expanded before repeating ones (the only kind that can spin; by kind, as a
+  single event can share its UID with a series), so they are never the ones the time runs
+  out on.
 - A zone name the zone database cannot load (folders such as `America` included) is an unknown
   zone, whose times float; an X-WR-TIMEZONE it cannot load is ignored.
-- When the file cannot be read as a whole (one event with an UNTIL that is no date, or one zone
-  without its offsets, fails them all), each event is tried on its own and those that read are
-  kept, with the file's zones or else without them.
-Whatever is left out, cut or skipped as broken (an event the engine did not return in any series)
-makes the answer `partial`. The child imports nothing from ToolGate, reads no environment and never sees
-the calendar's address.
+- When the file cannot be read as a whole (one event with an UNTIL that is no date fails them
+  all), its halves are read, and the halves of each half that fails, down to the events that
+  fail, which are left out: each half that reads builds its series once. An event and its
+  moved occurrences (the same UID) stay together. When the file's zones are what fails, the
+  events are read without them.
+Whatever is cut or skipped as broken (an event the engine did not return in any series) makes
+the answer `partial`; an event outside the window does not. The child imports nothing from
+ToolGate, reads no environment and never sees the calendar's address.
 
 Times: a timed event is given in ZONE with its offset; a floating time (no zone of its own) is
 read in ZONE; an all-day event is a date, its end the day after it ends (as iCalendar writes it).
@@ -69,6 +76,13 @@ SPACE = b"\xef\xbb\xbf \t\r\n"
 UNFOLD = re.compile(rb"(?:(?<!\n)\r\n|(?<![\r\n])\n)(?:\r?\n)*[ \t]")
 NEWLINE = re.compile(rb"\r?\n")
 OPEN, CLOSE = b"BEGIN:VCALENDAR", b"END:VCALENDAR"
+KEPT = (b"VEVENT", b"VTIMEZONE")
+# A line that makes an event repeat, or move one occurrence of a series: never left out unread.
+REPEATS = (b"RRULE", b"RDATE", b"EXRULE")
+DAY = re.compile(rb"(\d{8})(T\d{6}Z?)?")
+# Days by which an event's written day can differ from the window's: any zone's offset, and
+# an end or a duration read as whole days.
+MARGIN = timedelta(days=2)
 
 
 class Unreadable(Exception):
@@ -164,15 +178,71 @@ def _marker(line: bytes) -> tuple[bytes, bytes]:
     return (word, value.strip().upper()) if word in (b"BEGIN", b"END") else (b"", b"")
 
 
-def _parts(lines: list[bytes]) -> tuple[list[bytes], list[list[bytes]], list[list[bytes]], bool]:
-    """The calendar's own properties, its zones and its events (each a component's lines), within
-    the limits above, and whether any were left out."""
+def _own(block: list[bytes]):
+    """(name, value) of each of a component's own lines, not those of components inside it."""
+    depth = 0
+    for line in block[1:-1]:
+        word, _ = _marker(line)
+        if word:
+            depth += 1 if word == b"BEGIN" else -1
+        elif not depth:
+            name, _, value = line.partition(b":")
+            yield name.split(b";", 1)[0].strip().upper(), value
+
+
+def _day(value: bytes) -> date | None:
+    """The day an iCalendar date or date-time is written on, or None."""
+    match = DAY.fullmatch(value.strip())
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(match.group(1).decode(), "%Y%m%d").date()
+    except ValueError:
+        return None
+
+
+def _span(block: list[bytes]) -> tuple[date, date] | None:
+    """The first and last day a single event is written to touch; None for one that repeats, and
+    whenever anything about it is in doubt. (A moved occurrence is a single event here: the
+    version rule in `_parts` reads it whenever its series is read.)"""
+    found: dict[bytes, bytes] = {}
+    for name, value in _own(block):
+        if name in REPEATS:
+            return None
+        if name in (b"DTSTART", b"DTEND", b"DURATION"):
+            if name in found:
+                return None
+            found[name] = value
+    start = _day(found.get(b"DTSTART", b""))
+    if start is None or (b"DTEND" in found and b"DURATION" in found):
+        return None
+    if b"DURATION" in found:
+        try:
+            length = icalendar.vDuration.from_ical(found[b"DURATION"].strip().decode())
+            # Whole days, and one more: the start's time of day and the duration's hours (each
+            # under a day) can carry the end that far, as a DTEND's own time can past its day.
+            end = start + timedelta(days=length.days + 1)
+        except Exception:
+            return None
+    else:
+        end = _day(found[b"DTEND"]) if b"DTEND" in found else start
+    return None if end is None or end < start else (start, end)
+
+
+def _parts(
+    lines: list[bytes], first: date, last: date
+) -> tuple[list[bytes], list[list[bytes]], list[list[bytes]], bool]:
+    """The calendar's own properties, its zones and the events that can touch the days from
+    `first` to `last` (each a component's lines), within the limits above, and whether any were
+    left out by them."""
     props: list[bytes] = []
-    kept: dict[bytes, list[list[bytes]]] = {b"VTIMEZONE": [], b"VEVENT": []}
-    limits = {b"VTIMEZONE": MAX_ZONES, b"VEVENT": MAX_READ}
+    zones: list[list[bytes]] = []
+    singles: list[list[bytes]] = []
+    repeating: list[list[bytes]] = []
+    outside: list[list[bytes]] = []
     stack: list[bytes] = []
     current: list[bytes] = []
-    room, cut, opened = MAX_LINES, False, False
+    cut, opened = False, False
     for line in lines:
         word, name = _marker(line)
         if not stack:
@@ -184,24 +254,73 @@ def _parts(lines: list[bytes]) -> tuple[list[bytes], list[list[bytes]], list[lis
             opened = True
         if word == b"BEGIN":
             stack.append(name)
-        if len(stack) >= 2 and stack[1] in kept:
+        if len(stack) >= 2 and stack[1] in KEPT:
             current.append(line)
         elif len(stack) == 1 and not word:
-            if room > 0:
-                props.append(line)
-                room -= 1
-            else:
-                cut = True
+            props.append(line)
         if word == b"END" and stack:
             closed = stack.pop()
             if len(stack) == 1 and current:
-                if closed in kept and len(kept[closed]) < limits[closed] and len(current) <= room:
-                    kept[closed].append(current)
-                    room -= len(current)
+                span = _span(current) if closed == b"VEVENT" else None
+                if closed == b"VTIMEZONE":
+                    zones.append(current)
+                elif span is None:
+                    repeating.append(current)
+                elif span[1] >= first and span[0] <= last:
+                    singles.append(current)
                 else:
-                    cut = True
+                    outside.append(current)
                 current = []
-    return props, kept[b"VTIMEZONE"], kept[b"VEVENT"], cut or bool(current) or bool(stack)
+    # An event outside the window is not read, unless another version of it (the same UID: a
+    # higher SEQUENCE perhaps, or an occurrence of its series moved away) is: the engine needs both.
+    uids = {_block_uid(block) for block in singles + repeating} - {None}
+    singles += [block for block in outside if _block_uid(block) in uids]
+    cut = cut or bool(current) or bool(stack) or len(props) > MAX_LINES
+    room = MAX_LINES - len(props[:MAX_LINES])
+    kept: list[list[list[bytes]]] = [[], []]
+    for taken, blocks, limit in (
+        (kept[0], zones, MAX_ZONES),
+        (kept[1], singles + repeating, MAX_READ),
+    ):
+        for block in blocks:
+            if len(taken) < limit and len(block) <= room:
+                taken.append(block)
+                room -= len(block)
+            else:
+                cut = True
+    return props[:MAX_LINES], kept[0], kept[1], cut
+
+
+def _calendar(props: list[bytes], zones: list[list[bytes]], events: list[list[bytes]]):
+    """One calendar parsed from these parts."""
+    calendar = icalendar.Calendar.from_ical(
+        LF.join([OPEN, *props, *chain(*zones), *chain(*events), CLOSE])
+    )
+    if getattr(calendar, "name", None) != "VCALENDAR":
+        raise Unreadable("not a calendar")
+    return calendar
+
+
+def _part_of(whole, zones: list, events: list):
+    """A calendar with `whole`'s own properties and only these zones and events (parsed)."""
+    part = icalendar.Calendar()
+    part.update(whole)
+    part.subcomponents = [*zones, *events]
+    return part
+
+
+def _series(calendar) -> tuple[list, bool]:
+    """The calendar's series, single events first, and whether some were not read (an unusable
+    X-WR-TIMEZONE, an event the engine skipped as broken)."""
+    partial = False
+    named = calendar.get("X-WR-TIMEZONE")
+    if named is not None and _zone(str(named)) is None:
+        del calendar["X-WR-TIMEZONE"]  # floating times are then read in ZONE
+        partial = True
+    query = recurring_ical_events.of(calendar, skip_bad_series=True)
+    # By kind and not file order alone: a single event can share its UID with a series.
+    every = sorted(query.series, key=_repeats)
+    return every, partial or _missing(calendar, every)
 
 
 def _repeats(series) -> bool:
@@ -212,64 +331,95 @@ def _repeats(series) -> bool:
         return True
 
 
-def _series(props: list[bytes], zones: list[list[bytes]], events: list[list[bytes]]):
-    """The series of one calendar made of these parts, single events first, and whether some
-    were not read (an unusable X-WR-TIMEZONE, an event the engine skipped as broken)."""
-    calendar = icalendar.Calendar.from_ical(
-        LF.join([OPEN, *props, *chain(*zones), *chain(*events), CLOSE])
-    )
-    if getattr(calendar, "name", None) != "VCALENDAR":
-        raise Unreadable("not a calendar")
-    partial = False
-    named = calendar.get("X-WR-TIMEZONE")
-    if named is not None and _zone(str(named)) is None:
-        del calendar["X-WR-TIMEZONE"]  # floating times are then read in ZONE
-        partial = True
-    query = recurring_ical_events.of(calendar, skip_bad_series=True)
-    every = sorted(query.series, key=_repeats)
-    # Every event of the file (with a UID or without) comes back in some series, or was skipped.
-    return every, partial or _returned(every) < len(calendar.walk("VEVENT"))
-
-
-def _returned(every) -> int:
-    """How many of the file's events the series hold; -1 when one cannot say."""
+def _missing(calendar, every) -> bool:
+    """Whether an event of the file came back in no series (the engine skips a broken one and
+    says nothing): a UID no series has, or fewer other series than events without a UID. An
+    older version of an event (the same UID, a lower SEQUENCE) is the engine's to drop."""
+    uids = [component.get("UID") for component in calendar.walk("VEVENT")]
+    named = {str(uid) for uid in uids if uid}
     try:
-        return sum(len(series.components) for series in every)
+        returned = {str(series.uid) for series in every}
     except Exception:
-        return -1
+        return True
+    return not named <= returned or len(returned - named) < sum(1 for uid in uids if not uid)
+
+
+def _groups(items: list, uid) -> list[list]:
+    """The events, those with the same UID together (a series and its moved occurrences)."""
+    groups: dict[object, list] = {}
+    for index, item in enumerate(items):
+        groups.setdefault(uid(item) or index, []).append(item)
+    return list(groups.values())
+
+
+def _block_uid(block: list[bytes]) -> bytes | None:
+    return next((value.strip() for name, value in _own(block) if name == b"UID"), None)
+
+
+def _readable(groups: list[list], read, failed: bool = False) -> list:
+    """The series of these groups of events read together (`read`); when they fail together
+    (`failed`: known to), those of each half, and so on down to the single groups that fail."""
+    if not failed:
+        try:
+            return read(groups)
+        except Busy:
+            raise
+        except Exception:
+            pass
+    if len(groups) <= 1:
+        return []
+    middle = len(groups) // 2
+    return _readable(groups[:middle], read) + _readable(groups[middle:], read)
 
 
 def _all_series(props, zones, events, deadline: float) -> tuple[list, bool]:
     """Every series of the file and whether some were not read. When the file cannot be read as
-    a whole, each event is tried on its own (with the calendar's properties) and the ones that
-    read are kept: one the engine cannot take costs only itself. Busy when the time runs out."""
+    a whole, its halves are (`_readable`), so one event the engine cannot take costs only
+    itself: from the parsed file when only building its series fails, from its text when parsing
+    does. Without the file's zones when they are what fails. Busy when the time runs out."""
 
     def within(work):
         return _within(deadline - clock.monotonic(), work)
 
     try:
-        return within(lambda: _series(props, zones, events))
+        whole = within(lambda: _calendar(props, zones, events))
     except (Busy, Unreadable):
         raise
-    except Exception:
-        pass  # one event or zone the engine cannot take: try the events one by one
-    kept = []
-    for event in events:
+    except Exception:  # the text itself fails: read its parts as text
+
+        def build(frame, items):
+            return _calendar(props, frame, items)
+
+        frames, groups = (zones, []), _groups(events, _block_uid)
+    else:
         try:
-            within(lambda event=event: _series(props, [], [event]))
+            return within(lambda: _series(whole))
+        except (Busy, Unreadable):
+            raise
+        except Exception:
+            pass  # one event or zone the engine cannot take: find what reads
+
+        def build(frame, items):
+            return _part_of(whole, frame, items)
+
+        own = whole.subcomponents
+        frames = ([item for item in own if item.name == "VTIMEZONE"], [])
+        groups = _groups(
+            [item for item in own if item.name == "VEVENT"], lambda item: item.get("UID")
+        )
+    for frame in frames:  # the file's zones, else none: what reads without the events
+        try:
+            within(lambda frame=frame: _series(build(frame, [])))
         except Busy:
             raise
         except Exception:
             continue
-        kept.append(event)
-    for frame in (zones, []):  # a zone the engine cannot take: then without the file's zones
-        try:
-            return within(lambda frame=frame: _series(props, frame, kept))[0], True
-        except Busy:
-            raise
-        except Exception:
-            continue
-    raise Unreadable("unparsable")
+
+        def read(part, frame=frame):
+            return within(lambda: _series(build(frame, list(chain(*part)))))[0]
+
+        return sorted(_readable(groups, read, frame is frames[0]), key=_repeats), True
+    raise Unreadable("unparsable")  # the calendar's own lines fail
 
 
 def _expand(series, start: datetime, end: datetime, seconds: float) -> list | None:
@@ -350,7 +500,10 @@ def expand(
     if len(body) > LIMIT_BYTES or body.lstrip(SPACE)[:15].upper() != OPEN:
         raise Unreadable("not an iCalendar file")
     tzp.use(_Zones())
-    props, zones, events, cut = _within(deadline - clock.monotonic(), lambda: _parts(_lines(body)))
+    first, last = today - MARGIN, today + timedelta(days=days) + MARGIN
+    props, zones, events, cut = _within(
+        deadline - clock.monotonic(), lambda: _parts(_lines(body), first, last)
+    )
     every, partial = _all_series(props, zones, events, deadline)
     partial = partial or cut
     start = datetime.combine(today, time(), zone)

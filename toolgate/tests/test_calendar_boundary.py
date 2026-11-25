@@ -5,7 +5,6 @@ no other tool able to name the address and send it somewhere else."""
 from __future__ import annotations
 
 import logging
-import math
 import socket
 import sqlite3
 from datetime import UTC, datetime
@@ -17,6 +16,7 @@ from fastapi.testclient import TestClient
 from toolgate.api import builtin_capabilities, definitions, dispatch, server
 from toolgate.core import control_plane as cp
 from toolgate.core import vault
+from toolgate.core.control_plane_rules import DEFAULT_USAGE_LIMITS
 from toolgate.executors import calendar_ics
 from toolgate.tests.calendar_fixtures import ADDRESS, PRIVATE_PART, TODAY, WEEK, inner
 
@@ -254,8 +254,9 @@ def test_registration_is_once_and_keeps_the_owners_changes(gate):
     assert saved["status"] == "disabled" and saved["authorization"] == "owner_confirmation"
 
 
-def test_the_tools_runtime_limit_is_what_one_read_can_take(gate):
-    # The fetch's deadline, then the parser's kill: no read runs longer than the limit says.
+def test_the_tool_sets_no_runtime_limit_of_its_own(gate):
+    # No dispatch reads a tool's max_runtime_seconds; the read bounds itself (the fetch's
+    # deadline, then the parser's kill). The shared default every tool gets is not below that.
     limits = cp.get("tool", "calendar.events")["policy"]["usage_limits"]
-    bound = math.ceil(calendar_ics.SECONDS + calendar_ics.PARSE_SECONDS)
-    assert limits["max_runtime_seconds"] == bound == 20
+    assert limits["max_runtime_seconds"] == DEFAULT_USAGE_LIMITS["max_runtime_seconds"]
+    assert limits["max_runtime_seconds"] >= calendar_ics.SECONDS + calendar_ics.PARSE_SECONDS

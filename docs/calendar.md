@@ -72,8 +72,7 @@ A fence token inside the text is defused (`[/UNTRUSTED_` becomes `(/UNTRUSTED_`)
 cannot close its fence. A caller must treat what is inside as outside content.
 
 Replaying an `action_id` returns its receipt; a fresh read needs a new one. At most 6 reads a
-minute and 60 an hour. One read takes at most 20 seconds (the fetch's 5, then the parser's 15):
-that is the tool's `max_runtime_seconds`.
+minute and 60 an hour. One read takes at most 20 seconds (the fetch's 5, then the parser's 15).
 
 ## How the address is fetched
 
@@ -92,25 +91,34 @@ The file is then read by `executors/calendar_parse.py` in a child process that g
 file's bytes (no environment, no keys) and is stopped after 15 seconds. The child keeps its own
 clock from the moment it starts: reading the file, building its series and expanding them get
 10 seconds in all, and a child that runs out before its series are built says so itself
-(`calendar_too_busy`), well before the parent's limit. What it reads, so that a large or
-hostile file still answers in time:
+(`calendar_too_busy`), well before the parent's limit. (On Windows, where a virtual environment's
+`python` is a launcher, the parent's kill stops the launcher only; the child still stops itself
+at 10 seconds. ToolGate's server runs on Linux.) What it reads, so that a large or hostile
+file still answers in time:
 
-- The first 2,000 events of the file (and at most 40,000 lines, 20 time zones); the rest are
-  not read and the answer is `partial`. A calendar with years of history can hold more: its
-  newest events may then be among those not read.
+- A single (non-repeating) event that cannot touch the window is not read at all: its DTSTART
+  and DTEND (or DURATION, a day more for its hours) lines are read first, with two days of
+  margin for any time zone, and any doubt keeps the event, as does another version (the same
+  UID, such as an occurrence of its series moved away) of an event that is read. Repeating
+  events are always read. So years of past events cost nothing and do not make the answer
+  `partial`.
+- Of the rest, 2,000 events at most (and 40,000 lines, 20 time zones), single events before
+  repeating ones; those past the limit are not read and the answer is `partial`.
 - A repeating series that would take long to expand (a rule that never matches, one that repeats
   every second) is left out after half a second or 1000 occurrences, so one bad series costs only
   itself. Single events are read before repeating ones, so a calendar full of bad series still
   answers with its single events and the good series it reached.
 - An event or zone the engine cannot take would fail the whole file (an RRULE whose UNTIL is no
-  date, a VTIMEZONE without its offsets): then each event is read on its own and those that read
-  are kept, without the file's zones when a zone was the trouble (their times then float). An
-  event the engine skips as broken (FREQ=BOGUS, a DTSTART that is no time) is left out.
+  date, a VTIMEZONE without its offsets): then its halves are read, and the halves of a half that
+  fails, down to the events that fail, which are left out (an event and its moved occurrences
+  stay together). The file's zones are left out when they are the trouble (their events' times
+  then float). An event the engine skips as broken (FREQ=BOGUS, a DTSTART that is no time) is
+  left out.
 - A zone name the zone database cannot load (`TZID=America`, a folder) is an unknown zone: that
   event's times are read in `time_zone`, as for any zone ToolGate does not know. An
   `X-WR-TIMEZONE` it cannot load is ignored.
 
-Whatever is left out, cut or skipped makes the answer `partial`.
+Whatever is cut or skipped makes the answer `partial`; an event outside the window does not.
 
 ## Failures
 
@@ -127,5 +135,5 @@ Every failure is one fixed sentence that names no address:
 | `TOOL_UNAVAILABLE` | `calendar_too_busy` | The file could not be read in its 10 seconds (or the child was stopped at 15). |
 
 Tests: `toolgate/tests/test_calendar_parse.py`, `test_calendar_limits.py`,
-`test_calendar_fetch.py` and `test_calendar_boundary.py`, all on synthetic files with no
-network.
+`test_calendar_window.py`, `test_calendar_fetch.py` and `test_calendar_boundary.py`, all on
+synthetic files with no network.

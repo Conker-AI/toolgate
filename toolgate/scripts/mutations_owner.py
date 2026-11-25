@@ -264,6 +264,7 @@ CALENDAR_FETCH = "toolgate/tests/test_calendar_fetch.py::"
 CALENDAR = "toolgate/tests/test_calendar_boundary.py::"
 CALENDAR_PARSE = "toolgate/tests/test_calendar_parse.py::"
 LIMITS = "toolgate/tests/test_calendar_limits.py::"
+WINDOW = "toolgate/tests/test_calendar_window.py::"
 MUTANTS.extend(
     [
         (
@@ -314,13 +315,6 @@ MUTANTS.extend(
             "toolgate/executors/calendar_parse.py",
             "found = _expand(series, start, end, min(seconds, left)) if left > 0 else None",
             "found = _expand(series, start, end, seconds)",
-            CALENDAR_PARSE + "test_many_hostile_series_together_cost_only_themselves",
-        ),
-        (
-            "calendar single events not read first",
-            "toolgate/executors/calendar_parse.py",
-            "    every = sorted(query.series, key=_repeats)",
-            "    every = list(query.series)",
             CALENDAR_PARSE + "test_many_hostile_series_together_cost_only_themselves",
         ),
         (
@@ -376,8 +370,8 @@ MUTANTS.extend(
         (
             "calendar events read past the cap",
             "toolgate/executors/calendar_parse.py",
-            "if closed in kept and len(kept[closed]) < limits[closed] and len(current) <= room:",
-            "if closed in kept:",
+            "            if len(taken) < limit and len(block) <= room:",
+            "            if True:",
             LIMITS + "test_only_the_first_events_are_read_and_the_rest_make_the_answer_partial",
         ),
         (
@@ -397,21 +391,21 @@ MUTANTS.extend(
         (
             "calendar one broken event blanks the file",
             "toolgate/executors/calendar_parse.py",
-            "        pass  # one event or zone the engine cannot take: try the events one by one",
-            '        raise Unreadable("unparsable") from None',
+            "            pass  # one event or zone the engine cannot take: find what reads",
+            '            raise Unreadable("unparsable") from None',
             LIMITS + "test_an_event_the_engine_cannot_take_costs_only_itself",
         ),
         (
             "calendar broken zone blanks the file",
             "toolgate/executors/calendar_parse.py",
-            "    for frame in (zones, []):",
-            "    for frame in (zones,):",
+            "        frames, groups = (zones, []), _groups(events, _block_uid)",
+            "        frames, groups = (zones,), _groups(events, _block_uid)",
             LIMITS + "test_a_zone_the_engine_cannot_take_costs_only_its_own_times",
         ),
         (
             "calendar series the engine skips leave no partial",
             "toolgate/executors/calendar_parse.py",
-            '    return every, partial or _returned(every) < len(calendar.walk("VEVENT"))',
+            "    return every, partial or _missing(calendar, every)",
             "    return every, partial",
             LIMITS
             + "test_an_event_the_engine_skips_as_broken_makes_the_answer_partial[bogus-frequency]",
@@ -444,6 +438,92 @@ MUTANTS.extend(
             "    if False:\n        raise LookupTimeout(",
             CALENDAR_FETCH
             + "test_no_lookup_starts_once_the_deadline_has_passed_and_other_callers_are_unchanged",
+        ),
+        (
+            "calendar failing halves never split",
+            "toolgate/executors/calendar_parse.py",
+            "    if len(groups) <= 1:",
+            "    if True:",
+            LIMITS + "test_an_event_the_engine_cannot_take_costs_only_itself",
+        ),
+        (
+            "calendar broken event searched one by one",
+            "toolgate/executors/calendar_parse.py",
+            "    middle = len(groups) // 2",
+            "    middle = 1",
+            WINDOW + "test_a_broken_event_among_2000_is_found_by_halves_not_by_reading_each_event",
+        ),
+        (
+            "calendar series split from its moved occurrence",
+            "toolgate/executors/calendar_parse.py",
+            "        groups.setdefault(uid(item) or index, []).append(item)",
+            "        groups.setdefault(index, []).append(item)",
+            WINDOW
+            + "test_a_series_and_its_moved_occurrence_stay_together_when_a_broken_event_is_left_out",
+        ),
+        (
+            "calendar events outside the window count toward the cap",
+            "toolgate/executors/calendar_parse.py",
+            "                elif span[1] >= first and span[0] <= last:",
+            "                elif True:",
+            WINDOW + "test_events_that_cannot_touch_the_window_are_not_read_and_do_not_count",
+        ),
+        (
+            "calendar repeating events read before single ones",
+            "toolgate/executors/calendar_parse.py",
+            "        (kept[1], singles + repeating, MAX_READ),",
+            "        (kept[1], repeating + singles, MAX_READ),",
+            WINDOW + "test_single_events_are_read_before_repeating_ones",
+        ),
+        (
+            "calendar series expanded in file order",
+            "toolgate/executors/calendar_parse.py",
+            "    every = sorted(query.series, key=_repeats)",
+            "    every = list(query.series)",
+            WINDOW + "test_a_single_event_sharing_a_uid_does_not_move_its_series_ahead[whole]",
+        ),
+        (
+            "calendar halves expanded in file order",
+            "toolgate/executors/calendar_parse.py",
+            "        return sorted(_readable(groups, read, frame is frames[0]), key=_repeats), True",
+            "        return _readable(groups, read, frame is frames[0]), True",
+            WINDOW + "test_a_single_event_sharing_a_uid_does_not_move_its_series_ahead[halves]",
+        ),
+        (
+            "calendar window without its margin",
+            "toolgate/executors/calendar_parse.py",
+            "MARGIN = timedelta(days=2)",
+            "MARGIN = timedelta(0)",
+            WINDOW + "test_an_event_that_might_touch_the_window_is_always_read",
+        ),
+        (
+            "calendar event end ignored",
+            "toolgate/executors/calendar_parse.py",
+            '    end = _day(found[b"DTEND"]) if b"DTEND" in found else start',
+            "    end = start",
+            WINDOW + "test_an_event_that_might_touch_the_window_is_always_read",
+        ),
+        (
+            "calendar duration hours dropped",
+            "toolgate/executors/calendar_parse.py",
+            "            end = start + timedelta(days=length.days + 1)",
+            "            end = start + timedelta(days=length.days)",
+            WINDOW
+            + "test_an_event_given_as_a_duration_is_read_while_its_hours_may_reach_the_window",
+        ),
+        (
+            "calendar event duration ignored",
+            "toolgate/executors/calendar_parse.py",
+            "            end = start + timedelta(days=length.days + 1)",
+            "            end = start",
+            WINDOW + "test_an_event_that_might_touch_the_window_is_always_read",
+        ),
+        (
+            "calendar other versions outside the window not read",
+            "toolgate/executors/calendar_parse.py",
+            "    singles += [block for block in outside if _block_uid(block) in uids]",
+            "    singles += []",
+            WINDOW + "test_a_newer_version_of_an_event_outside_the_window_still_counts",
         ),
     ]
 )
