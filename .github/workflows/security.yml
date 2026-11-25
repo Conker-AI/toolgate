@@ -70,9 +70,9 @@ jobs:
           fetch-depth: 0
 
       - name: Scan
-        # gitleaks, pinned by tag; the default rules, no custom allowlist.
+        # gitleaks 8.28.0, pinned by digest; the default rules, no custom allowlist.
         env:
-          GITLEAKS: ghcr.io/gitleaks/gitleaks:v8.28.0
+          GITLEAKS: ghcr.io/gitleaks/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             range="--log-opts=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
