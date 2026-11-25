@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 from mutations_core import MUTANTS as CORE_MUTANTS
+from mutations_mail import MUTANTS as MAIL_MUTANTS
 from mutations_observe import MUTANTS as OBSERVE_MUTANTS
 from mutations_owner import MUTANTS as OWNER_MUTANTS
 
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Failures from a mutant that cannot run, not from the behaviour it changes.
 BROKEN_MUTANT = ("NameError", "ImportError", "SyntaxError", "IndentationError")
 
-MUTANTS = [*CORE_MUTANTS, *OWNER_MUTANTS, *OBSERVE_MUTANTS]
+MUTANTS = [*CORE_MUTANTS, *OWNER_MUTANTS, *OBSERVE_MUTANTS, *MAIL_MUTANTS]
 
 
 def run_tests(root: Path, tests: list[str], name: str) -> subprocess.CompletedProcess:

@@ -197,6 +197,38 @@ def ensure_builtin_system_capabilities() -> None:
                 },
             }
         )
+    if not control_plane.get("tool", "mail.recent"):
+        # The same: made once, then the owner's.
+        control_plane.create_tool(
+            {
+                "id": "mail.recent",
+                "name": "Recent mail",
+                "description": "Read the owner's newest INBOX messages (sender, subject, time, a short snippet) from the IMAP account stored in ToolGate's vault as MAIL_IMAP_HOST, MAIL_IMAP_USER and MAIL_IMAP_PASSWORD. Read only: nothing is marked read, moved or deleted; the account is never shown.",
+                "category": "safe",
+                "authorization": "auto",
+                "status": "active",
+                "inputs": [
+                    {
+                        "name": "hours",
+                        "type": "integer",
+                        "required": False,
+                        "default": 24,
+                        "minimum": 1,
+                        "maximum": 72,
+                    }
+                ],
+                "outputs": [
+                    {"name": "messages", "type": "array"},
+                    {"name": "connected", "type": "boolean"},
+                    {"name": "source", "type": "string"},
+                    {"name": "partial", "type": "boolean"},
+                ],
+                "execution": {"type": "mail_imap"},
+                "policy": {
+                    "usage_limits": {"max_per_minute": 6, "cooldown_seconds": 0, "max_per_hour": 60}
+                },
+            }
+        )
 
 
 def ensure_builtin_research_capabilities() -> None:

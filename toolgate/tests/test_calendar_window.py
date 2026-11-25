@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from toolgate.executors import calendar_ics, calendar_parse
+from toolgate.executors import calendar_ics, calendar_parse, child_guard
 from toolgate.tests.calendar_fixtures import NEVER, PLAIN, TODAY, WEEK, calendar, event, inner
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -173,7 +173,7 @@ def test_a_watchdog_that_ended_is_started_again():
     ended = threading.Thread(target=lambda: None)
     ended.start()
     ended.join()
-    calendar_parse.WATCH.thread = ended  # not restored: the new watchdog takes its place
+    child_guard.WATCH.thread = ended  # not restored: the new watchdog takes its place
 
     def spin() -> None:
         until = time.monotonic() + 2

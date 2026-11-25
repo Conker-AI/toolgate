@@ -448,14 +448,14 @@ MUTANTS.extend(
         ),
         (
             "calendar budget thread started for each budget",
-            "toolgate/executors/calendar_parse.py",
+            "toolgate/executors/child_guard.py",
             "            if self.thread is None or not self.thread.is_alive():",
             "            if True:",
             WINDOW + "test_a_thread_that_cannot_start_costs_no_events",
         ),
         (
             "calendar watchdog that ended left dead",
-            "toolgate/executors/calendar_parse.py",
+            "toolgate/executors/child_guard.py",
             "            if self.thread is None or not self.thread.is_alive():",
             "            if self.thread is None:",
             WINDOW + "test_a_watchdog_that_ended_is_started_again",

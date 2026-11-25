@@ -17,6 +17,7 @@ from toolgate.executors import (
     calendar_ics,
     container_control,
     filesystem_inventory,
+    mail_imap,
     mcp_http,
     pi_inference,
     process_control,
@@ -352,6 +353,24 @@ def _execute_calendar(tool: dict, args: dict) -> dict:
         return {"ok": False, "error": exc.message, "error_code": exc.code}
 
 
+def _execute_mail(tool: dict, args: dict) -> dict:
+    """mail.recent: the owner's newest INBOX messages from the account in the vault (read only;
+    "not connected" without one)."""
+    if tool.get("id") != "mail.recent" or tool.get("execution") != {"type": "mail_imap"}:
+        return {
+            "ok": False,
+            "error": "Mail is read only through its reserved definition.",
+            "error_code": "invalid_mail_definition",
+        }
+    hours = args.get("hours", 24)
+    if type(hours) is not int or not 1 <= hours <= mail_imap.MAX_HOURS:
+        _refuse("VALIDATION_ERROR", f"'hours' must be 1 to {mail_imap.MAX_HOURS}", 422)
+    try:
+        return {"ok": True, "result": mail_imap.read(hours)}
+    except mail_imap.MailError as exc:
+        return {"ok": False, "error": exc.message, "error_code": exc.code}
+
+
 def _execute_local_echo(args: dict) -> dict:
     value = str(args.get("value", ""))
     return {
@@ -432,6 +451,8 @@ def _dispatch_tool(tool: dict, args: dict, advert: str | None = None) -> dict:
         }
     if executor_type == "calendar_ics" or tool.get("id") == "calendar.events":
         result = _execute_calendar(tool, args)
+    elif executor_type == "mail_imap" or tool.get("id") == "mail.recent":
+        result = _execute_mail(tool, args)
     elif executor_type == "echo":
         result = {"ok": True, "result": args}
     elif executor_type == "local_echo":

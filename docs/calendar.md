@@ -88,7 +88,8 @@ minute and 60 an hour. One read takes at most 20 seconds (the fetch's 5, then th
 - Requests go straight to the transport, so no HTTP client logs the address.
 
 The file is then read by `executors/calendar_parse.py` in a child process that gets only the
-file's bytes (no environment, no keys) and is stopped after 15 seconds. The child keeps its own
+file's bytes (no environment, no keys) and is stopped after 15 seconds (`executors/child_guard.py`,
+shared with the mail parser). The child keeps its own
 clock from the moment it starts: reading the file, building its series and expanding them get
 10 seconds in all, and a child that runs out before its series are built says so itself
 (`calendar_too_busy`), well before the parent's limit. (On Windows, where a virtual environment's

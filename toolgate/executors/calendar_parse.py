@@ -40,15 +40,22 @@ Cancelled occurrences are left out. Titles and places come back as the file wrot
 
 from __future__ import annotations
 
-import _thread
 import json
+import os
 import re
 import sys
-import threading
 import time as clock
 from datetime import date, datetime, time, timedelta
 from itertools import chain
 from zoneinfo import ZoneInfo
+
+if __package__:  # imported by ToolGate and its tests
+    from toolgate.executors.child_guard import Busy, limit_memory
+    from toolgate.executors.child_guard import within as _within
+else:  # its own process (python -I): its folder, after the standard library
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from child_guard import Busy, limit_memory  # type: ignore[import-not-found]
+    from child_guard import within as _within  # type: ignore[import-not-found]
 
 # The child's own clock starts before the libraries below load: their import is part of the time.
 STARTED = clock.monotonic()
@@ -87,96 +94,6 @@ MARGIN = timedelta(days=2)
 
 class Unreadable(Exception):
     """Not an iCalendar file this parser can read."""
-
-
-class Busy(Exception):
-    """The time ran out."""
-
-
-class _Watch:
-    """The child's one watchdog thread, for every budget (one is in force at a time). A thread
-    for each budget stopped starting after a few dozen on Linux, under the address-space limit
-    (an 8 MB stack each, kept a while after the thread ends), and the work it guarded then
-    looked broken. When this one cannot start, nothing is read (fail closed)."""
-
-    def __init__(self) -> None:
-        self.ready = threading.Condition()
-        self.budget: _Budget | None = None
-        self.thread: threading.Thread | None = None
-
-    def watch(self, budget: _Budget) -> None:
-        with self.ready:
-            if self.thread is None or not self.thread.is_alive():
-                thread = threading.Thread(target=self._run, daemon=True)
-                thread.start()
-                self.thread = thread
-            self.budget = budget
-            self.ready.notify()
-
-    def _run(self) -> None:
-        with self.ready:
-            while True:
-                budget = self.budget
-                if budget is None:
-                    self.ready.wait()
-                elif clock.monotonic() < budget.ends:
-                    self.ready.wait(budget.ends - clock.monotonic())
-                else:
-                    self.budget = None
-                    if budget.armed:
-                        budget.armed, budget.fired = False, True
-                        _thread.interrupt_main()
-
-
-WATCH = _Watch()
-
-
-class _Budget:
-    """Interrupts the main thread (KeyboardInterrupt) when the work runs past its seconds."""
-
-    def __init__(self, seconds: float) -> None:
-        self.ends = clock.monotonic() + seconds
-        self.armed = True
-        self.fired = False
-
-    def __enter__(self) -> _Budget:
-        WATCH.watch(self)
-        return self
-
-    def __exit__(self, *_exc) -> None:
-        with WATCH.ready:
-            self.armed = False
-            if WATCH.budget is self:
-                WATCH.budget = None
-            WATCH.ready.notify()
-
-
-def _within(seconds: float, work):
-    """`work()`, or Busy when it runs past `seconds` (or none are left)."""
-    if seconds <= 0:
-        raise Busy
-    budget, taken = _Budget(seconds), False
-    try:
-        with budget:
-            result = work()
-    except KeyboardInterrupt:
-        taken = True
-        raise Busy from None
-    finally:
-        if budget.fired and not taken:
-            _settle()
-    return result
-
-
-def _settle() -> None:
-    """A fired interrupt is on the way: take it here, not later. Busy either way (a library that
-    swallowed it still ran out of time)."""
-    try:
-        for _ in range(200):
-            clock.sleep(0.005)
-    except KeyboardInterrupt:
-        pass
-    raise Busy
 
 
 def _zone(name: str) -> ZoneInfo | None:
@@ -560,14 +477,7 @@ def expand(
 
 
 def _limit_memory() -> None:
-    try:
-        import resource
-    except ImportError:  # not on Windows; the parent's timeout still applies
-        return
-    try:
-        resource.setrlimit(resource.RLIMIT_AS, (MEMORY_BYTES, MEMORY_BYTES))
-    except (ValueError, OSError):
-        return
+    limit_memory(MEMORY_BYTES)
 
 
 def main(argv: list[str]) -> int:
