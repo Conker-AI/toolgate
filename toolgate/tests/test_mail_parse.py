@@ -186,6 +186,51 @@ def test_html_is_read_as_its_visible_text():
     assert message["snippet"] == "Hello there, see you & bye"
 
 
+@pytest.mark.parametrize(
+    "markup",
+    [
+        pytest.param((b"<p>" + b"<a " * 2700)[:8192], id="unclosed-tags"),
+        pytest.param(b"<a" * 4096, id="unclosed-names"),
+        pytest.param(b"<!--" * 2048, id="unclosed-comments"),
+        pytest.param(b"<!" * 4096, id="unclosed-declarations"),
+        pytest.param(b"</" * 4096, id="unclosed-end-tags"),
+        pytest.param(b"<?" * 4096, id="unclosed-instructions"),
+        pytest.param(b"<a b='" * 1365, id="unclosed-quotes"),
+        pytest.param(b"&#" * 4096, id="unclosed-references"),
+        pytest.param(b"<script>" * 1024, id="unclosed-scripts"),
+        pytest.param(b"<p " + b"x=1 " * 2000, id="long-tag"),
+    ],
+)
+def test_broken_html_is_read_in_time_and_leaves_no_markup(markup):
+    started = time.perf_counter()
+    mail_parse._visible(markup.decode())
+    # A few milliseconds even on a busy machine; html.parser took 4 to 7 s on the first.
+    assert time.perf_counter() - started < 0.25
+    assert "<" not in one(b"Content-Type: text/html", markup + b"<p>After.")["snippet"]
+
+
+def test_html_markup_left_open_is_dropped_and_the_text_around_it_kept():
+    html = b"<p>One<b class='x' two</b> three <!-- <p>four --><script>x<p>y</script >five <i"
+    assert one(b"Content-Type: text/html", html)["snippet"] == "One three five"
+    assert one(b"Content-Type: text/html", b"a < b &amp;&amp c")["snippet"] == "a < b && c"
+    assert one(b"Content-Type: text/html", b"<p>kept<!-- open <p>gone")["snippet"] == "kept"
+
+
+def test_answers_join_by_uid_when_an_expunge_shifts_the_numbers():
+    plain, bill = (
+        mail(11, WHEN, subject="Plain"),
+        mail(12, WHEN, subject="Bill", attachment=b"%PDF"),
+    )
+    contents = fetch_answer([plain, bill], {11, 12}, mail_imap.CONTENT_ITEMS)
+    # UID 11 (message 1) expunged between the two commands: UID 12 is now message 1.
+    structures = fetch_answer([bill], {12}, mail_imap.STRUCTURE_ITEMS)
+    assert contents.startswith(b"* 1 FETCH (UID 11 ") and structures.startswith(
+        b"* 1 FETCH (UID 12 "
+    )
+    messages, _ = mail_parse.read(contents + structures, {11, 12})
+    assert {m["uid"]: m["has_attachments"] for m in messages} == {11: False, 12: True}
+
+
 def test_plain_text_is_preferred_and_an_attached_text_is_not_a_snippet():
     alternative = mail(1, WHEN, text="Plain words.", html="<p>Rich words.</p>")
     attached = item(

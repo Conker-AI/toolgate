@@ -95,6 +95,7 @@ class Message:
     raw: bytes
     structure: str | None = None  # BODYSTRUCTURE as sent; made from `raw` when None
     flags: set[str] = field(default_factory=set)
+    size: int | None = None  # RFC822.SIZE as sent; len(raw) when None
 
 
 def mail(
@@ -211,6 +212,7 @@ class Server:
         self.pace: float = options.pop("pace", 0.0)
         self.stall: dict[str, float] = options.pop("stall", {})
         self.examine_code: str = options.pop("examine_code", "[READ-ONLY]")
+        self.ranges: bool = options.pop("ranges", True)  # False: partial ranges ignored
         self.greeting: bytes = options.pop("greeting", b"* OK [CAPABILITY IMAP4rev1] ready\r\n")
         self.ca, cert, key = authority(folder, options.pop("names", (HOST,)))
         self.context = None
@@ -304,17 +306,20 @@ class Server:
 
     def _fetch(self, tag: str, rest: str) -> bytes:
         _, _, uid_set, items = rest.split(" ", 3)
-        return fetch_answer(self.messages, {int(uid) for uid in uid_set.split(",")}, items)
+        wanted = {int(uid) for uid in uid_set.split(",")}
+        return fetch_answer(self.messages, wanted, items, ranges=self.ranges)
 
 
-def fetch_answer(messages: list[Message], wanted: set[int], items: str = "") -> bytes:
+def fetch_answer(
+    messages: list[Message], wanted: set[int], items: str = "", ranges: bool = True
+) -> bytes:
     """The FETCH responses a server sends for `wanted` (UIDs) and `items` (the client's list;
     the reader's own by default), each body section a literal. A section fetched without PEEK
     marks its message \\Seen."""
     if not items:
         from toolgate.executors import mail_imap
 
-        items = mail_imap.FETCH_ITEMS
+        items = f"{mail_imap.CONTENT_ITEMS} {mail_imap.STRUCTURE_ITEMS}"
     sections = re.findall(r"BODY(\.PEEK)?\[([^\]]*)\](?:<0\.(\d+)>)?", items)
     out = bytearray()
     for number, message in enumerate(messages, 1):
@@ -325,13 +330,15 @@ def fetch_answer(messages: list[Message], wanted: set[int], items: str = "") -> 
             when = message.received
             stamp = f"{when.day:02d}-{MONTHS[when.month - 1]}-{when:%Y %H:%M:%S %z}"
             parts.append(f'INTERNALDATE "{stamp}"')
+        if "RFC822.SIZE" in items:
+            parts.append(f"RFC822.SIZE {message.size or len(message.raw)}")
         if "BODYSTRUCTURE" in items:
             made = message.structure or structure(message_from_bytes(message.raw))
             parts.append(f"BODYSTRUCTURE {made}")
         chunks = [" ".join(parts).encode()]
         for peek, spec, size in sections:
             data = _section(message.raw, spec)
-            if size:
+            if size and ranges:
                 data = data[: int(size)]
             if not peek:
                 message.flags.add("\\Seen")

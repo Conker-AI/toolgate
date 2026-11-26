@@ -7,6 +7,7 @@ import json
 import re
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 from toolgate.core import (
     container_admission,
@@ -108,6 +109,128 @@ def forgotten(conn, action_id: str) -> bool:
 
 class ExecutionConflict(ValueError):
     pass
+
+
+# A mail.recent answer (executors/mail_imap.py) is kept without its messages: they are outside
+# content, shown once on the live reply. Known by its shape wherever a receipt holds it (a tool's
+# own, an automation's steps, variables or result), so no copy of one is kept whole either.
+REDACTED_MAIL_NOTE = "The messages were shown once and are not kept. Read mail again to see them."
+
+
+def _mail(value) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("source") == "imap"
+        and isinstance(value.get("messages"), list)
+        and type(value.get("connected")) is bool
+    )
+
+
+# The fields of a mail answer; a dict that has its shape keeps its other keys (the tool's
+# envelope copies the answer's outputs next to "ok" and "result").
+MAIL_FIELDS = ("connected", "messages", "source", "partial", "uid_validity", "note")
+
+
+def _redacted(answer: dict) -> dict:
+    messages, note, validity = answer["messages"], answer.get("note"), answer.get("uid_validity")
+    return {
+        "connected": answer["connected"],
+        "count": len(messages),
+        "uids": [m["uid"] for m in messages if isinstance(m, dict) and type(m.get("uid")) is int],
+        "uid_validity": validity if type(validity) is int else None,
+        "partial": answer.get("partial") is True,
+        "note": note if isinstance(note, str) else REDACTED_MAIL_NOTE,
+        "redacted": True,
+    }
+
+
+def redact_mail(value):
+    """`value` with each mail.recent answer in it, however deep, as the journal keeps it:
+    {connected, count, uids, uid_validity, partial, note, redacted: true} (docs/mail.md). A
+    copy; `value` is left as it is. No recursion, so no depth of a tool's result can stop it."""
+    holder = [value]
+    pending: list[tuple[Any, Any]] = [(holder, 0)]
+    while pending:
+        parent, key = pending.pop()
+        item = parent[key]
+        if _mail(item):
+            rest = {name: value for name, value in item.items() if name not in MAIL_FIELDS}
+            parent[key] = copy = {**rest, **_redacted(item)}
+            pending.extend((copy, name) for name in rest)
+        elif isinstance(item, dict):
+            parent[key] = copy = dict(item)
+            pending.extend((copy, name) for name in copy)
+        elif isinstance(item, list):
+            parent[key] = copy = list(item)
+            pending.extend((copy, index) for index in range(len(copy)))
+    return holder[0]
+
+
+def kept(text: str) -> str:
+    """A stored response (JSON) as the journal keeps it: `text` itself, unless a mail answer in
+    it still has its messages."""
+    if not text or '"imap"' not in text:
+        return text
+    value = json.loads(text)
+    redacted = redact_mail(value)
+    return text if redacted == value else json.dumps(redacted, allow_nan=False)
+
+
+def redact_kept_mail(conn) -> None:
+    """Schema step 0002: mail answers kept whole before receipts were redacted lose their
+    messages, in the journal, its recovery receipts and editor runs. A completed receipt is
+    otherwise immutable (v2_action_result_fixed), so that trigger is dropped and made again from
+    its own stored text inside the one write transaction: no other connection ever sees the
+    table without it, and the schema stays the same. Idempotent; a redacted answer no longer
+    has the shape. A forgotten action already keeps nothing and is left alone."""
+
+    def pending() -> tuple[list, list, list]:
+        actions = [
+            (stored, action_id)
+            for action_id, text in conn.execute(
+                "SELECT action_id, response FROM v2_actions WHERE instr(response, '\"imap\"') "
+                "AND action_id NOT IN (SELECT object_id FROM v2_forgotten WHERE object_type='action')"
+            ).fetchall()
+            if (stored := kept(text)) != text
+        ]
+        receipts = []
+        for action_id, text in conn.execute(
+            "SELECT action_id, record FROM v2_recovery_receipts WHERE instr(record, 'imap')"
+        ).fetchall():
+            record = json.loads(text)
+            if (stored := kept(record.get("response"))) != record.get("response"):
+                receipts.append(
+                    (json.dumps({**record, "response": stored}, sort_keys=True), action_id)
+                )
+        runs = []
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='v2_editor_runs'"
+        ).fetchone():
+            runs = [
+                (stored, action_id)
+                for action_id, text in conn.execute(
+                    "SELECT action_id, response FROM v2_editor_runs WHERE instr(response, '\"imap\"')"
+                ).fetchall()
+                if (stored := kept(text)) != text
+            ]
+        return actions, receipts, runs
+
+    if not any(pending()):
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    actions, receipts, runs = pending()
+    if actions:
+        (guard,) = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='v2_action_result_fixed'"
+        ).fetchone()
+        conn.execute("DROP TRIGGER v2_action_result_fixed")
+        conn.executemany("UPDATE v2_actions SET response=? WHERE action_id=?", actions)
+        conn.execute(guard)
+    if receipts:
+        conn.executemany("UPDATE v2_recovery_receipts SET record=? WHERE action_id=?", receipts)
+    if runs:  # its table is made on first use: a database may not have it
+        conn.executemany("UPDATE v2_editor_runs SET response=? WHERE action_id=?", runs)
+    conn.commit()
 
 
 class UsageLimitExceeded(ValueError):
@@ -325,6 +448,10 @@ def begin(
 
 
 def finish(action_id: str, response: dict, reconcile=None) -> dict:
+    """Complete `action_id`. The journal keeps `response` with any mail answer in it redacted
+    (`redact_mail`); the record returned carries `response` itself, for the live reply and the
+    steps after it in a workflow. A replay, a listing or a lookup reads what was kept."""
+    live = json.dumps(response, allow_nan=False)
     with control_plane._conn() as conn:
         initialize(conn)
         conn.execute("BEGIN IMMEDIATE")
@@ -336,11 +463,12 @@ def finish(action_id: str, response: dict, reconcile=None) -> dict:
             reconcile(conn)
         conn.execute(
             "UPDATE v2_actions SET status='completed',response=?,updated_at=? WHERE action_id=?",
-            (json.dumps(response, allow_nan=False), time.time(), action_id),
+            (kept(live), time.time(), action_id),
         )
-        return _row(
+        record = _row(
             conn.execute("SELECT * FROM v2_actions WHERE action_id=?", (action_id,)).fetchone()
         )
+        return {**record, "response": json.loads(live)}
 
 
 def unknown(action_id: str) -> None:

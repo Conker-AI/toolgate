@@ -19,7 +19,7 @@ import sqlite3
 import time
 
 # Add a step (and its DDL) for every schema change; never edit or remove one.
-STEPS = ("0001-baseline",)
+STEPS = ("0001-baseline", "0002-mail-receipts")
 LEDGER = "CREATE TABLE IF NOT EXISTS v2_schema_migrations (id TEXT PRIMARY KEY, applied_at REAL NOT NULL)"
 # Objects a step retires. A ToolGate from before the ledger (a rollback) creates them again and
 # leaves the ledger as it was, so their presence also means the schema must run.
@@ -45,6 +45,7 @@ def ensure(conn) -> None:
     if current(conn):
         return
     _baseline(conn)
+    _mail_receipts(conn)
     conn.execute(LEDGER)
     conn.executemany(
         "INSERT OR IGNORE INTO v2_schema_migrations(id, applied_at) VALUES (?, ?)",
@@ -59,3 +60,11 @@ def _baseline(conn) -> None:
 
     conn.executescript(control_plane.SCHEMA)
     execution_journal.apply(conn)
+
+
+def _mail_receipts(conn) -> None:
+    """0002: mail answers kept whole before receipts were redacted lose their messages
+    (execution_journal.redact_kept_mail). No table or trigger changes."""
+    from toolgate.core import execution_journal
+
+    execution_journal.redact_kept_mail(conn)

@@ -102,10 +102,37 @@ says so (code `OK`, not an error):
  "note": "No mail account is connected: store MAIL_IMAP_HOST, MAIL_IMAP_USER and MAIL_IMAP_PASSWORD (an app password) in ToolGate's vault."}
 ```
 
-Replaying an `action_id` returns its receipt; a fresh read needs a new one. Receipts keep what
-the read returned (subjects and snippets included), like every tool's receipt. At most 6 reads
-a minute and 60 an hour. One read takes at most 27 seconds (the conversation's 12, then the
-parser's 15).
+At most 6 reads a minute and 60 an hour. One read takes at most 27 seconds (the conversation's
+12, then the parser's 15).
+
+## What the journal keeps
+
+The messages go only on the live reply. ToolGate's journal keeps a read without them, and
+everything that reads the journal gets that form: replaying the same `action_id` (a fresh read
+needs a new one), `GET /v2/agent/actions/<action_id>`, the owner's `GET /v2/actions`, owner and
+editor run histories, recovery receipts. In the kept receipt every mail answer, wherever it sits
+(the tool's `result.result`, an automation's `steps`, `variables` or `result`), is exactly:
+
+```json
+{"connected": true, "count": 2, "uids": [12, 11], "uid_validity": 3857529045,
+ "partial": false, "note": "The messages were shown once and are not kept. Read mail again to see them.",
+ "redacted": true}
+```
+
+- `redacted` is `true` only here, and a live answer never has it, so a caller can rely on it: no
+  `messages` key, and the messages must be read again with a new `action_id`.
+- `count` and `uids` are those of the messages the read returned, newest first.
+- `connected`, `uid_validity` and `partial` are the read's own; `note` is the read's own note
+  when it had one (the "not connected" sentence), else the sentence above.
+- The tool's envelope also copies the answer's outputs next to `ok` and `result`; that level
+  keeps `ok` and `result` and gets the same fields, with `uid_validity` `null` (it carried none).
+
+A workflow is not affected: a later step reads the earlier step's live answer
+(`$last.result.result.messages.0.subject`), never the kept one. What a later step does with a
+message (its arguments, its own receipt) is that step's record, as the owner built the workflow.
+Events (`/v2/events`) and logs carry no message. Receipts kept whole by an earlier build of this
+branch are redacted once by schema step `0002-mail-receipts` (`core/execution_journal.py`
+`redact_kept_mail`); a forgotten action is left to forgetting.
 
 ## How the mail is read
 
@@ -118,19 +145,33 @@ parser's 15).
   and tailnet ranges are refused. The socket connects to those numbers, so the name is never
   looked up a second time.
 - The conversation is `LOGIN`, `EXAMINE "INBOX"`, `UID SEARCH SINCE <the day before the window>`,
-  one `UID FETCH` of the newest 50 matches, then `LOGOUT`. `EXAMINE` opens the INBOX read only,
-  and the server must confirm it (`[READ-ONLY]`) or nothing is fetched. The fetch asks only for
-  `BODY.PEEK` sections (a peek leaves the `\Seen` flag alone): the `From`, `Subject`,
-  `Content-Type` and `Content-Transfer-Encoding` fields and the first 8 KB of the text, plus the
-  structure and the received time. The writer refuses, before a byte is sent, any command but
-  these five, and any fetch item that would mark a message read (`BODY[...]`, `BINARY[...]`,
-  `RFC822`, `RFC822.TEXT`). So no `SELECT`, `STORE`, `COPY`, `MOVE`, `EXPUNGE` or `APPEND` is
-  ever sent.
+  then one `UID FETCH` of the sizes (`RFC822.SIZE`) of the newest 50 matches, then for each of
+  them, newest first, one `UID FETCH` of its fields and text, then for each one, smallest message
+  first, a `UID FETCH` of its structure, then `LOGOUT`. Each group of fetches is sent
+  at once (IMAP pipelining) and the answers are joined by UID, never by message number, which an
+  expunge between two commands would shift. `EXAMINE` opens the INBOX read only, and the server
+  must confirm it (`[READ-ONLY]`) or nothing is fetched. The fetches ask only for `BODY.PEEK`
+  sections (a peek leaves the `\Seen` flag alone): the `From`, `Subject`, `Content-Type` and
+  `Content-Transfer-Encoding` fields and the first 8 KB of the text, plus the received time, and
+  apart, the structure (`BODYSTRUCTURE`). The writer refuses, before a byte is sent, any command
+  but these five, any line with a CR, LF or NUL in it, and any fetch item that would mark a
+  message read (`BODY[...]`, `BINARY[...]`, `RFC822`, `RFC822.TEXT`). So no `SELECT`, `STORE`,
+  `COPY`, `MOVE`, `EXPUNGE` or `APPEND` is ever sent.
 - 12 seconds for the whole conversation, however slowly the server or the name server answers
   (the lookup, connect, handshake and every read and write get only the time left). At most 2 MB
-  is read from the server and 64 KB for each message; a message over its cap is dropped and the
-  rest are read; at the total cap or the deadline the reading stops with the messages that came
-  whole. The server's own words (its errors, greetings) never leave the reader.
+  is read from the server. Each answer has its own share: 20 KB for a message's fields and text
+  (the partial ranges keep an honest server under it), 16 KB for its structure (about 150
+  parts). An answer over its share is read to its end, dropped, and the answer is `partial`:
+  a message whose fields and text are over is left out; one whose structure is over is kept,
+  without attachments. At the total cap or the deadline the reading stops with what came whole.
+  Fields and text come first for all 50 (at most 1 MB). A structure is made of its message's
+  parts, so a huge one comes from a large message, and the structures are read smallest message
+  first: a stranger's message built that way costs at most the attachment flags of the messages
+  as large as itself (a long video, say), and every message still comes back. IMAP tells no
+  structure's size before sending it, so one over its share is read to its end, counted against
+  the 2 MB, and dropped. The server's own words (its errors, greetings) and
+  the errors of the lookup, the socket and TLS (which can name the host) never leave the reader:
+  each becomes one fixed failure with nothing chained to it.
 - "Newest" is the order in which messages arrived in the INBOX (their UIDs). When more than 50
   match, the answer is `partial` unless the oldest one read already falls before the window.
 
@@ -145,7 +186,10 @@ space is capped at 512 MB (Linux). What it reads:
   plain text encoding, is read as UTF-8, and undecodable bytes become U+FFFD.
 - Base64 and quoted-printable text, including text the 8 KB fetch cut off (what came is read,
   and an escape cut in two is dropped).
-- HTML as its visible text: tags dropped, `script`, `style` and the head left out.
+- HTML as its visible text: tags and comments dropped, `script`, `style` and the head left
+  out with all in them, character references read. It is read in one forward pass, so broken
+  markup (thousands of unclosed tags) takes as long as any text of its length; a tag or comment
+  left open at the end is dropped.
 - A response nested deeper than 64 lists, a message without a received time, or one the mail
   parser cannot take is left out and the answer is `partial`. A structure that cannot be read
   (or lists more than 200 parts) keeps the message, without attachments, and makes the answer
@@ -166,5 +210,6 @@ Every failure is one fixed sentence that names nothing of the account:
 | `TOOL_UNAVAILABLE` | `mail_too_busy` | The answer could not be read in the parser's 10 seconds (or the child was stopped at 15). |
 
 Tests: `toolgate/tests/test_mail_fetch.py` (a local IMAP server over real TLS with a test-only
-certificate authority), `test_mail_parse.py` and `test_mail_boundary.py`, all on synthetic mail
-with no network.
+certificate authority), `test_mail_commands.py`, `test_mail_parse.py`, `test_mail_receipts.py`
+and `test_mail_boundary.py`, all on synthetic mail with no network. Mutants:
+`toolgate/scripts/mutations_mail.py`.

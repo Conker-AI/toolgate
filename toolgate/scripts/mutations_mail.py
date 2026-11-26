@@ -8,6 +8,12 @@ PARSE = "toolgate/executors/mail_parse.py"
 FETCH = "toolgate/tests/test_mail_fetch.py::"
 CHILD = "toolgate/tests/test_mail_parse.py::"
 BOUNDARY = "toolgate/tests/test_mail_boundary.py::"
+COMMANDS = "toolgate/tests/test_mail_commands.py::"
+RECEIPTS = "toolgate/tests/test_mail_receipts.py::"
+JOURNAL = "toolgate/core/execution_journal.py"
+LEDGER = "toolgate/core/schema_ledger.py"
+RECOVERY = "toolgate/core/recovery_journal.py"
+RUNS = "toolgate/core/editor_runs.py"
 
 MUTANTS = [
     (
@@ -22,21 +28,21 @@ MUTANTS = [
         IMAP,
         "        if not read_only(command):",
         "        if False:",
-        FETCH + "test_no_command_that_writes_can_be_sent[move]",
+        COMMANDS + "test_no_command_that_writes_can_be_sent[move]",
     ),
     (
         "mail body section that marks a message read allowed",
         IMAP,
         '        "BODY[" not in items.replace("BODY.PEEK[", "")',
         "        True",
-        FETCH + "test_no_command_that_writes_can_be_sent[body]",
+        COMMANDS + "test_no_command_that_writes_can_be_sent[body]",
     ),
     (
         "mail RFC822 fetch allowed",
         IMAP,
         '        and re.search(r"RFC822(?!\\.SIZE|\\.HEADER)", items) is None',
         "        and True",
-        FETCH + "test_no_command_that_writes_can_be_sent[rfc822-text]",
+        COMMANDS + "test_no_command_that_writes_can_be_sent[rfc822-text]",
     ),
     (
         "mail read-only confirmation not required",
@@ -102,16 +108,16 @@ MUTANTS = [
         FETCH + "test_the_total_cap_stops_reading_with_what_came_whole",
     ),
     (
-        "mail message kept past its cap",
+        "mail message kept past its share",
         IMAP,
-        "                data = self.response(MESSAGE_BYTES)",
+        "                data = self.response(limit)",
         "                data = self.response(TOTAL_BYTES)",
-        FETCH + "test_a_message_over_its_cap_is_dropped_and_the_rest_are_read",
+        FETCH + "test_a_message_over_its_share_is_dropped_and_the_rest_are_read",
     ),
     (
         "mail dropped message not partial",
         IMAP,
-        "                    partial = True  # one message over its cap: dropped, the rest still read",
+        "                    partial = True  # one answer over its share: dropped, the rest still read",
         "                    pass",
         FETCH + "test_the_fetch_itself_says_partial_when_it_drops_a_message",
     ),
@@ -258,8 +264,8 @@ MUTANTS = [
     (
         "mail script and style read as text",
         PARSE,
-        "        if tag in SKIPPED_TAGS:\n            self.skipping += 1",
-        "        if False:\n            self.skipping += 1",
+        "        if tag in SKIPPED_TAGS and not closing:",
+        "        if False:",
         CHILD + "test_html_is_read_as_its_visible_text",
     ),
     (
@@ -282,5 +288,182 @@ MUTANTS = [
         "        data = part.get_payload(decode=True)",
         '        data = part.get_payload(decode=False).encode("ascii", "surrogateescape")',
         CHILD + "test_an_8bit_body_is_read_in_its_charset",
+    ),
+    (
+        "mail quoted backslash not escaped",
+        IMAP,
+        "    return '\"' + value.replace(\"\\\\\", \"\\\\\\\\\").replace('\"', '\\\\\"') + '\"'",
+        "    return '\"' + value.replace('\"', '\\\\\"') + '\"'",
+        COMMANDS + "test_imap_quoting_escapes_backslash_and_quote",
+    ),
+    (
+        "mail quoted quote not escaped",
+        IMAP,
+        "    return '\"' + value.replace(\"\\\\\", \"\\\\\\\\\").replace('\"', '\\\\\"') + '\"'",
+        '    return \'"\' + value.replace("\\\\", "\\\\\\\\") + \'"\'',
+        FETCH + "test_a_password_with_quotes_and_backslashes_logs_in",
+    ),
+    (
+        "mail quoting lets CR, LF and NUL through",
+        IMAP,
+        '    if not value.isascii() or any(char in value for char in "\\r\\n\\0"):',
+        "    if not value.isascii():",
+        COMMANDS + "test_imap_quoting_refuses_what_it_cannot_carry[nul]",
+    ),
+    (
+        "mail command guard lets a second line through",
+        IMAP,
+        '    if any(char in command for char in "\\r\\n\\0") or not command.startswith(READ_ONLY):',
+        "    if not command.startswith(READ_ONLY):",
+        COMMANDS + "test_no_command_that_writes_can_be_sent[smuggled-line]",
+    ),
+    (
+        "mail certificate error chained to the caller",
+        IMAP,
+        '            raise MailError("mail_certificate_refused") from None',
+        '            raise MailError("mail_certificate_refused")',
+        FETCH + "test_a_certificate_for_another_name_is_refused",
+    ),
+    (
+        "mail handshake error chained to the caller",
+        IMAP,
+        '            tls.close()\n            raise MailError("mail_unavailable") from None',
+        '            tls.close()\n            raise MailError("mail_unavailable")',
+        FETCH + "test_an_error_that_names_the_host_never_leaves_the_reader[handshake]",
+    ),
+    (
+        "mail lookup refusal chained to the caller",
+        IMAP,
+        '        raise MailError("mail_address_refused") from None',
+        '        raise MailError("mail_address_refused")',
+        FETCH + "test_an_error_that_names_the_host_never_leaves_the_reader[lookup]",
+    ),
+    (
+        "mail lookup failure chained to the caller",
+        IMAP,
+        '    except Exception:  # the lookup ran out of time\n        raise MailError("mail_unavailable") from None',
+        '    except Exception:  # the lookup ran out of time\n        raise MailError("mail_unavailable")',
+        FETCH + "test_an_error_that_names_the_host_never_leaves_the_reader[lookup-other]",
+    ),
+    (
+        "mail socket error chained to the caller",
+        IMAP,
+        '        # Socket and TLS errors can name the host; none of it leaves this function.\n        raise MailError("mail_unavailable") from None',
+        '        # Socket and TLS errors can name the host; none of it leaves this function.\n        raise MailError("mail_unavailable")',
+        FETCH + "test_an_error_that_names_the_host_never_leaves_the_reader[conversation]",
+    ),
+    (
+        "mail structure kept past its share",
+        IMAP,
+        '        [f"UID FETCH {uid} {STRUCTURE_ITEMS}" for uid in smallest], STRUCTURE_BYTES',
+        '        [f"UID FETCH {uid} {STRUCTURE_ITEMS}" for uid in smallest], TOTAL_BYTES',
+        FETCH + "test_a_structure_over_its_share_is_dropped_and_its_message_kept",
+    ),
+    (
+        "mail oldest message fetched first",
+        IMAP,
+        "    newest = chosen[::-1]",
+        "    newest = chosen",
+        FETCH + "test_a_server_that_ignores_the_ranges_costs_only_the_older_messages",
+    ),
+    (
+        "mail structures fetched in arrival order, not by size",
+        IMAP,
+        "        smallest = sorted(newest, key=lambda uid: size.get(uid, 2**63))",
+        "        smallest = newest",
+        FETCH + "test_such_a_structure_costs_only_the_messages_as_large_their_attachment_flags",
+    ),
+    (
+        "mail structure asked for with the content",
+        IMAP,
+        '        [f"UID FETCH {uid} {CONTENT_ITEMS}" for uid in newest], MESSAGE_BYTES',
+        '        [f"UID FETCH {uid} {CONTENT_ITEMS[:-1]} BODYSTRUCTURE)" for uid in newest], MESSAGE_BYTES',
+        FETCH + "test_such_a_structure_costs_only_the_messages_as_large_their_attachment_flags",
+    ),
+    (
+        "mail answers joined by message number",
+        PARSE,
+        "            found = by_uid.setdefault(int(uid), {})",
+        "            found = numbered.get(number) or by_uid.setdefault(int(uid), {})",
+        CHILD + "test_answers_join_by_uid_when_an_expunge_shifts_the_numbers",
+    ),
+    (
+        "mail html tag left open kept as text",
+        PARSE,
+        '    r"|<(/?)([A-Za-z][A-Za-z0-9]*)[^<>]*(?:>|(?=<)|\\Z)"',
+        '    r"|<(/?)([A-Za-z][A-Za-z0-9]*)[^<>]*>"',
+        CHILD + "test_broken_html_is_read_in_time_and_leaves_no_markup[unclosed-tags]",
+    ),
+    (
+        "mail receipt kept whole",
+        JOURNAL,
+        "            (kept(live), time.time(), action_id),",
+        "            (live, time.time(), action_id),",
+        RECEIPTS + "test_finish_answers_live_and_keeps_the_redacted_form",
+    ),
+    (
+        "mail later workflow step given the kept receipt",
+        JOURNAL,
+        '        return {**record, "response": json.loads(live)}',
+        "        return record",
+        BOUNDARY + "test_a_workflow_step_after_the_mail_step_gets_the_messages",
+    ),
+    (
+        "mail envelope around a copied answer dropped",
+        JOURNAL,
+        "            parent[key] = copy = {**rest, **_redacted(item)}",
+        "            parent[key] = copy = _redacted(item)",
+        RECEIPTS + "test_every_copy_in_a_receipt_is_redacted_and_the_rest_kept_as_it_was",
+    ),
+    (
+        "mail receipts kept whole before redaction left whole",
+        LEDGER,
+        "    _mail_receipts(conn)\n",
+        "\n",
+        RECEIPTS + "test_step_two_redacts_what_was_kept_whole_and_only_once",
+    ),
+    (
+        "mail migration leaves the receipt trigger off",
+        JOURNAL,
+        "        conn.execute(guard)\n",
+        "\n",
+        RECEIPTS + "test_step_two_redacts_what_was_kept_whole_and_only_once",
+    ),
+    (
+        "mail migration rewrites a forgotten action",
+        JOURNAL,
+        "                \"AND action_id NOT IN (SELECT object_id FROM v2_forgotten WHERE object_type='action')\"",
+        '                ""',
+        RECEIPTS + "test_step_two_leaves_a_forgotten_action_alone_and_still_runs",
+    ),
+    (
+        "mail migration updates an editor table that is not there",
+        JOURNAL,
+        "    if runs:  # its table is made on first use: a database may not have it\n",
+        "    if True:\n",
+        RECEIPTS + "test_step_two_leaves_a_forgotten_action_alone_and_still_runs",
+    ),
+    (
+        "mail recovery refuses a receipt and its redacted form",
+        RECOVERY,
+        '                        json.loads(journal.kept(row["response"]))\n                        != json.loads(journal.kept(current["response"]))',
+        '                        json.loads(row["response"])\n                        != json.loads(current["response"])',
+        RECEIPTS
+        + "test_recovery_takes_a_receipt_kept_whole_and_its_redacted_form_as_one[authoritative]",
+    ),
+    (
+        "mail recovery copies a receipt whole",
+        RECOVERY,
+        '                            {**row, "response": row["response"] and journal.kept(row["response"])},',
+        "                            row,",
+        RECEIPTS
+        + "test_recovery_takes_a_receipt_kept_whole_and_its_redacted_form_as_one[restored]",
+    ),
+    (
+        "mail editor run kept whole",
+        RUNS,
+        "                journal.kept(json.dumps(response, allow_nan=False)),  # no mail kept whole",
+        "                json.dumps(response, allow_nan=False),",
+        RECEIPTS + "test_an_editor_run_keeps_the_redacted_form_and_answers_live",
     ),
 ]

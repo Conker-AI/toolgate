@@ -4,6 +4,7 @@ through the vault route and never seen again (no response, row, event or log lin
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -13,7 +14,8 @@ from fastapi.testclient import TestClient
 
 from toolgate.api import builtin_capabilities, definitions, dispatch, server
 from toolgate.core import control_plane as cp
-from toolgate.core import vault
+from toolgate.core import execution_journal as journal
+from toolgate.core import publications, vault
 from toolgate.core.control_plane_rules import DEFAULT_USAGE_LIMITS
 from toolgate.executors import mail_imap
 from toolgate.tests import imap_fake
@@ -72,6 +74,24 @@ def inner(text: str) -> str:
     return text.split("\n")[1]
 
 
+def kept(uids: list[int], validity: int | None = 3857529045) -> dict:
+    """What the journal keeps of a read (docs/mail.md)."""
+    return {
+        "connected": True,
+        "count": len(uids),
+        "uids": uids,
+        "uid_validity": validity,
+        "partial": False,
+        "note": journal.REDACTED_MAIL_NOTE,
+        "redacted": True,
+    }
+
+
+def assert_no_message(*texts: str) -> None:
+    for text in texts:
+        assert "Lunch" not in text and "Ana Friend" not in text and "See you at noon" not in text
+
+
 def test_mail_is_read_without_an_approval_card(gate, caplog, tmp_path):
     client, agent, fake = gate
     store(client)
@@ -86,9 +106,19 @@ def test_mail_is_read_without_an_approval_card(gate, caplog, tmp_path):
     assert inner(message["subject"]) == "Lunch" and inner(message["from"]["name"]) == "Ana Friend"
     assert message["subject"].startswith("[UNTRUSTED_MAIL_CONTENT field=subject]\n")
     assert fake.connections == 1 and fake.writes == []
-    # The same action asked again is the journaled answer, not a second read.
-    assert ask(client, agent, "mail-read-01", hours=24).json() == body
+    # The same action asked again is the journaled answer, not a second read: what the journal
+    # keeps of it, without the messages, marked redacted. The owner's action list shows the same.
+    again = ask(client, agent, "mail-read-01", hours=24)
+    assert {**again.json(), "result": None} == {**body, "result": None}
+    assert again.json()["result"] == {"ok": True, "result": kept([21]), **kept([21], None)}
     assert fake.connections == 1
+    actions = client.get("/v2/actions", headers=OWNER)
+    [action] = [a for a in actions.json()["results"] if a["action_id"] == "mail-read-01"]
+    assert action["response"]["result"]["result"] == kept([21])
+    assert_no_message(again.text, actions.text, stored_text())
+    events = client.get("/v2/events", headers=OWNER)
+    assert events.status_code == 200 and "mail-read-01" in events.text
+    assert_no_message(events.text, caplog.text)
     listing = client.get("/vault/secrets", headers=OWNER)
     definition = client.get("/v2/tools/mail.recent", headers=OWNER)
     assert set(mail_imap.SECRETS) <= set(listing.json())
@@ -225,3 +255,60 @@ def test_the_shared_runtime_limit_is_not_below_the_reads_own_bounds(gate):
     assert limits["max_per_minute"] == 6 and limits["max_per_hour"] == 60
     assert limits["max_runtime_seconds"] == DEFAULT_USAGE_LIMITS["max_runtime_seconds"]
     assert limits["max_runtime_seconds"] >= mail_imap.SECONDS + mail_imap.PARSE_SECONDS
+
+
+def test_a_workflow_step_after_the_mail_step_gets_the_messages(gate, caplog):
+    client, _agent, fake = gate
+    store(client)
+    cp.create_tool(
+        {
+            "id": "note",
+            "name": "Note",
+            "status": "active",
+            "authorization": "auto",
+            "execution": {"type": "echo"},
+            "inputs": [{"name": "text", "type": "string"}],
+        }
+    )
+    subject = "$last.result.result.messages.0.subject"
+    cp.create_automation(
+        {
+            "id": "mail-digest",
+            "name": "Mail digest",
+            "status": "active",
+            "workflow": [
+                {"type": "tool_call", "tool_id": "mail.recent", "args": {"hours": 24}},
+                {"type": "tool_call", "tool_id": "note", "args": {"text": subject}},
+            ],
+        }
+    )
+    publications.publish("automation", "mail-digest", 1)
+    _, key = cp.issue_agent_key("Digest", ["automation:mail-digest"])
+    run = {"action_id": "digest-01", "published_version": 1}
+    caller = {"X-ToolGate-Execution-Key": key}
+    body = client.post("/v2/automations/mail-digest/run", headers=caller, json=run).json()
+    assert body["code"] == "OK", body
+    # The second step was given the live message, not the receipt the journal keeps.
+    read, noted = body["steps"]
+    assert inner(read["result"]["result"]["result"]["messages"][0]["subject"]) == "Lunch"
+    assert inner(noted["result"]["result"]["result"]["text"]) == "Lunch"
+    assert fake.connections == 1
+    # Asked again, the run is the kept receipt: the mail step redacted, nothing run twice.
+    again = client.post("/v2/automations/mail-digest/run", headers=caller, json=run).json()
+    assert again["steps"][0]["result"]["result"]["result"] == kept([21])
+    assert fake.connections == 1
+    [step] = [r for r in journal.list_actions() if r["subject_id"] == "mail.recent"]
+    assert step["parent_action_id"] == "digest-01"
+    assert step["response"]["result"]["result"] == kept([21])
+    # The mail step's own receipt and the automation's copy of it keep no message. What the owner
+    # had a later step do with one is that step's own record (docs/mail.md, limits).
+    with sqlite3.connect(cp.DB_PATH) as db:
+        receipts = [row[0] for row in db.execute("SELECT response FROM v2_actions")]
+        mail_step = db.execute(
+            "SELECT response FROM v2_actions WHERE subject_id='mail.recent'"
+        ).fetchone()[0]
+        digest = db.execute(
+            "SELECT response FROM v2_actions WHERE action_id='digest-01'"
+        ).fetchone()[0]
+    assert len(receipts) == 3
+    assert_no_message(mail_step, json.dumps(json.loads(digest)["steps"][0]), caplog.text)

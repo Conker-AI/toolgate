@@ -216,7 +216,7 @@ def finish(action_id, response):
             " (SELECT 1 FROM v2_forgotten WHERE object_type='action' AND object_id=?)",
             (
                 "approval" if response.get("code") == "CONFIRMATION_REQUIRED" else "finished",
-                json.dumps(response, allow_nan=False),
+                journal.kept(json.dumps(response, allow_nan=False)),  # no mail kept whole
                 action_id,
                 action_id,
             ),

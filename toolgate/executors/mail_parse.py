@@ -49,7 +49,7 @@ import re  # noqa: E402
 import sys  # noqa: E402
 from datetime import UTC, datetime, timedelta, timezone  # noqa: E402
 from email.parser import BytesParser  # noqa: E402
-from html.parser import HTMLParser  # noqa: E402
+from html import unescape  # noqa: E402
 
 if __package__:  # imported by ToolGate and its tests
     from toolgate.executors.child_guard import Busy, limit_memory, within
@@ -90,6 +90,18 @@ WORD = re.compile(r"=\?([^?\s]{1,40})\?([bBqQ])\?([^?\s]*)\?=")
 # Codecs that are no charset a message can name, or are slow on hostile text.
 ODD_CODECS = {"punycode", "idna", "unicode-escape", "raw-unicode-escape", "undefined"}
 SKIPPED_TAGS = {"script", "style", "head", "title", "template", "noscript"}
+# Where a skipped element ends: all in it, tags too, is left out up to there.
+SKIPPED_ENDS = {tag: re.compile(f"</{tag}", re.I) for tag in SKIPPED_TAGS}
+# Markup in an HTML part, found in one pass: a comment, a tag (whether it ends one, and its
+# name) or another declaration. One left open ends at the next "<" or at the end, so however
+# broken the markup, no character is read more than a few times (html.parser took seconds on a
+# few thousand unclosed tags).
+MARKUP = re.compile(
+    r"<!--.*?(?:-->|\Z)"
+    r"|<(/?)([A-Za-z][A-Za-z0-9]*)[^<>]*(?:>|(?=<)|\Z)"
+    r"|<[!?/][^<>]*(?:>|(?=<)|\Z)",
+    re.S,
+)
 # Tags that end a run of text (a space between their words and the next); others do not.
 BLOCK_TAGS = {
     *("p", "div", "br", "hr", "li", "ul", "ol", "tr", "td", "th", "table", "blockquote"),
@@ -176,9 +188,14 @@ def _item(name: str) -> str:
 
 
 def _fetched(responses: list[list], wanted: set[int]) -> tuple[dict[int, dict], bool]:
-    """The items of each asked-for message by UID (one message's items may come in several
-    responses), and whether a FETCH response could not be read."""
-    by_number: dict[str, dict] = {}
+    """The items of each asked-for message by UID, and whether a FETCH response could not be
+    read. One message's items come in several responses (its content and its structure are
+    asked for apart): they join by UID, never by message number, which an expunge between two
+    commands shifts. A response without a UID (a server splitting one answer) joins the one
+    with its message number that has one, before or after it."""
+    by_uid: dict[int, dict] = {}
+    numbered: dict[str, dict] = {}  # message number -> the items of its UID
+    orphans: dict[str, dict] = {}  # message number -> items seen before its UID
     broken = False
     for response in responses:
         if len(response) != 4 or response[0] != "*" or not isinstance(response[2], str):
@@ -193,15 +210,19 @@ def _fetched(responses: list[list], wanted: set[int]) -> tuple[dict[int, dict], 
         ):
             broken = True
             continue
-        found = by_number.setdefault(number, {})
+        here: dict = {}
         for name, value in zip(items[::2], items[1::2], strict=True):
-            found.setdefault(_item(name), value)
-    messages: dict[int, dict] = {}
-    for items in by_number.values():
-        uid = items.get("UID")
-        if isinstance(uid, str) and uid.isdigit() and int(uid) in wanted:
-            messages.setdefault(int(uid), items)
-    return messages, broken
+            here.setdefault(_item(name), value)
+        uid = here.get("UID")
+        if isinstance(uid, str) and uid.isdigit():
+            found = by_uid.setdefault(int(uid), {})
+            numbered[number] = found
+            here = {**here, **orphans.pop(number, {})}  # what came first stays
+        else:
+            found = numbered.get(number) or orphans.setdefault(number, {})
+        for name, value in here.items():
+            found.setdefault(name, value)
+    return {uid: items for uid, items in by_uid.items() if uid in wanted}, broken
 
 
 def _received(value) -> str:
@@ -294,29 +315,23 @@ def _sender(value: bytes) -> tuple[str, str]:
     return _words(name)[:FIELD_CHARS], address[:FIELD_CHARS]
 
 
-class _Visible(HTMLParser):
-    """The text of an HTML part, script and style left out."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-        self.skipping = 0
-
-    def handle_starttag(self, tag, attrs) -> None:
-        if tag in SKIPPED_TAGS:
-            self.skipping += 1
+def _visible(markup: str) -> str:
+    """The text of an HTML part: tags and comments out, script, style and the head out with all
+    in them, a space for a tag that ends a run of text, character references read. One forward
+    pass: its time grows with the length of the part, whatever the markup."""
+    parts: list[str] = []
+    at = 0
+    while found := MARKUP.search(markup, at):
+        parts.append(unescape(markup[at : found.start()]))
+        at = found.end()
+        closing, tag = found.group(1), (found.group(2) or "").lower()
+        if tag in SKIPPED_TAGS and not closing:
+            end = SKIPPED_ENDS[tag].search(markup, at)
+            at = end.start() if end else len(markup)  # its end tag is read next, as a tag
         elif tag in BLOCK_TAGS:
-            self.parts.append(" ")
-
-    def handle_endtag(self, tag) -> None:
-        if tag in SKIPPED_TAGS and self.skipping:
-            self.skipping -= 1
-        elif tag in BLOCK_TAGS:
-            self.parts.append(" ")
-
-    def handle_data(self, data) -> None:
-        if not self.skipping:
-            self.parts.append(data)
+            parts.append(" ")
+    parts.append(unescape(markup[at:]))
+    return "".join(parts)
 
 
 def _payload(part) -> bytes:
@@ -359,10 +374,7 @@ def _snippet(message) -> str:
     if chosen.get_content_type() == "text/plain":
         text = _text(data[:SNIPPET_BYTES], chosen.get_content_charset())
     else:
-        visible = _Visible()
-        visible.feed(_text(data, chosen.get_content_charset()))
-        visible.close()
-        text = "".join(visible.parts)
+        text = _visible(_text(data, chosen.get_content_charset()))
     return " ".join(text.split())[:SNIPPET_CHARS]
 
 

@@ -20,11 +20,17 @@ SELECT, and the server must confirm it read-only. So no STORE, COPY, MOVE, EXPUN
 ever sent and no \\Seen flag changes.
 
 Limits: `SECONDS` for the whole conversation (the lookup, connect, handshake and every read and
-write get only the time left), `TOTAL_BYTES` read from the server at most, each message's
-answer at most `MESSAGE_BYTES` (its header fields and the first `TEXT_BYTES` of its text are
-all that is asked for). A message over its cap is dropped and the answer is partial; at the
-total cap the reading stops with what came whole. The answer is parsed by `mail_parse.py` in a
-child process with nothing but those bytes (`child_guard`), killed after `PARSE_SECONDS`.
+write get only the time left), `TOTAL_BYTES` read from the server at most. First the size of
+every message asked for (`SIZE_ITEMS`, one small command). Then each message on its own, newest
+first (the commands pipelined): its fields and the first `TEXT_BYTES` of its text
+(`CONTENT_ITEMS`, whose partial ranges keep an honest server's answer under `MESSAGE_BYTES`).
+Then, apart, each one's structure (`STRUCTURE_ITEMS`, at most `STRUCTURE_BYTES`), smallest
+message first. An answer over its share is dropped and the answer is partial; at the total cap
+the reading stops with what came whole. A structure is made of its message's parts, so a huge
+one comes from a large message: a stranger's message built that way costs at most the
+structures (the attachment flags) of messages as large as itself, never another message's
+fields or text. The answer is parsed by `mail_parse.py` in a child process with nothing but
+those bytes (`child_guard`), killed after `PARSE_SECONDS`.
 """
 
 from __future__ import annotations
@@ -54,7 +60,8 @@ BUSY = 3  # mail_parse.BUSY: the child ran out of its own time
 MAX_HOURS = 72
 MAX_MESSAGES = 50
 TOTAL_BYTES = 2 * 1024 * 1024
-MESSAGE_BYTES = 64 * 1024
+MESSAGE_BYTES = 20 * 1024  # a message's fields and text: two 8 KB partial ranges
+STRUCTURE_BYTES = 16 * 1024  # a message's BODYSTRUCTURE: about 150 parts
 LINE_BYTES = 16 * 1024
 SEARCH_BYTES = 512 * 1024
 HEADER_BYTES = 8192
@@ -65,10 +72,12 @@ PARSER = Path(__file__).with_name("mail_parse.py")
 CA_FILE: str | None = None  # tests only: one more root to trust (their own test authority)
 READ_ONLY = ("LOGIN ", "EXAMINE ", "UID SEARCH ", "UID FETCH ")  # and LOGOUT itself
 FIELDS = "FROM SUBJECT CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
-FETCH_ITEMS = (
-    f"(UID INTERNALDATE BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS ({FIELDS})]<0.{HEADER_BYTES}>"
+CONTENT_ITEMS = (
+    f"(UID INTERNALDATE BODY.PEEK[HEADER.FIELDS ({FIELDS})]<0.{HEADER_BYTES}>"
     f" BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)"
 )
+STRUCTURE_ITEMS = "(UID BODYSTRUCTURE)"
+SIZE_ITEMS = "(UID RFC822.SIZE)"
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 # A DNS name whose last label starts with a letter (so no address literal), ASCII only.
 HOST = re.compile(
@@ -78,6 +87,11 @@ LITERAL = re.compile(rb"\{(\d{1,10})\}\Z")
 SEARCH = re.compile(rb"\* SEARCH((?: \d{1,10})*) ?")
 FETCH = re.compile(rb"\* \d{1,10} FETCH \(")
 VALIDITY = re.compile(rb"\[UIDVALIDITY (\d{1,10})\]")
+# A size answer, its two items in either order.
+SIZED = re.compile(
+    rb"\* \d{1,10} FETCH \((?:UID (\d{1,10}) RFC822\.SIZE (\d{1,12})"
+    rb"|RFC822\.SIZE (\d{1,12}) UID (\d{1,10}))\)\r\n"
+)
 WORDS = {
     "mail_not_connected": "No mail account is connected: store MAIL_IMAP_HOST, MAIL_IMAP_USER "
     "and MAIL_IMAP_PASSWORD (an app password) in ToolGate's vault.",
@@ -278,24 +292,28 @@ class Session:
                 raise MailError("mail_unavailable")
             untagged.append(data)
 
-    def messages(self, uids: list[int]) -> tuple[bytes, bool]:
-        """The FETCH responses for `uids` as the server sent them, and whether some were cut."""
-        tag = self.send(f"UID FETCH {','.join(map(str, uids))} {FETCH_ITEMS}")
+    def pipeline(self, commands: list[str], limit: int) -> tuple[bytes, bool, bool]:
+        """Send `commands` at once (IMAP pipelining), then read their answers in order: the
+        FETCH responses, each at most `limit` bytes; whether one was dropped or a command
+        failed; and whether the reading stopped early, keeping what came whole."""
+        pending = [self.send(command) for command in commands]
         answers, partial = bytearray(), False
         try:
-            while True:
-                data = self.response(MESSAGE_BYTES)
+            while pending:
+                data = self.response(limit)
                 if data is None:
-                    partial = True  # one message over its cap: dropped, the rest still read
-                elif data.startswith(tag + b" "):
-                    return bytes(answers), partial or not data.startswith(tag + b" OK")
+                    partial = True  # one answer over its share: dropped, the rest still read
                 elif FETCH.match(data):
                     answers += data
+                elif (tag := data.split(b" ", 1)[0]) in pending:
+                    pending.remove(tag)
+                    partial = partial or not data.startswith(tag + b" OK")
                 elif not data.startswith(b"* ") or data.startswith(b"* BYE"):
-                    return bytes(answers), True  # a continuation, another tag, or goodbye
+                    return bytes(answers), True, True  # a continuation, another tag, goodbye
         except (_Cut, MailError, OSError):
             # The total cap, the deadline or a broken connection: what came whole is kept.
-            return bytes(answers), True
+            return bytes(answers), True, True
+        return bytes(answers), partial, False
 
     def logout(self) -> None:
         """LOGOUT, waiting a second at most for its answer; any failure is ignored."""
@@ -314,7 +332,8 @@ def _since(day: datetime) -> str:
 
 def conversation(session: Session, user: str, password: str, since: datetime):
     """Log in, open INBOX read only and fetch the newest messages since `since`'s day: the FETCH
-    answer, the UIDs asked for, whether more matched, whether some were cut, and UIDVALIDITY."""
+    answers, the UIDs asked for, whether more matched, whether some were dropped or cut, and
+    UIDVALIDITY."""
     greeting = session.response(LINE_BYTES)
     if greeting is None or not greeting.upper().startswith(b"* OK"):
         raise MailError("mail_unavailable")
@@ -342,10 +361,28 @@ def conversation(session: Session, user: str, password: str, since: datetime):
     if not status.upper().startswith(b"OK"):
         raise MailError("mail_unavailable")
     chosen = sorted(uid for uid in found if 0 < uid < 2**32)[-MAX_MESSAGES:]
-    answers, cut = session.messages(chosen) if chosen else (b"", False)
-    if not cut:
+    newest = chosen[::-1]
+    # The sizes only order the structures: one missing or unread puts its message last.
+    asked = [f"UID FETCH {','.join(map(str, newest))} {SIZE_ITEMS}"] if newest else []
+    sized, _, stopped = session.pipeline(asked, LINE_BYTES)
+    size = {int(m[0] or m[3]): int(m[1] or m[2]) for m in SIZED.findall(sized)}
+    answers, partial = b"", False
+    if not stopped:
+        answers, partial, stopped = session.pipeline(
+            [f"UID FETCH {uid} {CONTENT_ITEMS}" for uid in newest], MESSAGE_BYTES
+        )
+    if not stopped:
+        # The structures apart, smallest message first (newest first among equals): one over its
+        # share is dropped, and one too large for what is left of the total stops only the
+        # structures of messages as large as its own.
+        smallest = sorted(newest, key=lambda uid: size.get(uid, 2**63))
+        structures, dropped, stopped = session.pipeline(
+            [f"UID FETCH {uid} {STRUCTURE_ITEMS}" for uid in smallest], STRUCTURE_BYTES
+        )
+        answers, partial = answers + structures, partial or dropped
+    if not stopped:
         session.logout()
-    return answers, chosen, len(found) > len(chosen), cut, validity
+    return answers, chosen, len(found) > len(chosen), partial or stopped, validity
 
 
 def fetch(host: str, user: str, password: str, since: datetime):

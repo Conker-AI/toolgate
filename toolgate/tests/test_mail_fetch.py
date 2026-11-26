@@ -10,6 +10,7 @@ import logging
 import socket
 import ssl
 import time
+import traceback
 
 import pytest
 
@@ -19,7 +20,11 @@ from toolgate.tests import imap_fake
 from toolgate.tests.imap_fake import APP_WORDS, HOST, USER, mail
 
 NOW = dt.datetime(2026, 11, 25, 9, 0, tzinfo=dt.UTC)
-VERBS = ["LOGIN", "EXAMINE", "UID SEARCH", "UID FETCH", "LOGOUT"]
+
+
+def conversation(messages: int) -> list[str]:
+    """The commands of a whole read: the sizes, each message's content, each one's structure."""
+    return ["LOGIN", "EXAMINE", "UID SEARCH", *["UID FETCH"] * (2 * messages + 1), "LOGOUT"]
 
 
 def ago(hours: float) -> dt.datetime:
@@ -74,7 +79,9 @@ def failed(code: str, caplog=None, hours: int = 24) -> mail_imap.MailError:
         mail_imap.read(hours, NOW)
     error = caught.value
     assert error.code == code and error.message == mail_imap.WORDS[code]
-    told = str(error) + error.message + repr(error.__cause__) + (caplog.text if caplog else "")
+    # The whole chain as a log line with the error would print it: its causes and contexts too.
+    chain = "".join(traceback.format_exception(error))
+    told = str(error) + error.message + chain + (caplog.text if caplog else "")
     for secret in (HOST, USER, APP_WORDS):
         assert secret not in told
     return error
@@ -98,82 +105,28 @@ def test_the_newest_messages_of_the_window_are_read_over_verified_tls(serve):
             assert text.startswith("[UNTRUSTED_MAIL_CONTENT field=")
     # TLS to the address the one lookup gave, the host's name sent as SNI.
     assert server.lookups == [HOST] and server.server_names == [HOST]
-    assert verbs(server) == VERBS
+    assert verbs(server) == conversation(3)
 
 
 def test_the_session_is_read_only_and_changes_no_flag(serve):
     server = serve()
     mail_imap.read(72, NOW)
     assert server.writes == []
-    assert verbs(server) == VERBS
-    examine, fetch = server.commands[1], server.commands[3]
-    assert examine.endswith('EXAMINE "INBOX"')
-    assert fetch.count("BODY.PEEK[") == 2 and "BODY[" not in fetch.replace("BODY.PEEK[", "")
+    assert verbs(server) == conversation(3)
+    assert server.commands[1].endswith('EXAMINE "INBOX"')
+    fetches = [command.split(" ", 1)[1] for command in server.commands[3:10]]
+    # The sizes, then each message on its own: its content (two PEEKs) newest first, then its
+    # structure, smallest message first.
+    raw = {message.uid: len(message.raw) for message in server.messages}
+    smallest = sorted((12, 11, 10), key=raw.__getitem__)
+    assert fetches == [
+        "UID FETCH 12,11,10 (UID RFC822.SIZE)",
+        *(f"UID FETCH {uid} {mail_imap.CONTENT_ITEMS}" for uid in (12, 11, 10)),
+        *(f"UID FETCH {uid} (UID BODYSTRUCTURE)" for uid in smallest),
+    ]
+    assert mail_imap.CONTENT_ITEMS.count("BODY.PEEK[") == 2
+    assert "BODY[" not in "".join(fetches).replace("BODY.PEEK[", "")
     assert all(not message.flags for message in server.messages)
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        'SELECT "INBOX"',
-        "UID STORE 12 +FLAGS (\\Seen)",
-        "STORE 1 +FLAGS (\\Deleted)",
-        "UID COPY 12 Trash",
-        "UID MOVE 12 Trash",
-        "EXPUNGE",
-        "UID EXPUNGE 12",
-        'APPEND "INBOX" {12}',
-        "UID FETCH 12 (BODY[TEXT])",
-        "UID FETCH 12 (body[])",
-        "UID FETCH 12 (RFC822)",
-        "UID FETCH 12 (RFC822.TEXT)",
-        "UID FETCH 12 (BINARY[1])",
-        'LOGIN "a" "b"\r\nT9 EXPUNGE',
-        "LOGOUT EXPUNGE",
-        "NOOP",
-    ],
-    ids=[
-        "select",
-        "uid-store",
-        "store",
-        "copy",
-        "move",
-        "expunge",
-        "uid-expunge",
-        "append",
-        "body",
-        "body-lowercase",
-        "rfc822",
-        "rfc822-text",
-        "binary",
-        "smuggled-line",
-        "logout-and-more",
-        "noop",
-    ],
-)
-def test_no_command_that_writes_can_be_sent(command):
-    assert mail_imap.read_only(command) is False
-
-    class Recorder:
-        sent = b""
-
-        def settimeout(self, _seconds):
-            pass
-
-        def sendall(self, data):
-            Recorder.sent += data
-
-    session = mail_imap.Session(Recorder(), time.monotonic() + 5)
-    with pytest.raises(mail_imap.MailError):
-        session.send(command)
-    assert Recorder.sent == b""
-
-
-def test_the_commands_the_reader_sends_are_the_read_only_ones():
-    fetch = f"UID FETCH 1,2 {mail_imap.FETCH_ITEMS}"
-    for command in ('LOGIN "a" "b"', 'EXAMINE "INBOX"', "UID SEARCH SINCE 1-Nov-2026", fetch):
-        assert mail_imap.read_only(command)
-    assert mail_imap.read_only("LOGOUT") and mail_imap.read_only("UID FETCH 1 (RFC822.SIZE)")
 
 
 def test_a_server_that_does_not_confirm_read_only_is_not_read(serve):
@@ -198,11 +151,34 @@ def test_a_login_imap_cannot_carry_is_refused_before_it_is_sent(serve, monkeypat
     assert server.commands == []
 
 
-@pytest.mark.parametrize("value", ["two\r\nT9 EXPUNGE", "nul\x00byte", "caf\u00e9", "line\n"])
-def test_imap_quoting_refuses_what_it_cannot_carry(value):
-    with pytest.raises(ValueError):
-        mail_imap._quoted(value)
-    assert mail_imap._quoted('back\\slash "quote"') == '"back\\\\slash \\"quote\\""'
+def test_a_password_with_quotes_and_backslashes_logs_in(serve, monkeypatch):
+    serve()
+    words = 'made "up" \\words\\'
+    monkeypatch.setattr(imap_fake, "APP_WORDS", words)  # what the fake server expects
+    monkeypatch.setenv("MAIL_IMAP_PASSWORD", words)
+    assert len(mail_imap.read(24, NOW)["messages"]) == 2
+
+
+# Where an error can come from that names the host, and the fixed failure it must become.
+NAMING_THE_HOST = {
+    "lookup": (socket, "getaddrinfo", "mail_address_refused"),
+    "lookup-other": (mail_imap, "public_addresses", "mail_unavailable"),
+    "handshake": (ssl.SSLSocket, "do_handshake", "mail_unavailable"),
+    "conversation": (mail_imap.Session, "until", "mail_unavailable"),
+}
+
+
+@pytest.mark.parametrize("place", list(NAMING_THE_HOST))
+def test_an_error_that_names_the_host_never_leaves_the_reader(serve, monkeypatch, caplog, place):
+    caplog.set_level(logging.DEBUG)
+    serve()
+    owner, name, code = NAMING_THE_HOST[place]
+
+    def broken(*_args, **_kwargs):
+        raise ConnectionResetError(f"connection to {HOST} reset")
+
+    monkeypatch.setattr(owner, name, broken)
+    failed(code, caplog)
 
 
 def test_a_certificate_the_trusted_roots_did_not_sign_is_refused(serve, monkeypatch):
@@ -357,16 +333,74 @@ def oversized(uid: int, received: dt.datetime) -> imap_fake.Message:
     return message
 
 
-def test_a_message_over_its_cap_is_dropped_and_the_rest_are_read(serve):
+def test_a_message_over_its_share_is_dropped_and_the_rest_are_read(serve):
+    # A server that ignores the partial ranges sends a long text whole: that answer is dropped.
+    long = mail(21, ago(2), subject="Long", text="z" * (mail_imap.MESSAGE_BYTES + 1000))
     serve(
-        [
-            mail(20, ago(3), subject="Before"),
-            oversized(21, ago(2)),
-            mail(22, ago(1), subject="After"),
-        ]
+        [mail(20, ago(3), subject="Before"), long, mail(22, ago(1), subject="After")], ranges=False
     )
     answer = mail_imap.read(24, NOW)
     assert [inner(m["subject"]) for m in answer["messages"]] == ["After", "Before"]
+    assert answer["partial"] is True
+
+
+def test_a_structure_over_its_share_is_dropped_and_its_message_kept(serve):
+    bill = mail(22, ago(1), subject="After", attachment=b"%PDF-1")
+    serve([mail(20, ago(3), subject="Before"), oversized(21, ago(2)), bill])
+    answer = mail_imap.read(24, NOW)
+    read = [(inner(m["subject"]), m["has_attachments"]) for m in answer["messages"]]
+    assert read == [("After", True), ("Huge", False), ("Before", False)]
+    assert answer["partial"] is True
+
+
+def huge_structure(uid: int, received: dt.datetime) -> imap_fake.Message:
+    """A message whose structure alone is larger than the total cap (the review's starve.py)."""
+    message = mail(uid, received, subject="Stranger")
+    part = '("TEXT" "PLAIN" ("NAME" "' + "x" * 60 + '") NIL NIL "7BIT" 1 1 NIL NIL NIL NIL)'
+    message.structure = "(" + part * 30000 + ' "MIXED")'
+    message.size = 2 * len(message.structure)  # its 30000 parts are in the message too
+    assert len(message.structure) > mail_imap.TOTAL_BYTES
+    return message
+
+
+def newer(count: int) -> list[imap_fake.Message]:
+    return [
+        mail(101 + i, ago(10 - i * 0.5), subject=f"n{i}", attachment=b"%PDF" if i % 2 else None)
+        for i in range(count)
+    ]
+
+
+def test_an_old_message_with_a_structure_over_the_total_cap_costs_no_newer_message(serve):
+    serve([huge_structure(100, ago(12)), *newer(10)])
+    answer = mail_imap.read(24, NOW)
+    assert [m["uid"] for m in answer["messages"]] == list(range(110, 99, -1))
+    assert [m["has_attachments"] for m in answer["messages"][:10]] == [True, False] * 5
+    assert answer["messages"][10]["has_attachments"] is False  # its structure was not read
+    assert answer["partial"] is True
+
+
+def test_such_a_structure_costs_only_the_messages_as_large_their_attachment_flags(serve):
+    # The newest this time, and one message larger still (a long video, say).
+    larger = mail(99, ago(11), subject="Video", attachment=b"%MP4")
+    larger.size = 10 * mail_imap.TOTAL_BYTES
+    serve([larger, *newer(10), huge_structure(111, ago(1))])
+    answer = mail_imap.read(24, NOW)
+    assert [inner(m["subject"]) for m in answer["messages"]] == [
+        "Stranger",
+        *(f"n{i}" for i in range(9, -1, -1)),
+        "Video",
+    ]
+    flags = [m["has_attachments"] for m in answer["messages"]]
+    assert flags == [False, *[True, False] * 5, False]  # Video's own structure went unread
+    assert answer["partial"] is True
+
+
+def test_a_server_that_ignores_the_ranges_costs_only_the_older_messages(serve):
+    # A whole text over the total cap, on the oldest message: the newer ones were read before.
+    flood = mail(100, ago(12), subject="Flood", text="z" * (mail_imap.TOTAL_BYTES + 1000))
+    serve([flood, *newer(5)], ranges=False)
+    answer = mail_imap.read(24, NOW)
+    assert [m["uid"] for m in answer["messages"]] == list(range(105, 100, -1))
     assert answer["partial"] is True
 
 
@@ -390,14 +424,16 @@ class Wire:
 
 def test_the_fetch_itself_says_partial_when_it_drops_a_message(monkeypatch):
     # The parent and the child would both notice the missing UID too; this is the fetch's own say.
-    monkeypatch.setattr(mail_imap, "MESSAGE_BYTES", 2000)
-    small = b"* %d FETCH (UID %d BODY[TEXT]<0> {5}\r\nhello)\r\n"
-    big = b"* 2 FETCH (UID 2 BODY[TEXT]<0> {5000}\r\n" + b"x" * 5000 + b")\r\n"
-    wire = Wire(small % (1, 1) + big + small % (3, 3) + b"T1 OK done\r\n")
-    answers, partial = mail_imap.Session(wire, time.monotonic() + 5).messages([1, 2, 3])
-    assert partial is True
-    assert answers == small % (1, 1) + small % (3, 3)
-    assert wire.sent.startswith(b"T1 UID FETCH 1,2,3 (UID INTERNALDATE BODYSTRUCTURE BODY.PEEK[")
+    small = b"* %d FETCH (UID %d BODY[TEXT]<0> {5}\r\nhello)\r\nT%d OK done\r\n"
+    big = b"* 2 FETCH (UID 2 BODY[TEXT]<0> {5000}\r\n" + b"x" * 5000 + b")\r\nT2 OK done\r\n"
+    wire = Wire(small % (1, 1, 1) + big + small % (3, 3, 3))
+    session = mail_imap.Session(wire, time.monotonic() + 5)
+    commands = [f"UID FETCH {uid} {mail_imap.CONTENT_ITEMS}" for uid in (1, 2, 3)]
+    answers, partial, stopped = session.pipeline(commands, 2000)
+    assert (partial, stopped) == (True, False)
+    assert answers == (small % (1, 1, 1)).split(b"T1")[0] + (small % (3, 3, 3)).split(b"T3")[0]
+    # All three sent before a word of the answer is read (pipelined), in the order given.
+    assert wire.sent == b"".join(b"T%d %s\r\n" % (n, c.encode()) for n, c in enumerate(commands, 1))
 
 
 def test_the_total_cap_stops_reading_with_what_came_whole(serve, monkeypatch):
@@ -434,7 +470,8 @@ def test_more_matches_than_the_cap_give_the_newest_and_say_partial(serve):
     assert len(answer["messages"]) == mail_imap.MAX_MESSAGES == 50
     assert [m["uid"] for m in answer["messages"]] == list(range(159, 109, -1))
     assert answer["partial"] is True
-    assert server.commands[3].split(" ")[3] == ",".join(str(uid) for uid in range(110, 160))
+    contents = [c.split(" ")[3] for c in server.commands if "BODY.PEEK[" in c]
+    assert contents == [str(uid) for uid in range(159, 109, -1)]
 
 
 def test_more_matches_reaching_past_the_window_are_not_partial(serve):
