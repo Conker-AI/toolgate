@@ -375,7 +375,7 @@ def conversation(session: Session, user: str, password: str, since: datetime):
         # The structures apart, smallest message first (newest first among equals): one over its
         # share is dropped, and one too large for what is left of the total stops only the
         # structures of messages as large as its own.
-        smallest = sorted(newest, key=lambda uid: size.get(uid, 2**63))
+        smallest = sorted(newest, key=lambda uid: (uid not in size, size.get(uid, 0)))
         structures, dropped, stopped = session.pipeline(
             [f"UID FETCH {uid} {STRUCTURE_ITEMS}" for uid in smallest], STRUCTURE_BYTES
         )

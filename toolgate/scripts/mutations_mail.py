@@ -369,7 +369,7 @@ MUTANTS = [
     (
         "mail structures fetched in arrival order, not by size",
         IMAP,
-        "        smallest = sorted(newest, key=lambda uid: size.get(uid, 2**63))",
+        "        smallest = sorted(newest, key=lambda uid: (uid not in size, size.get(uid, 0)))",
         "        smallest = newest",
         FETCH + "test_such_a_structure_costs_only_the_messages_as_large_their_attachment_flags",
     ),
