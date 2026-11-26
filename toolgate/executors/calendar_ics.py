@@ -25,9 +25,7 @@ for a model that reads the result.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -39,6 +37,7 @@ import httpx
 from toolgate.core import vault
 from toolgate.core.public_https import DestinationDenied, PublicTransport, public_url
 from toolgate.core.untrusted_text import fenced, strip_invisible
+from toolgate.executors import child_guard
 
 SECRET = "CALENDAR_ICS_URL"
 LIMIT_BYTES = 2 * 1024 * 1024
@@ -152,24 +151,11 @@ def fetch(url: str, transport: httpx.BaseTransport | None = None) -> bytes:
             sender.close()
 
 
-def _environment() -> dict[str, str]:
-    """Nothing of ToolGate's environment (its keys) reaches the child; Windows needs its root."""
-    root = os.environ.get("SYSTEMROOT")
-    return {"SYSTEMROOT": root} if root else {}
-
-
 def parse(body: bytes, days: int, zone: str, today: date) -> tuple[list[dict], bool]:
     """Run the parser on `body`; the events it found, checked and cleaned, and whether some
     could not be read."""
     try:
-        done = subprocess.run(
-            [sys.executable, "-I", "-B", str(PARSER), str(days), zone, today.isoformat()],
-            input=body,
-            capture_output=True,
-            timeout=PARSE_SECONDS,
-            env=_environment(),
-            check=False,
-        )
+        done = child_guard.run(PARSER, [str(days), zone, today.isoformat()], body, PARSE_SECONDS)
     except subprocess.TimeoutExpired:
         raise CalendarError("calendar_too_busy") from None
     except OSError:

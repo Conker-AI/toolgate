@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from toolgate.executors import calendar_ics, calendar_parse
+from toolgate.executors import calendar_ics, calendar_parse, child_guard
 from toolgate.tests.calendar_fixtures import (
     EVERY_SECOND,
     NEVER,
@@ -207,7 +207,7 @@ def test_titles_and_places_are_fenced_as_outside_text_they_cannot_close():
 def test_the_child_environment_carries_none_of_toolgates_keys(monkeypatch):
     monkeypatch.setenv("TOOLGATE_ADMIN_KEY", "never-in-the-child")
     monkeypatch.setenv("CALENDAR_ICS_URL", "https://calendar.example.com/never-in-the-child")
-    assert set(calendar_ics._environment()) <= {"SYSTEMROOT"}
+    assert set(child_guard.environment()) <= {"SYSTEMROOT"}
 
 
 def test_an_all_day_event_passes_the_parents_check_as_plain_dates():

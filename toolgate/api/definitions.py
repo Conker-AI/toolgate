@@ -29,6 +29,7 @@ SUPPORTED_TOOL_EXECUTORS = {
     "sandbox_run",
     "sandbox_install",
     "calendar_ics",
+    "mail_imap",
 }
 
 
@@ -157,6 +158,11 @@ def tool_definition_errors(tool: dict) -> list[str]:
         tool.get("id") != "calendar.events" or execution != {"type": "calendar_ics"}
     ):
         errors.append("calendar.events is reserved for the read-only calendar executor")
+    reads_mail = isinstance(execution, dict) and execution.get("type") == "mail_imap"
+    if (tool.get("id") == "mail.recent" or reads_mail) and (
+        tool.get("id") != "mail.recent" or execution != {"type": "mail_imap"}
+    ):
+        errors.append("mail.recent is reserved for the read-only mail executor")
     if not isinstance(execution, dict) or execution.get("type") not in SUPPORTED_TOOL_EXECUTORS:
         errors.append(
             f"execution.type must be one of: {', '.join(sorted(SUPPORTED_TOOL_EXECUTORS))}"

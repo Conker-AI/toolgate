@@ -77,6 +77,7 @@ Tool definitions can use these first-class executors:
 - `research_fetch`: resolves exactly one server-issued research handle. It does not accept URLs.
 - `research_fetch_batch`: resolves up to eight handles as one bounded, scanned batch.
 - `calendar_ics`: reserved for `calendar.events`; reads the owner's calendar from the vault-held address `CALENDAR_ICS_URL`, which no other tool can name, over public HTTPS only. See [Calendar](calendar.md).
+- `mail_imap`: reserved for `mail.recent`; reads the owner's newest INBOX messages from the vault-held account `MAIL_IMAP_HOST`, `MAIL_IMAP_USER` and `MAIL_IMAP_PASSWORD`, which no other tool can name, over implicit TLS to a public host only, with EXAMINE and BODY.PEEK so nothing in the mailbox changes; the journal keeps each read without its messages (`redacted`). See [Mail](mail.md).
 
 Arbitrary agent-supplied Python and legacy script execution are intentionally unsupported.
 

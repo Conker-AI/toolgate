@@ -93,8 +93,18 @@ def _lookup(host: str, port: int, deadline: float | None) -> list:
 
 
 def resolve_public(host: str, port: int = 443, deadline: float | None = None) -> list[str]:
-    if port != 443 or not host or "%" in host:
+    if port != 443:
         raise DestinationDenied("Destination must be public HTTPS on port 443")
+    return public_addresses(host, port, deadline)
+
+
+def public_addresses(host: str, port: int, deadline: float | None = None) -> list[str]:
+    """Every address `host` resolves to, each one public, from one lookup (bounded by `deadline`
+    when there is one). DestinationDenied when any is not public or none comes back; the caller
+    connects to these numbers, so nothing is looked up again. Any port: `resolve_public` is
+    HTTPS's own rule (443 only); the mail reader connects to 993."""
+    if not host or "%" in host:
+        raise DestinationDenied("Destination must be a public host name")
     try:
         addresses = list(
             dict.fromkeys(cast(str, answer[4][0]) for answer in _lookup(host, port, deadline))

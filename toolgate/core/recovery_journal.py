@@ -118,10 +118,12 @@ def reconcile(source_path, target_path):
                     )
                 if current["updated_at"] < row["updated_at"]:
                     raise ValueError("Supplied journal is older than restored evidence.")
+                # A mail answer one side kept whole and the other redacted is the same receipt.
                 if row["status"] == "completed" and (
                     current["status"] != "completed"
                     or (
-                        json.loads(row["response"]) != json.loads(current["response"])
+                        json.loads(journal.kept(row["response"]))
+                        != json.loads(journal.kept(current["response"]))
                         and not (
                             identity in forgotten
                             and json.loads(current["response"])
@@ -136,7 +138,13 @@ def reconcile(source_path, target_path):
                 target.execute(
                     "INSERT INTO v2_recovery_receipts VALUES (?,?) "
                     "ON CONFLICT(action_id) DO UPDATE SET record=excluded.record",
-                    (identity, json.dumps(row, sort_keys=True)),
+                    (
+                        identity,
+                        json.dumps(
+                            {**row, "response": row["response"] and journal.kept(row["response"])},
+                            sort_keys=True,
+                        ),
+                    ),
                 )
             target.commit()
             return {

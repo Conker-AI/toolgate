@@ -77,9 +77,10 @@ _CONFIG_KEYS = _CONTROL_KEYS | {
 _OWN_PREFIX = "TOOLGATE_"
 _OWN_SECRETS = {"TOOLGATE_CALLBACK_SECRET"}
 # Vault secrets only one built-in executor reads (`builtin_secret`): the calendar address alone
-# grants read access to the owner's calendar, so no tool header, MCP server or verification
-# method may name it and send it anywhere else. Set, listed and deleted like any vault secret.
-BUILTIN_SECRETS = {"CALENDAR_ICS_URL"}
+# grants read access to the owner's calendar, and the mail account (host, user name and app
+# password) to the owner's mail, so no tool header, MCP server or verification method may name
+# them and send them anywhere else. Set, listed and deleted like any vault secret.
+BUILTIN_SECRETS = {"CALENDAR_ICS_URL", "MAIL_IMAP_HOST", "MAIL_IMAP_USER", "MAIL_IMAP_PASSWORD"}
 _NAME_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 _SCRYPT_N = 2**14
